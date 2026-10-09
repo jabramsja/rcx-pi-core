@@ -1,0 +1,700 @@
+{
+  "wave_id": "workingrcx-targeted-gate-budget-r2-2026-10-09",
+  "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+  "wave_class": "L4_ENABLER",
+  "observed_utc": "2026-10-09T09:27:00.413084+00:00",
+  "status": "PHASE_B_LOCAL_VALIDATION_PASSED; native final governance and landing pending",
+  "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+  "head": "5780234568130f7116922ecc29d854a6db9e069e",
+  "comparison_commit": "5780234568130f7116922ecc29d854a6db9e069e",
+  "observed_origin_dev": "35f7c225a25025aec893230c072754cf7d7c76fc",
+  "live_github_state_refreshed": false,
+  "canonical_tracker_note": "- Tracker sync note (2026-10-09, workingrcx-targeted-gate-budget-r2-2026-10-09): **Finish PR1332 targeted gate budgets with adjacent receipt regression coverage.**. Class: L4_ENABLER. target_gate_id: G8. Packet: `reports/control_plane/workingrcx-targeted-gate-budget-r2-2026-10-09_2026-10-09.md`. structural_artifact_ref: mu/tools/executors/commit_executor.py. evidence_command: `PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate --tb=short`. evidence_delta: Phase B-local declared gate passes 2482 passed in 532.02s (0:08:52), exit 0; the separate entire receipt gate class passes 22 tests in 4.51s, exit 0. Source/test hashes are stable across both executions and every receipt-test byte outside the three admitted methods is unchanged. R1 gate was interrupted before completion; separate unchanged-source adjacent diagnostic reproduced3failures in1.48s. No prior final approval or gate result transfers.. progress_proof_before: PR1332 OPEN at5780234568130f7116922ecc29d854a6db9e069e against dev35f7c225a25025aec893230c072754cf7d7c76fc. Targeted-gate-budget R1 completed code/test edits within its runner/Step8b boundary, then root diagnostic exposed three existing receipt assertions expecting240/480s instead of600/840s. The receipt file was outside R1 allowlist. Operator stopped exact owned tree while full gate remained incomplete; snapshot2b57d3a3b292435809f0630628eb79817fdf10c7b01b2227636cb2b46a4bc6f9 independently restores127files and raw-index closure. No new commit, push or merge.. progress_proof_after: Fresh local three-module plus receipt-class gate passes with preserved runner/parser bytes and all PR1330 regression cases. Real indexed reader/selector/builder controls pass in disposable fixtures and preserve the existing PR branch; final native staging, receipts, corrected-head CI, independent cloud review, precise finding disposition, landing and PRIMARY sync remain pending. Pending PR1330 implementation coverage must be verified after actual landing; its PR disposition remains separate.. post_gate_contract_sweep: `PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate --tb=short`. FOUNDER_OVERRIDE:workingrcx-targeted-gate-budget-r2-2026-10-09. primary_blocker_class: INTEGRATION. primary_invariant_id: INV_STRUCTURAL_FORWARD_MOTION. indicator_artifact_ref: reports/l4_wave_indicators/workingrcx-targeted-gate-budget-r2-2026-10-09.json. indicator_collection_command: python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id workingrcx-targeted-gate-budget-r2-2026-10-09 --output reports/l4_wave_indicators/workingrcx-targeted-gate-budget-r2-2026-10-09.json. bootstrap_endgame_policy: SUBSTRATE_INDEPENDENT_MINIMAL_BOOTSTRAP. boot0_track_id: V1. boot0_progress_state: HOLD.",
+  "files_changed_this_implementation": [
+    "CHANGELOG.md",
+    "TASKS.md",
+    "mu/tests/tools/test_commit_executor_receipt.py",
+    "reports/control_plane/workingrcx-targeted-gate-budget-r1-2026-10-09_2026-10-09.md",
+    "reports/control_plane/workingrcx-targeted-gate-budget-r2-2026-10-09_2026-10-09.md",
+    "reports/control_plane/workingrcx-targeted-gate-budget-r2-2026-10-09_2026-10-09_implementation_evidence.json",
+    "reports/control_plane/workingrcx-terminal-result-r1-2026-10-09_2026-10-09.md",
+    "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09.md"
+  ],
+  "preserved_implementation": {
+    "mu/tools/executors/commit_executor.py": "42ab02897073b0785d411a5cb569b962a0e6b30b8cd00f82a2dd29b5459df8b3",
+    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "51e48f3edcff47c9ebda30597aa81d1529b15b8e39cf5330145736c8bc946387",
+    "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+    "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+    "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+    "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+    "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+    "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+    "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+    "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+    "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+    "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+    "mu/tests/docs/test_growth_caps.py": "ba9964c72588ab7a8be6decd44ffc037e34e6f679ff53e89cb237b82c239e955"
+  },
+  "policy": {
+    "exact_full_module_seconds": {
+      "mu/tests/tools/test_phase_b_executor.py": 600,
+      "mu/tests/tools/test_worktree_lifecycle.py": 600,
+      "mu/tests/tools/test_workingrcx_fleet_apply.py": 900
+    },
+    "ordinary_node_foreign_selector_seconds": 240,
+    "mixed_gates": "sum exact selector allocations; max with caller timeout",
+    "fleet_parallelism": "exact full fleet selector retains -n 4 --dist worksteal",
+    "unchanged_semantics": "selectors, import mode, markers, production validation environment, caller maxima and success/nonzero/empty-collection behavior",
+    "diagnostics": "full available bytes/text/None TimeoutExpired streams, including invalid UTF-8 bytes escaped without truncation; real Step8b failure envelope carries raw streams, argv/command/hash and selected finite deadline"
+  },
+  "validation": {
+    "receipt_class": {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate --tb=short",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+        "--tb=short"
+      ],
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+      "started_utc": "2026-10-09T09:16:33.876071+00:00",
+      "sha256_before": {
+        "mu/tools/executors/commit_executor.py": "42ab02897073b0785d411a5cb569b962a0e6b30b8cd00f82a2dd29b5459df8b3",
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "51e48f3edcff47c9ebda30597aa81d1529b15b8e39cf5330145736c8bc946387",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+        "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+        "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+        "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+        "mu/tests/docs/test_growth_caps.py": "ba9964c72588ab7a8be6decd44ffc037e34e6f679ff53e89cb237b82c239e955"
+      },
+      "validation_environment": "production _commit_validation_env with declared pins; live bus and role/pager overrides removed",
+      "exit_code": 0,
+      "duration_seconds": 9.400323375011794,
+      "finished_utc": "2026-10-09T09:16:43.279263+00:00",
+      "sha256_after": {
+        "mu/tools/executors/commit_executor.py": "42ab02897073b0785d411a5cb569b962a0e6b30b8cd00f82a2dd29b5459df8b3",
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "51e48f3edcff47c9ebda30597aa81d1529b15b8e39cf5330145736c8bc946387",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+        "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+        "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+        "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+        "mu/tests/docs/test_growth_caps.py": "ba9964c72588ab7a8be6decd44ffc037e34e6f679ff53e89cb237b82c239e955"
+      },
+      "source_hashes_unchanged": true,
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/receipt-class.stdout",
+        "sha256": "475f9e2650389852ac4ef687d105e4637dc3cebd50d21b9479bb11305755143a",
+        "bytes": 99
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/receipt-class.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "summary": "......................                                                   [100%]\n22 passed in 4.51s"
+    },
+    "declared_gate": {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate --tb=short",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/tools/test_executor_dispatch.py",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+        "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+        "--tb=short"
+      ],
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+      "started_utc": "2026-10-09T09:17:14.792885+00:00",
+      "sha256_before": {
+        "mu/tools/executors/commit_executor.py": "42ab02897073b0785d411a5cb569b962a0e6b30b8cd00f82a2dd29b5459df8b3",
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "51e48f3edcff47c9ebda30597aa81d1529b15b8e39cf5330145736c8bc946387",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+        "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+        "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+        "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+        "mu/tests/docs/test_growth_caps.py": "ba9964c72588ab7a8be6decd44ffc037e34e6f679ff53e89cb237b82c239e955"
+      },
+      "validation_environment": "production _commit_validation_env with declared pins; live bus and role/pager overrides removed",
+      "exit_code": 0,
+      "duration_seconds": 532.4223193340003,
+      "finished_utc": "2026-10-09T09:26:07.218658+00:00",
+      "sha256_after": {
+        "mu/tools/executors/commit_executor.py": "42ab02897073b0785d411a5cb569b962a0e6b30b8cd00f82a2dd29b5459df8b3",
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "51e48f3edcff47c9ebda30597aa81d1529b15b8e39cf5330145736c8bc946387",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+        "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+        "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+        "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+        "mu/tests/docs/test_growth_caps.py": "ba9964c72588ab7a8be6decd44ffc037e34e6f679ff53e89cb237b82c239e955"
+      },
+      "source_hashes_unchanged": true,
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/gate-1.stdout",
+        "sha256": "b49089355acfdd6338a9a4cd0053159506e8651896fdc14a16ddbf6cf44adce1",
+        "bytes": 2833
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/gate-1.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "summary": "........................................................................ [ 72%]\n........................................................................ [ 75%]\n........................................................................ [ 78%]\n........................................................................ [ 81%]\n........................................................................ [ 84%]\n........................................................................ [ 87%]\n........................................................................ [ 89%]\n........................................................................ [ 92%]\n........................................................................ [ 95%]\n........................................................................ [ 98%]\n..................................                                       [100%]\n2482 passed in 532.02s (0:08:52)"
+    }
+  },
+  "indexed_authority": {
+    "before_full_gate": {
+      "label": "authority-before",
+      "started_utc": "2026-10-09T09:16:42.577584+00:00",
+      "packet_sha256": "8f708f72d7be8983d50951695cdb7bb4feb95bbf90c47b9cf40db95ce989def2",
+      "tracker_note_sha256": "137f064e6ee8b7f18440523f5a88de709072ecb58dc3c75886c2880cdd75279a",
+      "predicates": {
+        "positive": true,
+        "negative": false,
+        "authorized": true
+      },
+      "cases": {
+        "indexed": {
+          "indexed_authority": true,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "wave_id": "workingrcx-targeted-gate-budget-r2-2026-10-09",
+            "tracked_packet": "reports/control_plane/workingrcx-targeted-gate-budget-r2-2026-10-09_2026-10-09.md"
+          },
+          "head_index_unchanged": true
+        },
+        "index_only": {
+          "indexed_authority": true,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "wave_id": "workingrcx-targeted-gate-budget-r2-2026-10-09",
+            "tracked_packet": "reports/control_plane/workingrcx-targeted-gate-budget-r2-2026-10-09_2026-10-09.md"
+          },
+          "head_index_unchanged": true
+        },
+        "unindexed": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-targeted-gate-budget-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "wrong_wave": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-targeted-gate-budget-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "explicit_denial": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-targeted-gate-budget-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "narrative_collision": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-targeted-gate-budget-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        }
+      },
+      "duration_seconds": 0.5100902910053264,
+      "limits": "Real indexed reader, selector and builder; disposable fixtures only. This is not a native candidate receipt or commit admission. Candidate index is untouched and final staging remains outer-owned."
+    },
+    "after_final_observations": {
+      "label": "authority-after",
+      "started_utc": "2026-10-09T09:26:59.694884+00:00",
+      "packet_sha256": "c4c90b17a143a9b3e85317408bf840cdffb0f33a52846bfbab6ec1a39935c55d",
+      "tracker_note_sha256": "2a814bf14e626fcaba96948a3fb3ab2fc71def176a86d341b7fbe532c94291df",
+      "predicates": {
+        "positive": true,
+        "negative": false,
+        "authorized": true
+      },
+      "cases": {
+        "indexed": {
+          "indexed_authority": true,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "wave_id": "workingrcx-targeted-gate-budget-r2-2026-10-09",
+            "tracked_packet": "reports/control_plane/workingrcx-targeted-gate-budget-r2-2026-10-09_2026-10-09.md"
+          },
+          "head_index_unchanged": true
+        },
+        "index_only": {
+          "indexed_authority": true,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "wave_id": "workingrcx-targeted-gate-budget-r2-2026-10-09",
+            "tracked_packet": "reports/control_plane/workingrcx-targeted-gate-budget-r2-2026-10-09_2026-10-09.md"
+          },
+          "head_index_unchanged": true
+        },
+        "unindexed": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-targeted-gate-budget-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "wrong_wave": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-targeted-gate-budget-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "explicit_denial": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-targeted-gate-budget-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "narrative_collision": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-targeted-gate-budget-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        }
+      },
+      "duration_seconds": 0.45639579198905267,
+      "limits": "Real indexed reader, selector and builder; disposable fixtures only. This is not a native candidate receipt or commit admission. Candidate index is untouched and final staging remains outer-owned."
+    }
+  },
+  "source_boundary_and_pr1330_provenance": {
+    "parent": "5780234568130f7116922ecc29d854a6db9e069e",
+    "outside_runner_and_step8b_failure_envelope_byte_identical": true,
+    "protected_remainder_sha256": "62ec4d9658aa0be9f4250bc4ebddf1bc14f8886c4d444bd2cf4ca854cedd4d23",
+    "receipt_policy": {
+      "only_allowed_methods_changed": [
+        "test_run_pytest_on_files_gives_single_large_file_real_slack",
+        "test_run_pytest_on_files_gives_two_heavy_files_real_slack",
+        "test_run_pytest_on_files_timeout_reports_budget"
+      ],
+      "all_other_bytes_unchanged": true,
+      "protected_remainder_sha256": "c9d2cb3a3768b5ce5d1c890de146975fc1cf3f0327c45c190f30db103669c066",
+      "sha256_before": "c143407bb92b50ed3e093397b11a3136b5409ea026896044dd5ac32c7a0e0850",
+      "sha256_after": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7"
+    },
+    "pr1330": {
+      "commit": "817e470362ef632b60ab13bb4321571676f564ee",
+      "parameter_coverage": [
+        {
+          "test": "test_targeted_pytest_budget_preserves_selectors_and_caller_timeout",
+          "parameters": "selectors, caller_timeout, expected_budget",
+          "donor_cases": 24,
+          "current_cases": 42,
+          "all_donor_cases_retained": true
+        },
+        {
+          "test": "test_targeted_pytest_budget_keeps_nonzero_failure_output",
+          "parameters": "selectors, expected_budget",
+          "donor_cases": 4,
+          "current_cases": 6,
+          "all_donor_cases_retained": true
+        },
+        {
+          "test": "test_targeted_pytest_budget_keeps_nonzero_failure_output",
+          "parameters": "returncode, stdout, stderr",
+          "donor_cases": 5,
+          "current_cases": 5,
+          "all_donor_cases_retained": true
+        },
+        {
+          "test": "test_targeted_pytest_timeout_reports_selected_budget",
+          "parameters": "selectors, caller_timeout, expected_budget",
+          "donor_cases": 7,
+          "current_cases": 11,
+          "all_donor_cases_retained": true
+        }
+      ],
+      "coverage_status": "All original meaningful parameter cases retained and the declared local gate passes. Landed-byte coverage, fresh full-PR CI and native disposition remain pending.",
+      "merged": false
+    },
+    "preserved_hashes": {
+      "mu/tools/executors/commit_executor.py": "42ab02897073b0785d411a5cb569b962a0e6b30b8cd00f82a2dd29b5459df8b3",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "51e48f3edcff47c9ebda30597aa81d1529b15b8e39cf5330145736c8bc946387",
+      "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+      "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+      "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+      "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+      "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+      "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+      "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+      "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+      "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+      "mu/tests/docs/test_growth_caps.py": "ba9964c72588ab7a8be6decd44ffc037e34e6f679ff53e89cb237b82c239e955"
+    }
+  },
+  "historical_evidence": {
+    "inputs": {
+      "targeted-gate-budget-r1-stopped-preserved/preservation.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r1-stopped-preserved/preservation.json",
+        "sha256": "0aad0cd3b9b4ca20b727428566181a5ff112b99e741ecd9656739239c63f5d51"
+      },
+      "targeted-gate-budget-r1-adjacent-receipt-diagnostic/result.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r1-adjacent-receipt-diagnostic/result.json",
+        "sha256": "e7da97923af2999189889c2d5afef415f357848d32bb9d4fac4afffb5b6ef4af"
+      },
+      "targeted-gate-budget-r1-adjacent-receipt-diagnostic/stdout.txt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r1-adjacent-receipt-diagnostic/stdout.txt",
+        "sha256": "71c64ff49a390c75354feba4ff3c2b6af29e95f5d00cfe7be548dcda30f6bb85"
+      },
+      "targeted-gate-budget-r1-validation/gate-1-start.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r1-validation/gate-1-start.json",
+        "sha256": "1c72fa1e7659bdfa3b209890db6bec647e7a53b592a76024c291048a0b7a51e2"
+      },
+      "terminal-result-r2-stopped-preserved/preservation.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-stopped-preserved/preservation.json",
+        "sha256": "958de1394b9236dd89614454c6556983fe414e407977c3053dfa2ff855cc3db5"
+      },
+      "terminal-result-r2-step8-diagnostic/diagnostic.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-step8-diagnostic/diagnostic.json",
+        "sha256": "eb3b9a6ed15ad70929e0c6df0091084739f0c57e7cd72a43b57d56d27f55a7b9"
+      },
+      "terminal-result-r2-step8-diagnostic/timing-summary.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-step8-diagnostic/timing-summary.json",
+        "sha256": "06baf94a40fdba39068c73c3b0d4f49ad422319a628f237e03995ef8278694b1"
+      },
+      "terminal-result-r2-step8-diagnostic/stdout.txt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-step8-diagnostic/stdout.txt",
+        "sha256": "3a3132ab1161b1d2701465b80678b752e937c9c8ab48534fefc337473fed8467"
+      },
+      "terminal-result-r2-step8-diagnostic/results.xml": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-step8-diagnostic/results.xml",
+        "sha256": "2a5b5f3822567374f5304f4184a2d1c803c867da5e2523225804d867f43a244f"
+      }
+    },
+    "targeted_budget_r1": {
+      "status": "STOPPED_PRESERVED_UNFINISHED",
+      "gate_started_utc": "2026-10-09T09:01:14.579576+00:00",
+      "completed_gate_result_present": false,
+      "receipt_regression_diagnostic": {
+        "result": "3 failed, 315 deselected in 1.48s",
+        "wall_seconds": 1.7883003749884665,
+        "exit_code": 1,
+        "source_unchanged": true,
+        "mismatches": [
+          "600 vs 240",
+          "840 vs 480",
+          "840s vs 480s timeout message"
+        ]
+      },
+      "final_approval": false
+    },
+    "terminal_result_r2": {
+      "status": "STOPPED_PRESERVED_UNMERGED",
+      "original_step8b_deadline_seconds": 480,
+      "recovery_delegates_with_missing_module": 3,
+      "diagnostic": {
+        "duration_s": 473.64771591700264,
+        "exit_code": 0,
+        "source_and_index_unchanged": true,
+        "module_timings": {
+          "test_executor_dispatch": {
+            "tests": 860,
+            "seconds": 159.1900000000005
+          },
+          "test_phase_b_executor": {
+            "tests": 1294,
+            "seconds": 305.33200000000016
+          }
+        },
+        "scope": "Instrumented stopped-candidate diagnostic. Does not reconstruct which test was interrupted in the original discarded timeout output."
+      },
+      "original_interrupted_test": "unknown; discarded timeout output",
+      "earlier_timeout_success_claimed": false
+    }
+  },
+  "preserved_predecessor_artifacts": [
+    "reports/control_plane/workingrcx-terminal-result-r1-2026-10-09_2026-10-09.md",
+    "reports/control_plane/workingrcx-terminal-result-r1-2026-10-09_2026-10-09_implementation_evidence.json",
+    "reports/l4_wave_indicators/workingrcx-terminal-result-r1-2026-10-09.json",
+    "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09.md",
+    "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09_implementation_evidence.json",
+    "reports/l4_wave_indicators/workingrcx-terminal-result-r2-2026-10-09.json",
+    "reports/control_plane/workingrcx-targeted-gate-budget-r1-2026-10-09_2026-10-09.md",
+    "reports/l4_wave_indicators/workingrcx-targeted-gate-budget-r1-2026-10-09.json"
+  ],
+  "historical_indicator_and_evidence_bytes_unchanged": [
+    "reports/control_plane/workingrcx-terminal-result-r1-2026-10-09_2026-10-09_implementation_evidence.json",
+    "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09_implementation_evidence.json",
+    "reports/l4_wave_indicators/workingrcx-targeted-gate-budget-r1-2026-10-09.json",
+    "reports/l4_wave_indicators/workingrcx-targeted-gate-budget-r2-2026-10-09.json",
+    "reports/l4_wave_indicators/workingrcx-terminal-result-r1-2026-10-09.json",
+    "reports/l4_wave_indicators/workingrcx-terminal-result-r2-2026-10-09.json"
+  ],
+  "original_bot_findings": {
+    "snapshot_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/review-baseline.json",
+    "snapshot_sha256": "194dfa697df9778a4ba808b320f212e12d072728fa543dd37de0c5aa837d524f",
+    "snapshot_observed_utc": "2026-10-09T05:53:24.362036+00:00",
+    "offline_verified": true,
+    "records": [
+      {
+        "thread": "PRRT_kwDOQvy8bs6qI-5e",
+        "comment": "PRRC_kwDOQvy8bs77IAg6",
+        "author": {
+          "login": "chatgpt-codex-connector",
+          "__typename": "Bot"
+        },
+        "body_sha256": "ff2c6b22b5f36ec3b2347da074a3be12739fe0643a6748f3cffb1fc883860fbc",
+        "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Wait for merge-queue completion before verifying the landing**\n\nOn a base branch that requires a merge queue, this protected quota path reports an error immediately after successfully enqueueing the PR: `gh pr merge --help` states, \u201cIf required checks have passed, the pull request will be added to the merge queue,\u201d but the YAML-equivalent command flow here queries once and requires the PR to already be landed. The queued PR therefore remains open at this instant, `_verified_remote_merge_sha` returns no merge SHA, and Step 15 fails even though GitHub may merge it later without post-merge completion or cleanup. Poll the exact-head PR until it lands or reaches a terminal failure, as the existing merge wrapper/CI flow does.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+        "is_resolved_in_saved_snapshot": false
+      },
+      {
+        "thread": "PRRT_kwDOQvy8bs6qMIWE",
+        "comment": "PRRC_kwDOQvy8bs77NDtC",
+        "author": {
+          "login": "chatgpt-codex-connector",
+          "__typename": "Bot"
+        },
+        "body_sha256": "c161930ad5ed0dede0fa2aabca3885d88af3712087ef6828783c99c77f39b078",
+        "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Revalidate the reviewed base while polling the merge queue**\n\nWhen another change lands on the base branch while this PR is queued, `baseRefOid` can advance, but this check accepts any well-formed SHA. The local-review receipt is bound to the earlier `identity[\"base_sha\"]`, while the protected intent records only the base branch name, so the queue can land against a base/diff that the independent reviewer never approved. Preserve the admitted base OID in the intent and, while the PR is open, require subsequent observations to match it (or obtain fresh review authority); after landing, verify the merge commit against that stored base.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+        "is_resolved_in_saved_snapshot": false
+      },
+      {
+        "thread": "PRRT_kwDOQvy8bs6qRZES",
+        "comment": "PRRC_kwDOQvy8bs77VkbW",
+        "author": {
+          "login": "chatgpt-codex-connector",
+          "__typename": "Bot"
+        },
+        "body_sha256": "9cfd90ae8c6ce97db941773bf3ee93ff18bde9f38b1d1314c8eb9bf430797661",
+        "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Parse verbose Phase B output before gating commit**\n\nWhen the dispatcher is run with `--verbose`, `build_surface_command` passes both `--verbose` and `--json` to Phase B. Phase B then writes diagnostic lines followed by indented, multi-line JSON, but `_extract_structured_stdout_payload` can parse only an entirely JSON stdout stream or a complete JSON object on one line. Consequently `payload` is `None` here and a genuinely successful Phase B run with a valid handoff is rejected instead of chaining to commit. Emit compact JSON when verbose diagnostics are present, send diagnostics to stderr, or make the extractor handle the trailing multi-line object.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+        "is_resolved_in_saved_snapshot": false
+      }
+    ],
+    "limits": "Saved complete bodies/authors verified only. No fresh GitHub action or finding disposition. Outer review must re-fetch complete current comments/authors/bodies and retain local sweeps, CI and independent current-head clearance."
+  },
+  "tracker_preservation": {
+    "task_ids": 268,
+    "queue_owners": 44,
+    "primary_read_sha256": "9079fb51d27a74690328f4182b5cafcefbb22a9475f4698bcbdd4e9ab44a9160",
+    "primary_unchanged": true
+  },
+  "raw_index_sha256_before": "b037da1d4f9f9bfb1c80ac70925bd3362ad5fbbafa72f8c583534aff31afb205",
+  "raw_index_sha256_after": "b037da1d4f9f9bfb1c80ac70925bd3362ad5fbbafa72f8c583534aff31afb205",
+  "candidate_index_unchanged": true,
+  "source_hashes_initial": {
+    "mu/tools/executors/commit_executor.py": "42ab02897073b0785d411a5cb569b962a0e6b30b8cd00f82a2dd29b5459df8b3",
+    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "51e48f3edcff47c9ebda30597aa81d1529b15b8e39cf5330145736c8bc946387",
+    "mu/tests/tools/test_commit_executor_receipt.py": "c143407bb92b50ed3e093397b11a3136b5409ea026896044dd5ac32c7a0e0850",
+    "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+    "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+    "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+    "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+    "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+    "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+    "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+    "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+    "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+    "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+    "mu/tests/docs/test_growth_caps.py": "ba9964c72588ab7a8be6decd44ffc037e34e6f679ff53e89cb237b82c239e955"
+  },
+  "source_hashes_final": {
+    "mu/tools/executors/commit_executor.py": "42ab02897073b0785d411a5cb569b962a0e6b30b8cd00f82a2dd29b5459df8b3",
+    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "51e48f3edcff47c9ebda30597aa81d1529b15b8e39cf5330145736c8bc946387",
+    "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+    "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+    "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+    "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+    "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+    "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+    "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+    "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+    "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+    "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+    "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+    "mu/tests/docs/test_growth_caps.py": "ba9964c72588ab7a8be6decd44ffc037e34e6f679ff53e89cb237b82c239e955"
+  },
+  "artifact_manifest": {
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/authority-after.json": {
+      "sha256": "dfa003ab09cd74d51efed08ee97a90ffd19869b621dd0f73a5485e93af0e71f4",
+      "bytes": 4059
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/authority-after.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/authority-after.stdout": {
+      "sha256": "dfa003ab09cd74d51efed08ee97a90ffd19869b621dd0f73a5485e93af0e71f4",
+      "bytes": 4059
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/authority-before.json": {
+      "sha256": "70fc2a28fab4f651679500a2ac9d75ed6a5ad7a70b035d14a66337baee53675a",
+      "bytes": 4059
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/authority-before.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/authority-before.stdout": {
+      "sha256": "70fc2a28fab4f651679500a2ac9d75ed6a5ad7a70b035d14a66337baee53675a",
+      "bytes": 4059
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/authority_probe.py": {
+      "sha256": "214b5547142d4ca2eae29f99b57718c0e378a7c70d7b3569ebab902965a5e10d",
+      "bytes": 5173
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/finalize_docs.py": {
+      "sha256": "feea70d8019b0d628a67fd774ebfa317a067336088efbb9b4ef96430aac0909b",
+      "bytes": 13509
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/gate-1-start.json": {
+      "sha256": "d39723af48b6bb18c1eee1ef780b7597303cc8edd020b68bef3f171f18512ebf",
+      "bytes": 2903
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/gate-1.json": {
+      "sha256": "bcbe12c5eb61ff0e95eef7633cd8ee0801e22627336783e02e2fa754a0409998",
+      "bytes": 6226
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/gate-1.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/gate-1.stdout": {
+      "sha256": "b49089355acfdd6338a9a4cd0053159506e8651896fdc14a16ddbf6cf44adce1",
+      "bytes": 2833
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/historical-evidence.json": {
+      "sha256": "6822342303ddb1510691757d2c63c45e30e75a31be47891d5ea53b9a662a9489",
+      "bytes": 4100
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/initial-head-diff.patch": {
+      "sha256": "aaed36f961a1de21acb09721a76cb691e8a51d266d7a29b1bb2647f88032467f",
+      "bytes": 228841
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/initial-state.json": {
+      "sha256": "f24057a05aea4e983e12cf8fd31ca0cca3e7096c02a76174c6e6d691a041bc25",
+      "bytes": 20010
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/pr1330-source-test.diff": {
+      "sha256": "e38f88b435b3053dd931d1a2c130e88e8448e6493ec2c37da7addd1156716ffa",
+      "bytes": 7477
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/receipt-class-start.json": {
+      "sha256": "31d00a8fe2da3c43e023602d38f61adc939afdb90df2e2f733433d2fa6cbe7b2",
+      "bytes": 2604
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/receipt-class.json": {
+      "sha256": "9a23cb13792a09ba1686a810d93c02e591731d2b56c35acb59155197243cd3c5",
+      "bytes": 5115
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/receipt-class.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/receipt-class.stdout": {
+      "sha256": "475f9e2650389852ac4ef687d105e4637dc3cebd50d21b9479bb11305755143a",
+      "bytes": 99
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/record_evidence.py": {
+      "sha256": "e076fc888aa0664b2f77aa211f62081cdcbf13dd4e6d20346d42df0d98827397",
+      "bytes": 9134
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/retained-findings.json": {
+      "sha256": "b0cb4e3febda6b414c51440066b50aee96d2d35a1a6e795a28792e5e89cb02d0",
+      "bytes": 4085
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/run_gate.py": {
+      "sha256": "1e8648f20aed18442e2fbe747b3284764167a81fc2db67f901ff20b6bcd66670",
+      "bytes": 3053
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/source-boundary-and-provenance.json": {
+      "sha256": "3d6d1d3edc101651ab537f8e85a610cd299687ea3676a263a7c1c49a8d1c3102",
+      "bytes": 3728
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-validation/tracker-sync.json": {
+      "sha256": "ef3af7484513622b86b001b9321ac6d31f4b0f81fc114fde64b2637b8e194cd7",
+      "bytes": 4335
+    }
+  },
+  "existing_row40_followups": [
+    "Adjacent runner-policy assertions must be admitted with future policy changes.",
+    "Invalid delegation feedback must carry concrete scope errors and existing-module inventory; no identical exhausted retry resets.",
+    "Broad authorization-text scanning, early indexed reader/selector/builder admission and advanced Phase B-to-Phase A retry routing remain separately owned.",
+    "If native indicator scope generation repeats the predecessor inconsistency, repair only its generator in a bounded existing-row follow-up.",
+    "Report any observed task-ID-only APPLY-routing hold separately from actual landing and PRIMARY sync; never fabricate an APPLY plan."
+  ],
+  "outer_owned_pending": [
+    "Native final gates, staging, candidate inventory, indicator/cap generation, supervisor receipts and hooks.",
+    "Corrected-head required CI, independent authenticated current-head cloud review and aggregate clearance including retained local sweeps.",
+    "Fresh complete comment/author/body refresh and proof-backed individual disposition only for unchanged addressed Bot findings; no GitHub action occurred here.",
+    "Commit, push, merge, actual existing-PR handoff admission and separately verified PRIMARY synchronization.",
+    "After landing/sync: PR1331 disposition; PR1330 landed-byte source/test coverage, fresh full-PR CI and native disposition; then PR1329.",
+    "Paused PR1325, remaining folders/registrations/useful work and separately scoped producer retention."
+  ],
+  "limits": "Local code/test evidence only. No predecessor receipt transfer, state/budget reset, pipeline launch, live staging, commit, push, merge, GitHub action, APPLY replay, purge, retention integration or backup-setting change. Source outside the declared runner/Step8b boundary and three admitted receipt methods remains preserved."
+}

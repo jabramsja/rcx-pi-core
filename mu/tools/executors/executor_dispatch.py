@@ -1972,7 +1972,9 @@ def build_surface_command(
         cmd.extend(["--bus-dir", str(args.bus_dir)])
     if getattr(args, "verbose", False):
         cmd.append("--verbose")
-    if getattr(args, "json", False):
+    # Phase B results are consumed by the continuation/commit chain even when
+    # the caller selects human-readable dispatcher output.
+    if args.surface == "phase-b" or getattr(args, "json", False):
         cmd.append("--json")
     return cmd
 
@@ -2579,25 +2581,65 @@ def _classify_commit_executor_result(
 
 
 def _extract_structured_stdout_payload(stdout: str) -> dict[str, Any] | None:
-    """Best-effort decode of executor stdout JSON."""
-    if not stdout:
+    """Decode one final, standalone executor result after diagnostic output.
+
+    Consume complete JSON values, including provider events, without searching
+    inside them. Only a top-level status object without an event ``type`` is a
+    result. It must be unique and last; malformed JSON, duplicate keys, trailing
+    output and conflicting results cannot grant terminal or recovery authority.
+    The caller still owns status, checkpoint and handoff identity validation.
+    """
+    if not isinstance(stdout, str) or not stdout.strip():
         return None
-    try:
-        payload = json.loads(stdout)
-        if isinstance(payload, dict):
-            return payload
-    except (json.JSONDecodeError, ValueError, TypeError):
-        pass
-    for line in stdout.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("{"):
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        obj: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in obj:
+                raise ValueError("duplicate JSON key")
+            obj[key] = value
+        return obj
+
+    def invalid_constant(value: str) -> Any:
+        raise ValueError(f"non-JSON constant: {value}")
+
+    decoder = json.JSONDecoder(
+        object_pairs_hook=unique_object, parse_constant=invalid_constant,
+    )
+    cursor = 0
+    while cursor < len(stdout):
+        # Only consider values beginning on their own line. Inline log objects
+        # are diagnostics, and raw_decode skips entire nested objects/arrays.
+        while cursor < len(stdout) and stdout[cursor] in " \t\r\n":
+            cursor += 1
+        if cursor == len(stdout):
+            break
+        line_end = stdout.find("\n", cursor)
+        if line_end == -1:
+            line_end = len(stdout)
+        if stdout[cursor] not in '{["':
+            cursor = line_end + 1
             continue
         try:
-            payload = json.loads(stripped)
-        except (json.JSONDecodeError, ValueError, TypeError):
-            continue
-        if isinstance(payload, dict):
-            return payload
+            payload, end = decoder.raw_decode(stdout, cursor)
+        except (ValueError, RecursionError):
+            # Text diagnostics such as "[phase-b] Complete" are not arrays.
+            if re.match(r"\[[A-Za-z][A-Za-z0-9_.:-]*\][ \t]+\S", stdout[cursor:line_end]):
+                cursor = line_end + 1
+                continue
+            return None
+        end_line = stdout.find("\n", end)
+        if end_line == -1:
+            end_line = len(stdout)
+        if stdout[end:end_line].strip():
+            return None
+        if isinstance(payload, dict) and "status" in payload and "type" not in payload:
+            if not isinstance(payload["status"], str) or not payload["status"].strip():
+                return None
+            # Any output after a result (even another identical result) makes
+            # the stream ambiguous. Never select a success out of such output.
+            return payload if not stdout[end:].strip() else None
+        cursor = end_line + 1
     return None
 
 def _parse_worktree_list(output: str) -> list[dict[str, str]]:
@@ -3087,7 +3129,9 @@ def _is_protected_ordinary_dispatch_error(
         result.get("executor") == "phase_b_executor"
         and (
             implementer_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
-            or (result.get("status") == "error" and result.get("step") == "ordinary_bridge_fix_continuation")
+            or (result.get("status") == "error" and result.get("step") in {
+                "ordinary_bridge_fix_continuation", "phase_b_result",
+            })
             or ordinary_bridge_fix_failure_blocks_recovery(repo_root, result, bus_dir=bus_dir)
         )
     )
@@ -3109,7 +3153,7 @@ def _ordinary_bridge_fix_error_result(
     if not isinstance(payload, dict) or not ordinary_bridge_fix_failure_blocks_recovery(repo_root, payload, bus_dir=bus_dir):
         implementer_owned = implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir)
         if implementer_owned or (
-            (not isinstance(payload, dict) or payload.get("status") in {"error", "failed", "timeout", "needs_phase_b"})
+            (not isinstance(payload, dict) or payload.get("status") in ("error", "failed", "timeout", "needs_phase_b"))
             and ordinary_bridge_fix_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir)
         ):
             # Timeout/abrupt-exit/embedded-recovery output cannot erase ownership.
@@ -3500,6 +3544,9 @@ def _continue_successful_executor_chain(
                 return {
                     "status": "error", "step": "ordinary_bridge_fix_continuation",
                     "decision": "ROUTE_PHASE_B", "executor": executor_name,
+                    "exit_code": completed.returncode,
+                    "stdout": completed.stdout, "stderr": completed.stderr,
+                    "chained_from": chain_origin,
                     "message": f"Ordinary continuation rejected: {issue}. Checkpoint preserved.",
                 }
             phase_b_timeout = config.get("timeouts", {}).get("phase_b_executor", DEFAULT_EXECUTOR_CONFIG["timeouts"]["phase_b_executor"])
@@ -3543,8 +3590,12 @@ def _continue_successful_executor_chain(
                 return {
                     "status": "error", "step": "ordinary_bridge_fix_continuation",
                     "decision": "ROUTE_PHASE_B", "executor": executor_name,
+                    "exit_code": completed.returncode,
+                    "stdout": completed.stdout, "stderr": completed.stderr,
+                    "chained_from": chain_origin,
                     "message": "Repeated ordinary continuation without consuming the finalized checkpoint; checkpoint preserved.",
                 }
+            payload = following
         handoff_path = agent_bus_path(repo_root, bus_dir, "executors", "phase_b_handoff.json")
         if not handoff_path.exists():
             origin = chain_origin or "phase_b_executor"
@@ -3593,11 +3644,31 @@ def _continue_successful_executor_chain(
                 "status": "failed",
                 "decision": "ROUTE_PHASE_B",
                 "executor": executor_name,
-                "exit_code": 0,
+                "exit_code": completed.returncode,
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
                 "message": "Phase B converged but no handoff file found",
                 "chained_from": (
                     "phase_a_executor" if origin == "phase_a_executor" else None
                 ),
+            }
+
+        # An old same-wave handoff can survive a nonterminal Phase B return.
+        # Exit 0 alone (including text continuation or embedded recovery) must
+        # never select commit preparation or mutate its packet/checkpoint.
+        if not isinstance(payload, dict) or payload.get("status") not in (
+            "success", "ready", "commit_ready",
+        ):
+            return {
+                "status": "error", "step": "phase_b_result",
+                "decision": "ROUTE_PHASE_B", "executor": executor_name,
+                "exit_code": completed.returncode,
+                "stdout": completed.stdout, "stderr": completed.stderr,
+                "message": (
+                    "Phase B requires a structured terminal success before chaining commit; "
+                    "checkpoint and handoff preserved."
+                ),
+                "chained_from": chain_origin,
             }
 
         if record and (
@@ -3615,6 +3686,8 @@ def _continue_successful_executor_chain(
                     "status": "error",
                     "decision": "COMMIT_GO",
                     "executor": "commit_executor",
+                    "exit_code": completed.returncode,
+                    "stdout": completed.stdout, "stderr": completed.stderr,
                     "message": f"Phase B handoff validation failed: {handoff_msg}",
                     "chained_from": (
                         "phase_a_executor → phase_b_executor"

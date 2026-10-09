@@ -1,0 +1,530 @@
+{
+  "schema_version": 1,
+  "wave_id": "workingrcx-local-review-ci-isolation-r2-2026-10-07",
+  "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+  "recorded_utc": "2026-10-07T17:20:18.349197+00:00",
+  "phase": "Phase B local implementation; native review/governance/CI/landing pending",
+  "baseline_head": "d978fcff7b984b1739b3ae2ca88627276a16d5bc",
+  "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+  "pr_number": 1332,
+  "development_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/local-review-ci-r2-20261007",
+  "recovery_evidence_root": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z",
+  "volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+  "authority_observed": {
+    "native_same_pr_config_validation": {
+      "config": "reports/control_plane/workingrcx-local-review-ci-isolation-r2-2026-10-07_wave_config.json",
+      "config_sha256": "86ffdcfd26020a842f352d0e700d4ba35be3d8d07b1cc43d1f908a36fdca7a40",
+      "validation_errors": [],
+      "packet_fence_errors": [],
+      "selected_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+      "native_same_pr_authorization": true,
+      "launch_performed": false
+    },
+    "locked_plan": "reports/control_plane/workingrcx-local-review-ci-isolation-r2-2026-10-07_2026-10-07.md",
+    "founder_override": "workingrcx-local-review-ci-isolation-r2-2026-10-07",
+    "phase_b_state": "implementer_mutation initial; baseline/comparison d978fcff7b984b1739b3ae2ca88627276a16d5bc",
+    "ownership": "This implementer is a descendant of the active R2 phase_b_executor; no second implementation lane was observed. No executor was launched by this implementer."
+  },
+  "diagnosis": [
+    "At the unchanged baseline, TestBootstrapRegistry.setup_method and teardown_method clear the shared BOOTSTRAP_REGISTRY (test_mu_type.py:795-801).",
+    "With that list empty, _stage0_match_bootstrap_marker_reason reloads live eval_seed (baseline test_stage0_vm_cutover.py:38-45). eval_seed.py:237-245 defines and constructs a new NO_MATCH each execution; imported victim references keep the prior identity.",
+    "The exact serial sequence reproduces the same nine node IDs in the archived GitHub failure log; all nine victims pass in their own process. This execution, combined with the inspected definitions, grounds the causal diagnosis."
+  ],
+  "implementation": [
+    "Adopt the two selected, hash-verified restored R1 test modules byte-for-byte. No predecessor Git/admin data, packet, bus, receipt or budget is imported.",
+    "Save registry contents before registry tests; restore by slice assignment in teardown, keeping the original list identity on normal and exceptional exit.",
+    "If marker lookup sees an empty registry, import the actual evaluator and read the public registry in a fresh Python process using the current interpreter and sys.path, with a 30-second timeout. The live registry and NO_MATCH remain untouched; missing markers in a populated registry still fail.",
+    "Retain all preexisting test methods and dynamic marker/path assertions. Add five cases: normal/exceptional fixture restoration, populated/empty marker lookup preservation, and missing-marker rejection."
+  ],
+  "baseline_source_sha256": {
+    "mu/tests/engine/test_mu_type.py": "942a95d8a2e5c4cfea0918860b24d5490de86f48fb351653fedec515f3e6a584",
+    "mu/tests/l4_gates/test_stage0_vm_cutover.py": "aa9f0c4ab388f0b69ec6a44255a418b7a0de9ed4b776a9aa39a7b39c15814723",
+    "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+    "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+    "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+  },
+  "current_source_sha256": {
+    "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+    "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+    "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+    "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+    "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+  },
+  "historical_predecessor_source_sha256": {
+    "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+    "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f"
+  },
+  "predecessor_context": {
+    "r1_snapshot": "819514fb76f590d17ab8cb9e467008362976a87c62a43c28d44ebf184f561214",
+    "r1_preservation_manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r1-preserved/preservation.json",
+    "r1_limits": "Tested source only; immutable packet omitted native same-PR routing/authorization literals. No completed precommit approval, landing or budget transfer. Prior review labels are historical and do not approve R2.",
+    "r3_snapshot": "52300cb8863dc5360f3a53127ea91244a49a35a2c57f576163e8ea58f33d715a",
+    "r3_recovery_state": {
+      "step": "wait_ci",
+      "state": "tier3_exhausted",
+      "tuple_attempt_index": 3,
+      "wave_invocation_count": 5,
+      "exhausted": true,
+      "outcome": "exhausted",
+      "detail": "max 2 attempts reached for (workingrcx-local-review-quota-r3-2026-10-05, wait_ci, test_failure)"
+    },
+    "immutable_r3_restored_files_verified_before_and_after": 59
+  },
+  "historical_input_sha256": {
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/recovery-source.json": "06e95e0602dd0e3086406fcd20c46eca1cb230530b9f0c7a3e9c8a42dc2c8d8b",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/restore-result.json": "6871906cfaf44050cb1410da68b83770621c28a36069609b2c6b8c307b3939c1",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/test-reproduction.json": "f53b17fb9e7c8297013dc18fe510f162fccc7d512179a967039d5d5fe38465af",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/github-green-gate-failure.log": "8a69e04d2f84381726ac6a1f993184a34c750c0295ec95ab407f2df1654b403b",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/restored-file-hashes.json": "0831135bc7b9645bcf49397c33428ec90cdcb94846f18f69ae9f7b4c1d6547e7",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r1-preserved/preservation.json": "89a6a340a1d570de757710bdd6e3449c045d67696f9400b5dde36fe217bc786a",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-config-validation.json": "27b616b96eae725caf9a1946d9148fda2a431f48abbec060f886c914997720d1",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-launch-baseline.json": "d7e905c8a55cb9ffc7c057cbacdb15d2fa05a70f5f7f26892af3df73fc6cec69",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/workingrcx-local-review-ci-isolation-r2-2026-10-07_wave_config.json": "86ffdcfd26020a842f352d0e700d4ba35be3d8d07b1cc43d1f908a36fdca7a40",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/restored/WorkingRCX-local-review-quota-r3-20261005/.agent_bus-local-review-quota-r3-20261005/recovery/recovery_status.json": "3161e99e9d040df7f3973a2dd73463426c91fdba8b8dd053e16f63339508c0e2",
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/restored/WorkingRCX-local-review-quota-r3-20261005/.agent_bus-local-review-quota-r3-20261005/recovery/recovery_log.json": "81e12965a84958dcd2c25dcec6368211c349ae1b1fdf920a79a7c4d761042c65"
+  },
+  "unchanged_victims_runtime_and_r3_artifacts_sha256": {
+    "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+    "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+    "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a",
+    "reports/control_plane/workingrcx-local-review-quota-r3-2026-10-05_2026-10-05.md": "5a28b0fefc3307515254bb610a240a1f774fa5a19fdf7a191e2393850883ee42",
+    "reports/control_plane/workingrcx-local-review-quota-r3-2026-10-05_implementation_evidence.json": "03fdeccb9265e7c9b7909eb2ed2108d00f1aa7b70e51332fa983688a1bb35440",
+    "reports/l4_wave_indicators/workingrcx-local-review-quota-r3-2026-10-05.json": "e1719506f69742d8505d8847714b6e60fa5dba3f2e0e428e49aae8e1ab2855f4"
+  },
+  "regression_red_source": {
+    "description": "Only the two preserved regression classes were appended to the unmodified baseline helpers before applying the repair. Snapshots and exact diff are retained for independent reproduction.",
+    "patch_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/regression-only.patch",
+    "patch_sha256": "ea8bf3108bc145ee4b3a911441326d3fa418b4fda0831581e53c334bb994aeeb",
+    "source_snapshot_root": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/regression-only-source"
+  },
+  "reproduced_github_failure_nodes": [
+    "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_conflict",
+    "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_dict_conflict",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch::test_empty_var_match_int",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch::test_empty_var_match_str",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch::test_empty_var_match_none",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch::test_empty_var_match_dict",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch::test_stage0_match_empty_var_int",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch::test_stage0_match_empty_var_dict",
+    "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch::test_stage0_match_empty_var_with_bindings"
+  ],
+  "validation_runs": [
+    {
+      "name": "baseline-victim-alone",
+      "source_state": "unmodified PR1332 baseline",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_conflict",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_dict_conflict",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_conflict mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_dict_conflict mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/local-review-ci-r2-20261007",
+      "started_utc": "2026-10-07T17:15:24.654926+00:00",
+      "elapsed_seconds": 0.358,
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/baseline-victim-alone.log",
+      "log_sha256": "7b3b0d5a921d7788afd5d0591f4f23616773499e68d52f759b0a65c29bc0ff2c",
+      "source_sha256": {
+        "mu/tests/engine/test_mu_type.py": "942a95d8a2e5c4cfea0918860b24d5490de86f48fb351653fedec515f3e6a584",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "aa9f0c4ab388f0b69ec6a44255a418b7a0de9ed4b776a9aa39a7b39c15814723",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+        "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+        "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+      },
+      "summary": "9 passed in 0.03s",
+      "receipt_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/baseline-victim-alone.json",
+      "receipt_sha256": "7fceaaf925b7faaa3270eb0037b69aace4ba889266a252037ab13a9fa63057a4"
+    },
+    {
+      "name": "baseline-ordered-reproduction",
+      "source_state": "unmodified PR1332 baseline",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/engine/test_mu_type.py::TestBootstrapRegistry::test_mark_bootstrap_adds_entry",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py::TestCutoverIntegration::test_stage0_marker_truth_current_paths",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_conflict",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_dict_conflict",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/engine/test_mu_type.py::TestBootstrapRegistry::test_mark_bootstrap_adds_entry mu/tests/l4_gates/test_stage0_vm_cutover.py::TestCutoverIntegration::test_stage0_marker_truth_current_paths mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_conflict mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_dict_conflict mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/local-review-ci-r2-20261007",
+      "started_utc": "2026-10-07T17:15:25.013481+00:00",
+      "elapsed_seconds": 24.62,
+      "exit_code": 1,
+      "expected_exit_code": 1,
+      "log_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/baseline-ordered-reproduction.log",
+      "log_sha256": "ad45b9cdf06e64aab75d98ef03ca3418f6d38bc1c2e492e554e344ee7df78156",
+      "source_sha256": {
+        "mu/tests/engine/test_mu_type.py": "942a95d8a2e5c4cfea0918860b24d5490de86f48fb351653fedec515f3e6a584",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "aa9f0c4ab388f0b69ec6a44255a418b7a0de9ed4b776a9aa39a7b39c15814723",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+        "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+        "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+      },
+      "summary": "9 failed, 2 passed in 24.37s",
+      "receipt_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/baseline-ordered-reproduction.json",
+      "receipt_sha256": "1b49e25be83def433ffe72d139fd695edef7d420edcacac066af97ae8dea90d2"
+    },
+    {
+      "name": "regression-old-helpers",
+      "source_state": "PR1332 baseline helpers plus only the five preserved regression cases",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/engine/test_mu_type.py::TestBootstrapRegistryIsolation",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py::TestBootstrapMarkerIsolation",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/engine/test_mu_type.py::TestBootstrapRegistryIsolation mu/tests/l4_gates/test_stage0_vm_cutover.py::TestBootstrapMarkerIsolation --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/local-review-ci-r2-20261007",
+      "started_utc": "2026-10-07T17:16:40.472303+00:00",
+      "elapsed_seconds": 0.476,
+      "exit_code": 1,
+      "expected_exit_code": 1,
+      "log_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/regression-old-helpers.log",
+      "log_sha256": "ee0efc273f01014931ac975daa95f1ecabeb8ee618235ec481544e8803b70906",
+      "source_sha256": {
+        "mu/tests/engine/test_mu_type.py": "11da204eba548834e3117e7dc4daf9c47dec1939d87a342fc2704824e9689e6a",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "5631391a6d720b9726ba1cd3fa2542eeed036e3235859fe69a18c80826e2d9f0",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+        "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+        "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+      },
+      "source_unchanged_during_run": true,
+      "summary": "3 failed, 2 passed in 0.10s",
+      "receipt_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/regression-old-helpers.json",
+      "receipt_sha256": "9b8be8dc2700d395fc54ebf83476fb60465b82ecec3dcadb50e84a3c2c75edb7"
+    },
+    {
+      "name": "fixed-focused-regressions",
+      "source_state": "R2 candidate: both test modules byte-identical to verified preserved R1 implementation; fresh R2 results",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/engine/test_mu_type.py::TestBootstrapRegistryIsolation",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py::TestBootstrapMarkerIsolation",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/engine/test_mu_type.py::TestBootstrapRegistryIsolation mu/tests/l4_gates/test_stage0_vm_cutover.py::TestBootstrapMarkerIsolation --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/local-review-ci-r2-20261007",
+      "started_utc": "2026-10-07T17:16:57.546568+00:00",
+      "elapsed_seconds": 0.443,
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-focused-regressions.log",
+      "log_sha256": "6b9ffd6b9a3baa1f0f65b43fd8e9939ac47909d796917593222ef0ccd5a23556",
+      "source_sha256": {
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+        "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+        "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+      },
+      "source_unchanged_during_run": true,
+      "summary": "5 passed in 0.11s",
+      "receipt_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-focused-regressions.json",
+      "receipt_sha256": "b4bbc45c773688407f998143419dfe72498e60157d709ca8e59a4a110dc6716c"
+    },
+    {
+      "name": "fixed-ordered-reproduction",
+      "source_state": "R2 candidate: both test modules byte-identical to verified preserved R1 implementation; fresh R2 results",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/engine/test_mu_type.py::TestBootstrapRegistry::test_mark_bootstrap_adds_entry",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py::TestCutoverIntegration::test_stage0_marker_truth_current_paths",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_conflict",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_dict_conflict",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/engine/test_mu_type.py::TestBootstrapRegistry::test_mark_bootstrap_adds_entry mu/tests/l4_gates/test_stage0_vm_cutover.py::TestCutoverIntegration::test_stage0_marker_truth_current_paths mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_conflict mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_dict_conflict mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/local-review-ci-r2-20261007",
+      "started_utc": "2026-10-07T17:16:57.990380+00:00",
+      "elapsed_seconds": 8.378,
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-ordered-reproduction.log",
+      "log_sha256": "dad5a360aaca6770017d62d8edaa92d29d1b57f3fa5ea0ee136391430037afa0",
+      "source_sha256": {
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+        "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+        "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+      },
+      "source_unchanged_during_run": true,
+      "summary": "11 passed in 8.12s",
+      "receipt_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-ordered-reproduction.json",
+      "receipt_sha256": "cc1f3f4133f9357568e66774c8d4ca0b435164613d124c23c0cd89b0bb04833c"
+    },
+    {
+      "name": "fixed-victim-alone",
+      "source_state": "R2 candidate: both test modules byte-identical to verified preserved R1 implementation; fresh R2 results",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_conflict",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_dict_conflict",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_conflict mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestBehaviorPreserved::test_nonlinear_dict_conflict mu/tests/l4_gates/test_w3_crash_guards_gate.py::TestF11EmptyVarNameNoMatch --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/local-review-ci-r2-20261007",
+      "started_utc": "2026-10-07T17:17:06.369158+00:00",
+      "elapsed_seconds": 0.276,
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-victim-alone.log",
+      "log_sha256": "7b3b0d5a921d7788afd5d0591f4f23616773499e68d52f759b0a65c29bc0ff2c",
+      "source_sha256": {
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+        "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+        "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+      },
+      "source_unchanged_during_run": true,
+      "summary": "9 passed in 0.03s",
+      "receipt_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-victim-alone.json",
+      "receipt_sha256": "6747290eef84577b634bc37066d70dfec72ccc897522591222dd6010c4439378"
+    },
+    {
+      "name": "fixed-four-module-gate",
+      "source_state": "R2 candidate: both test modules byte-identical to verified preserved R1 implementation; fresh R2 results",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/engine/test_mu_type.py",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/engine/test_mu_type.py mu/tests/l4_gates/test_stage0_vm_cutover.py mu/tests/l4_gates/test_trusted_mutation_removal_gate.py mu/tests/l4_gates/test_w3_crash_guards_gate.py --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/local-review-ci-r2-20261007",
+      "started_utc": "2026-10-07T17:17:06.645621+00:00",
+      "elapsed_seconds": 20.084,
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-four-module-gate.log",
+      "log_sha256": "37a2efd9cafceac26f0ceb48bdd86fd078d8ebb1fc8f7a9a679f20eabccd2035",
+      "source_sha256": {
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+        "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+        "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+      },
+      "source_unchanged_during_run": true,
+      "summary": "214 passed, 1 skipped in 19.82s",
+      "receipt_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-four-module-gate.json",
+      "receipt_sha256": "d6a45c7ac8671389345d0d4759cc8b8c4870d49e7d2d4a6617c3415640dc95aa"
+    },
+    {
+      "name": "fixed-reversed-module-order",
+      "source_state": "R2 candidate: both test modules byte-identical to verified preserved R1 implementation; fresh R2 results",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py",
+        "mu/tests/engine/test_mu_type.py",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/l4_gates/test_w3_crash_guards_gate.py mu/tests/l4_gates/test_trusted_mutation_removal_gate.py mu/tests/l4_gates/test_stage0_vm_cutover.py mu/tests/engine/test_mu_type.py --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/local-review-ci-r2-20261007",
+      "started_utc": "2026-10-07T17:17:26.731315+00:00",
+      "elapsed_seconds": 20.036,
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-reversed-module-order.log",
+      "log_sha256": "67475faf441c41319cbbfe78884da707299c8e453c83edb3b5439f8520417397",
+      "source_sha256": {
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+        "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+        "mu/host/python/rcx_pi/selfhost/eval_seed.py": "e76543cb739a25681ef6f0ff44b54a97708a5611f782dbd0e03d8c2b7fb78991",
+        "mu/host/python/rcx_pi/selfhost/mu_type.py": "f6e998a2c776a8d60232b6ff0f7df57c1d919236d54f8471f96a91159a9e592a"
+      },
+      "source_unchanged_during_run": true,
+      "summary": "214 passed, 1 skipped in 19.68s",
+      "receipt_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/ci-r2-phase-b-20261007T171524Z/fixed-reversed-module-order.json",
+      "receipt_sha256": "88893f5125e30f8fbef435f623dbf84685ba666ed199fea6b096df7b7022059f"
+    }
+  ],
+  "final_source_inspection": {
+    "preexisting_definitions_changed": {
+      "mu/tests/engine/test_mu_type.py": [
+        "TestBootstrapRegistry.setup_method",
+        "TestBootstrapRegistry.teardown_method"
+      ],
+      "mu/tests/l4_gates/test_stage0_vm_cutover.py": [
+        "_stage0_match_bootstrap_marker_reason"
+      ]
+    },
+    "other_preexisting_test_definitions_unchanged": true,
+    "scoped_test_sources_match_verified_preserved_bytes": true,
+    "tracked_delta_within_native_allowlist": true,
+    "numbered_queue_ids_and_order_preserved": true,
+    "all_prior_task_ids_retained": true,
+    "production_and_executor_delta": false
+  },
+  "storage_and_remaining_ownership": {
+    "access_manifest": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/RCX-Recovery-Access/manifest.json",
+    "access_manifest_sha256": "7f5982b35b2197bfa8bfaf7a736178aa58fa3de8f5769ad5cad176a8d68d816d",
+    "fleet_archive_folders_retired_on_2026_10_06": 86,
+    "ordinary_sibling_checkouts_retired_on_2026_10_06": 17,
+    "storage_is_not_merge_completion": true,
+    "deduplicated_producer_integration": "Existing separate automation obligation; not implemented here.",
+    "pr_and_useful_work": "Row38 retains PR1330/PR1329 continuation, PR1325 exact coverage/disposition and all inherited useful-work owners.",
+    "physical_apply_plan": "None: auxiliary test repair. No APPLY/VERIFY replay or folder retirement. If native postmerge demands an APPLY plan, retain the exact obligation under existing row40.",
+    "runtime_investigation": "Remains paused."
+  },
+  "limits": [
+    "Fresh Phase B-local commands only; the archived GitHub log is historical. This implementer did not invoke startup/preflight launchers, attestation, dispatch/executor launches, commit/push/PR/merge or closeout commands.",
+    "The cross-orchestrator session-protocol display was executed read-only; it is not a validation gate or governance receipt.",
+    "Both full local module orders include one existing skip: TestRatchetEvidence.test_total_decreased requires /tmp/cp_s1a_before.json, which is absent. The victim module and its skip were not changed or disabled.",
+    "Native Phase A owns the packet; native governance owns the canonical tracker-sync note, indicator and any generated growth cap. They are not manually generated or claimed complete by this record.",
+    "Fresh native review, hooks, required GitHub CI, protected merge and PRIMARY sync remain pending. No predecessor review approves this package.",
+    "These gates prove the scoped test isolation and existing behavioral assertions. They do not establish full-repository CI, runtime investigation progress, storage producer integration or useful-work completion."
+  ]
+}

@@ -793,12 +793,13 @@ class TestBootstrapRegistry:
     """Tests for bootstrap marking functions."""
 
     def setup_method(self):
-        """Clear registry before each test."""
+        """Isolate registry tests without losing imported runtime markers."""
+        self._bootstrap_registry_before = get_bootstrap_registry()
         BOOTSTRAP_REGISTRY.clear()
 
     def teardown_method(self):
-        """Clear registry after each test."""
-        BOOTSTRAP_REGISTRY.clear()
+        """Restore contents in place, including after a test raises."""
+        BOOTSTRAP_REGISTRY[:] = self._bootstrap_registry_before
 
     def test_mark_bootstrap_adds_entry(self):
         """mark_bootstrap adds to registry."""
@@ -828,6 +829,45 @@ class TestBootstrapRegistry:
         with pytest.raises(RuntimeError) as exc_info:
             assert_no_bootstrap_in_production()
         assert "leftover" in str(exc_info.value)
+
+
+class TestBootstrapRegistryIsolation:
+    """Registry unit tests must not discard markers owned by imported modules."""
+
+    @pytest.mark.parametrize("fail_test", [False, True], ids=["normal", "exception"])
+    def test_registry_survives_test_exit(self, fail_test):
+        from rcx_pi.selfhost import eval_seed, mu_type
+
+        registry = BOOTSTRAP_REGISTRY
+        original = get_bootstrap_registry()
+        no_match = eval_seed.NO_MATCH
+        case = TestBootstrapRegistry()
+
+        def run_case():
+            case.setup_method()
+            try:
+                assert get_bootstrap_registry() == []
+                case.test_mark_bootstrap_adds_entry()
+                if fail_test:
+                    raise RuntimeError("registry test failed")
+            finally:
+                case.teardown_method()
+
+        try:
+            mark_bootstrap("isolation_regression", "preexisting marker")
+            before = get_bootstrap_registry()
+            if fail_test:
+                with pytest.raises(RuntimeError, match="registry test failed"):
+                    run_case()
+            else:
+                run_case()
+            assert mu_type.BOOTSTRAP_REGISTRY is registry
+            assert BOOTSTRAP_REGISTRY is registry
+            assert get_bootstrap_registry() == before
+            assert eval_seed.NO_MATCH is no_match
+            assert eval_seed.match({"var": ""}, 42) is no_match
+        finally:
+            registry[:] = original
 
 
 # =============================================================================

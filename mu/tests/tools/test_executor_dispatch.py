@@ -23,6 +23,7 @@ from tests.repo_root import REPO_ROOT
 from mu.tests.tools.test_phase_b_executor import (
     PrivateReviewCrash, private_review_checkpoint, real_pre_review_package,
     reentry_private_bridge_lane, native_structural_tracker_fixture,
+    phase_b_terminal_cli,
 )
 from mu.tests.tools.test_worktree_lifecycle import native_base, native_lane
 
@@ -79,6 +80,253 @@ def isolated_pager_transports(monkeypatch):
 
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
 _PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
+
+
+@pytest.mark.parametrize("case", [
+    "pretty", "compact", "verbose", "verbose-compact", "provider", "other-provider", "nested-prefix", "large",
+    "recovered", "recovered-no-handoff", "needs-phase-b", "failed", "nonzero",
+    "diagnostic-only", "nested-only", "array-only", "inline-only", "unknown-status",
+    "duplicate-results", "contradictory", "truncated", "truncated-prefix", "truncated-array",
+    "truncated-suffix", "trailing-diagnostic", "same-line-suffix", "duplicate-status", "non-json-number",
+    "no-handoff", "wrong-wave", "wrong-task", "wrong-packet",
+])
+def test_real_phase_b_terminal_output_routes_without_stale_authority(tmp_path, phase_b_terminal_cli, case):
+    """Real producer formatting -> public dispatch -> mocked commit boundary."""
+    packet_rel = "reports/control_plane/transport.md"
+    packet = tmp_path / packet_rel
+    packet.parent.mkdir(parents=True)
+    packet.write_text("# Transport\nWave ID: transport\nPhase-A-Lock: LOCKED\n")
+    bus = ".agent_bus-transport"
+    route = {**_VALID_ROUTING_RECORD, "wave_id": "transport", "task_id": "[TRANSPORT]",
+             "next_candidates": [{"candidate": "transport", "bounded": True, "tracked_packet": packet_rel}]}
+    route_path = common_mod.routing_record_path(tmp_path, bus)
+    route_path.parent.mkdir(parents=True)
+    route_path.write_text(json.dumps(route))
+    handoff = tmp_path / bus / "executors/phase_b_handoff.json"
+    handoff.parent.mkdir(parents=True)
+    _write_phase_b_handoff(
+        handoff, wave_id="old" if case == "wrong-wave" else "transport",
+        task_id="[OLD]" if case == "wrong-task" else route["task_id"],
+        tracked_packet="old.md" if case == "wrong-packet" else packet_rel,
+    )
+    if case in {"no-handoff", "recovered-no-handoff"}:
+        handoff.unlink()
+    checkpoint = handoff.with_name("phase_b_state.json")
+    checkpoint.write_text('{"wave_id":"transport","completed_step":"validated"}\n')
+    before = {p: p.read_bytes() for p in (packet, route_path, checkpoint, handoff) if p.exists()}
+    payload = {"status": "commit_ready", "wave_id": "transport", "handoff_path": str(handoff)}
+    prefix = {
+        "verbose": "[phase-b] Complete\n",
+        "provider": '{"type":"thread.started","thread_id":"fixture"}\n',
+        "other-provider": '{"type":"system","subtype":"init"}\n{"type":"result","status":"success"}\n',
+        "nested-prefix": json.dumps({"diagnostic": {"status": "error", "text": 'brace } and "quote"'}}, indent=2) + "\n",
+    }.get(case, "")
+    if case in {"recovered", "recovered-no-handoff", "failed"}:
+        payload.update(status="error", errors=["actor failed"], step="implementer")
+    elif case == "needs-phase-b":
+        payload["status"] = "needs_phase_b"
+    elif case == "unknown-status":
+        payload["status"] = "in_progress"
+    recovery = {"recovered": True, "tier": 2} if case.startswith("recovered") else None
+    emitted = phase_b_terminal_cli(tmp_path, payload, prefix=prefix, stderr="stderr-start\n" + "e" * 131072 + "\nstderr-end\n", recovery=recovery)
+    stdout, exit_code = emitted.stdout, emitted.returncode
+    if case in {"compact", "verbose-compact"}:
+        stdout = json.dumps(json.loads(stdout)) + "\n"
+        if case == "verbose-compact":
+            stdout = "[phase-b] Complete\n" + stdout
+    elif case == "diagnostic-only":
+        stdout = json.dumps({"type": "diagnostic", "status": "commit_ready"}) + "\n"
+    elif case == "nested-only":
+        stdout = json.dumps({"diagnostic": payload}, indent=2) + "\n"
+    elif case == "array-only":
+        stdout = json.dumps([payload], indent=2) + "\n"
+    elif case == "inline-only":
+        stdout = "[phase-b] diagnostic: " + json.dumps(payload) + "\n"
+    elif case == "duplicate-results":
+        stdout = json.dumps(payload) + "\n" + stdout
+    elif case == "contradictory":
+        stdout = '{"status":"error"}\n' + stdout
+    elif case == "truncated":
+        stdout = stdout.rstrip()[:-1]
+    elif case == "truncated-prefix":
+        stdout = '{"diagnostic":\n' + stdout
+    elif case == "truncated-array":
+        stdout = "[\n" + stdout
+    elif case == "truncated-suffix":
+        stdout += '{"status":'
+    elif case == "trailing-diagnostic":
+        stdout += "[phase-b] more output\n"
+    elif case == "same-line-suffix":
+        stdout = stdout.rstrip() + ' {"type":"diagnostic"}'
+    elif case == "duplicate-status":
+        stdout = '{"status":"error","status":"commit_ready"}'
+    elif case == "non-json-number":
+        stdout = '{"status":"commit_ready","value":NaN}'
+    elif case == "nonzero":
+        exit_code = 23
+    accepted = case in {"pretty", "compact", "verbose", "verbose-compact", "provider", "other-provider", "nested-prefix", "large"}
+    # Long diagnostic output must survive both success and rejection intact.
+    if not accepted or case == "large":
+        stdout = "[fixture] " + "x" * 131072 + "\n" + stdout
+    children = []
+    invoked_records = []
+
+    def child(command, *, cwd, timeout):
+        assert cwd == tmp_path
+        assert command[command.index("--bus-dir") + 1] == bus
+        children.append(Path(command[1]).name)
+        assert "--json" in command
+        if children[-1] == "phase_b_executor.py":
+            invoked = json.loads(command[command.index("--routing-record") + 1])
+            assert invoked["wave_id"] == "transport" and invoked["task_id"] == "[TRANSPORT]"
+            assert invoked["next_candidates"][0]["tracked_packet"] == packet_rel
+            invoked_records.append(invoked)
+            return subprocess.CompletedProcess(command, exit_code, stdout, emitted.stderr)
+        assert children[-1] == "commit_executor.py"
+        assert command[command.index("--handoff") + 1] == str(handoff)
+        return subprocess.CompletedProcess(command, 0, '{"status":"held"}', "")
+
+    with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=child), \
+         patch.object(dispatch_mod, "attempt_recovery") as recover, \
+         patch.object(dispatch_mod, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")):
+        result = dispatch_mod.dispatch(route, repo_root=tmp_path, skip_freshness=True, bus_dir=bus)
+    assert children == (["phase_b_executor.py", "commit_executor.py"] if accepted else ["phase_b_executor.py"])
+    if accepted:
+        assert result["status"] == "held"
+        assert result["decision"] == "COMMIT_HELD"
+    else:
+        assert result["status"] in {"error", "failed"}
+        assert result["stdout"] == stdout
+        assert result["stderr"] == emitted.stderr
+        assert result["exit_code"] == exit_code
+    if case == "recovered-no-handoff":
+        assert result["recovery"] == recovery
+        assert result["retry_record"] == invoked_records[0]
+    assert all(p.read_bytes() == data for p, data in before.items())
+    assert handoff.exists() == (case not in {"no-handoff", "recovered-no-handoff"})
+    recover.assert_not_called()
+
+
+@pytest.mark.parametrize("stdout", [
+    '{"type":"event","payload":{"status":"commit_ready"}}',
+    '{\n "details": {"status":"commit_ready"}\n}',
+    '[\n {"status":"commit_ready"}\n]',
+    '[\n {"status":"commit_ready"}\n',
+    '{\n "details":\n {"status":"commit_ready"}\n',
+    '{"status":"commit_ready"}\n{"status":"error"}',
+    '{"status":"commit_ready"}\n{"type":"event"}',
+    '{"status":"commit_ready","details":{"x":1,"x":2}}',
+    '{"status":[]}', '{"status":null}', '{"status":""}',
+])
+def test_terminal_parser_never_promotes_nested_or_ambiguous_results(stdout):
+    assert dispatch_mod._extract_structured_stdout_payload(stdout) is None  # ANTICHEAT_OK: direct terminal framing negative controls
+
+
+@pytest.mark.parametrize("terminal", [True, False])
+def test_terminal_transport_drains_both_child_pipes(tmp_path, terminal):
+    """A disposable child exceeding both pipe buffers must finish intact."""
+    payload = {"status": "commit_ready"}
+    final = json.dumps(payload, indent=2) if terminal else '{"status":'
+    exit_code = 0 if terminal else 17
+    script = (
+        "import sys\n"
+        "for i in range(64):\n"
+        " sys.stdout.write('[diagnostic] ' + 'o' * 4096 + '\\n'); sys.stdout.flush()\n"
+        " sys.stderr.write('e' * 4096 + '\\n'); sys.stderr.flush()\n"
+        f"sys.stdout.write({final!r}); sys.stdout.flush()\n"
+        f"sys.exit({exit_code})\n"
+    )
+    result = dispatch_mod._run_executor_in_group([sys.executable, "-c", script], cwd=tmp_path, timeout=10)  # ANTICHEAT_OK: real pipe-drain boundary with disposable non-executor child
+    assert result.returncode == exit_code
+    assert result.stdout == ("[diagnostic] " + "o" * 4096 + "\n") * 64 + final
+    assert result.stderr == ("e" * 4096 + "\n") * 64
+    actual = dispatch_mod._extract_structured_stdout_payload(result.stdout)  # ANTICHEAT_OK: terminal parsing after actual pipe draining
+    assert actual == (payload if terminal else None)
+
+
+@pytest.mark.parametrize("output", [
+    "[phase-b] Status: continue_phase_b\n", "", '{"status":', '[]', '{}',
+    '{"status":[]}', '{"status":null}',
+    '{"status":"needs_phase_b"}', '{"status":"question_for_founder"}',
+    '{"status":"error","recovery":{"recovered":true}}',
+    '{"status":"continue_phase_b"}',
+    '{"status":"success"}', '{"status":"ready"}', '{"status":"commit_ready"}',
+], ids=["text-continuation", "missing", "malformed", "array", "missing-status", "invalid-status", "null-status",
+        "needs-phase-b", "question", "recovered-error", "unbound-continuation",
+        "success", "ready", "commit-ready"])
+@pytest.mark.parametrize("after_continuation", [False, True])
+def test_launcher_dispatch_output_cannot_consume_old_handoff(native_lane, output, after_continuation):
+    """Use the real launcher argv and consumer with a matching old handoff."""
+    import hashlib
+    import launch_wave
+
+    _primary, repo, git, _env = native_lane
+    bus = ".agent_bus-transport"
+    packet_rel = "reports/control_plane/transport.md"
+    packet = repo / packet_rel
+    packet.parent.mkdir(parents=True)
+    packet.write_text("# Transport\nWave ID: transport\nPhase-A-Lock: LOCKED\n")
+    config = SimpleNamespace(tracked_packet=packet_rel, task_id="[TRANSPORT]")
+    route = {"decision": "ROUTE_PHASE_B", "wave_id": "transport",
+             "tracked_packet": packet_rel, "task_id": config.task_id}
+    route_path = common_mod.routing_record_path(repo, bus)
+    route_path.parent.mkdir(parents=True)
+    route_path.write_text(json.dumps(route))
+    state_path = repo / bus / "executors/phase_b_state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({
+        "plan_path": packet_rel, "wave_id": "transport", "completed_step": "bridge_round_2",
+        "bridge_fix_mutation": {"state": "SUCCESS_PENDING_FINALIZE"},
+        "bridge_fix_task_id": config.task_id,
+    }, indent=3) + "\n")
+    continuation = {
+        "status": "continue_phase_b", "step": "bridge_fix_finalize", "resumed_from": "bridge_fix_pending",
+        "plan_path": packet_rel, "wave_id": "transport", "completed_step": "bridge_round_2",
+        "checkpoint_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(),
+    }
+    handoff = state_path.with_name("phase_b_handoff.json")
+    _write_phase_b_handoff(handoff, wave_id="transport", task_id=config.task_id, tracked_packet=packet_rel)
+    index = Path(git(repo, "rev-parse", "--absolute-git-dir")) / "index"
+    before = {p: p.read_bytes() for p in (packet, index, state_path, handoff, route_path)}
+    command = launch_wave.build_phase_b_dispatch_command(repo, config, bus_dir=bus)
+    args = dispatch_mod.build_surface_parser().parse_args(command[2:])
+    args._teammate_script_repo_root = repo  # ANTICHEAT_OK: exercise selected native script owner propagation
+    phase_b_calls, commit_calls = [], []
+
+    def process(child, *, cwd, timeout):
+        assert cwd == repo
+        assert Path(child[1]).parent == repo / "mu/tools/executors"
+        assert child[child.index("--bus-dir") + 1] == bus
+        if Path(child[1]).name == "commit_executor.py":
+            commit_calls.append(child)
+            return subprocess.CompletedProcess(child, 0, '{"status":"success"}', "")
+        assert Path(child[1]).name == "phase_b_executor.py"
+        phase_b_calls.append(child)
+        assert child[child.index("--task-id") + 1] == config.task_id
+        assert child[child.index("--plan") + 1] == packet_rel
+        assert json.loads(child[child.index("--routing-record") + 1])["wave_id"] == "transport"
+        assert "--json" in child and "--dispatcher-owned-recovery" in child
+        assert len(phase_b_calls) <= (2 if after_continuation else 1)
+        assert child == phase_b_calls[0]
+        assert all(p.read_bytes() == content for p, content in before.items())
+        text = json.dumps(continuation) if after_continuation and len(phase_b_calls) == 1 else output
+        return subprocess.CompletedProcess(child, 0, text, "")
+
+    with patch.dict(os.environ), \
+         patch.object(dispatch_mod, "_run_executor_in_group", side_effect=process), \
+         patch.object(dispatch_mod, "attempt_recovery") as recovery, \
+         patch.object(dispatch_mod, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+         patch.object(dispatch_mod, "_LaneMonitor"), \
+         patch.object(dispatch_mod, "_install_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_remove_wave_end_signal_cleanup"), \
+         patch.object(dispatch_mod, "_emit_executor_hard_fail_event"):
+        exit_code = dispatch_mod.run_recoverable_surface_command(args, repo_root=repo, config={})
+    terminal = output in ('{"status":"success"}', '{"status":"ready"}', '{"status":"commit_ready"}')
+    assert len(commit_calls) == int(terminal), {"output": output, "commit_commands": commit_calls}
+    assert exit_code == (0 if terminal else 1)
+    assert len(phase_b_calls) == (2 if after_continuation else 1)
+    assert all(p.read_bytes() == content for p, content in before.items())
+    recovery.assert_not_called()
 
 
 @pytest.mark.parametrize("route,targets", [
@@ -10108,10 +10356,15 @@ class TestCommitContinuationAndBotFreshness:
         monkeypatch.setattr(commit_mod, "_query_pr_review_state", fake_pr_review_state)
         monkeypatch.setattr(commit_mod, "_has_recorded_current_head_bot_request", lambda *args, **kwargs: False)
         monkeypatch.setattr(commit_mod, "_has_fresh_connector_review", lambda pr_data, head_sha: True)
+
+        def clear_findings(pr_data, head_sha, *, result, pr_number, classify_quota=False):
+            assert classify_quota is False
+            return {"outcome": "clear"}
+
         monkeypatch.setattr(
             commit_mod,
             "_extract_review_findings",
-            lambda pr_data, head_sha, *, result, pr_number: {"outcome": "clear"},
+            clear_findings,
         )
         monkeypatch.setattr(commit_mod, "_try_auto_resolve_pr_conflict", fake_auto_resolve)
         monkeypatch.setattr(commit_mod, "_wait_for_required_checks_to_register", lambda *args, **kwargs: None)
@@ -10862,7 +11115,7 @@ class TestModularSurfaceEntrypoints:
             "detail": "phase-b re-entry succeeded",
         }
         failed = subprocess.CompletedProcess(["phase-b"], 1, stdout="", stderr="")
-        succeeded = subprocess.CompletedProcess(["phase-b"], 0, stdout="", stderr="")
+        succeeded = subprocess.CompletedProcess(["phase-b"], 0, stdout='{"status":"commit_ready"}', stderr="")
         commit_ok = subprocess.CompletedProcess(
             ["commit"], 0, "[commit-executor] Status: success\n", ""
         )
@@ -16669,7 +16922,7 @@ class TestRecoveryGateWiring:
         """
         record = {"decision": "ROUTE_PHASE_B", "summary": "test chain timeout"}
         # Phase B succeeds
-        phase_b_ok = MagicMock(returncode=0, stdout="{}", stderr="")
+        phase_b_ok = MagicMock(returncode=0, stdout='{"status":"commit_ready"}', stderr="")
         # Create handoff file so the commit chain is reached
         handoff_dir = tmp_path / ".agent_bus" / "executors"
         handoff_dir.mkdir(parents=True)
@@ -18874,8 +19127,8 @@ class TestPrDispositionTerminalReceiptRouting:
 @pytest.mark.parametrize("entry", ["surface", "routing"])
 @pytest.mark.parametrize("checkpoint_step", ["bridge_round_2", "bridge_converged"])
 @pytest.mark.parametrize("bus_dir", [None, ".agent_bus-ordinary"])
-def test_ordinary_finalization_continues_with_exact_command_and_checkpoint(tmp_path, entry, checkpoint_step, bus_dir):
-    """Consumer contract test; the Phase B module covers the real producer."""
+def test_ordinary_finalization_continues_with_exact_command_and_checkpoint(tmp_path, phase_b_terminal_cli, entry, checkpoint_step, bus_dir):
+    """Continue actual CLI output without changing command/checkpoint authority."""
     import hashlib
 
     plan_path = "reports/control_plane/ordinary.md"
@@ -18904,7 +19157,8 @@ def test_ordinary_finalization_continues_with_exact_command_and_checkpoint(tmp_p
         assert state_path.read_bytes() == before
         calls.append(command)
         if len(calls) == 1:
-            return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+            emitted = phase_b_terminal_cli(tmp_path, payload, prefix='{"type":"thread.started"}\n[phase-b] Finalized\n')
+            return subprocess.CompletedProcess(command, emitted.returncode, emitted.stdout, emitted.stderr)
         assert command == calls[0]
         assert len(calls) == 2
         assert "--dispatcher-owned-recovery" in command
@@ -18938,7 +19192,7 @@ def test_ordinary_finalization_continues_with_exact_command_and_checkpoint(tmp_p
 
 @pytest.mark.parametrize("entry", ["surface", "routing"])
 @pytest.mark.parametrize("invalid", ["digest", "step", "wave", "outcome", "repeated"])
-def test_invalid_ordinary_continuation_preserves_checkpoint_without_recovery(tmp_path, entry, invalid):
+def test_invalid_ordinary_continuation_preserves_checkpoint_without_recovery(tmp_path, phase_b_terminal_cli, entry, invalid):
     import hashlib
 
     plan_path = "reports/control_plane/ordinary.md"
@@ -18971,7 +19225,8 @@ def test_invalid_ordinary_continuation_preserves_checkpoint_without_recovery(tmp
     def process(command, **_kwargs):
         assert Path(command[1]).name == "phase_b_executor.py"
         assert state_path.read_bytes() == before
-        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+        emitted = phase_b_terminal_cli(tmp_path, payload, prefix='{"type":"thread.started"}\n', stderr="continuation diagnostic\n")
+        return subprocess.CompletedProcess(command, emitted.returncode, emitted.stdout, emitted.stderr)
 
     with patch.dict(os.environ), \
          patch.object(dispatch_mod, "_run_executor_in_group", side_effect=process) as child, \
@@ -18986,6 +19241,9 @@ def test_invalid_ordinary_continuation_preserves_checkpoint_without_recovery(tmp
             result = dispatch_mod.dispatch(route, repo_root=tmp_path, skip_freshness=True)
             assert result["status"] == "error"
             assert result["step"] == "ordinary_bridge_fix_continuation"
+            assert result["stdout"] == '{"type":"thread.started"}\n' + json.dumps(payload, indent=2) + "\n"
+            assert result["stderr"] == "continuation diagnostic\n"
+            assert result["exit_code"] == 0
     assert child.call_count == (2 if invalid == "repeated" else 1)
     recovery.assert_not_called()
     assert state_path.read_bytes() == before
@@ -19011,7 +19269,7 @@ def test_ordinary_success_without_continuation_keeps_missing_handoff_failure(tmp
     (None, False),
 ])
 def test_ordinary_shared_error_uses_only_selected_checkpoint_owner(
-    tmp_path, step, checkpoint_step, protected,
+    tmp_path, phase_b_terminal_cli, step, checkpoint_step, protected,
 ):
     """Public dispatch retains shared errors only while ordinary work owns them."""
     default = tmp_path / ".agent_bus" / "executors" / "phase_b_state.json"
@@ -19032,7 +19290,8 @@ def test_ordinary_shared_error_uses_only_selected_checkpoint_owner(
 
     def child(command, *, cwd, timeout):
         assert command[command.index("--bus-dir") + 1] == ".agent_bus-selected"
-        return subprocess.CompletedProcess(command, 1, json.dumps(payload), "")
+        emitted = phase_b_terminal_cli(tmp_path, payload, prefix='{"type":"thread.started"}\n', stderr="owned failure\n")
+        return subprocess.CompletedProcess(command, emitted.returncode, emitted.stdout, emitted.stderr)
 
     with patch.object(dispatch_mod, "_run_executor_in_group", side_effect=child) as process, \
          patch.object(dispatch_mod, "attempt_recovery") as recovery:
@@ -19041,7 +19300,9 @@ def test_ordinary_shared_error_uses_only_selected_checkpoint_owner(
         )
     assert result["status"] == ("error" if protected else "failed")
     assert result["executor"] == "phase_b_executor"
-    assert json.loads(result["stdout"]) == payload
+    assert result["stdout"] == '{"type":"thread.started"}\n' + json.dumps(payload, indent=2) + "\n"
+    assert result["stderr"] == "owned failure\n"
+    assert result["exit_code"] == 1
     if protected:
         assert result["step"] == step
         assert result["errors"] == payload["errors"]

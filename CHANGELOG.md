@@ -4,6 +4,243 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-09
+
+### Finish targeted pytest budgets with adjacent receipt coverage (R2 Phase B; landing pending)
+
+- Allocate 600 seconds only to the exact full Phase B and lifecycle modules;
+  retain the fleet module's 900 seconds, ordinary/node/foreign selectors' 240
+  seconds, summed mixed gates, caller maxima and bounded fleet parallelism.
+- Reuse pending PR1330 commit `817e470362ef632b60ab13bb4321571676f564ee`'s
+  lifecycle policy and every meaningful budget/failure regression case. Local
+  reuse does not establish landed coverage or PR disposition; fresh full-PR CI
+  and later native verification remain required.
+- Preserve complete available timeout progress, including byte/text/absent
+  streams, and retain the actual pytest command plus selected deadline through
+  Step8b's failure result. Success, nonzero and collection behavior stay intact.
+  Existing tests cover the real runner and public pipeline failure boundary with
+  disposable Git/receipt fixtures and isolated external effects.
+- Carry both terminal-result R1 and R2 packets, implementation evidence and
+  indicators as preserved predecessors. R2 stopped after the 480-second Step8b
+  gate and three nonexistent-module recovery requests. Its later 2,154-pass,
+  473.648-second diagnostic leaves the original interruption unidentified.
+  Protected parser/Phase B/review/merge code remains unchanged.
+- Preserve targeted-gate-budget R1 as an unfinished predecessor: its gate began
+  at 09:01:14Z and was interrupted, with no completed gate result or final receipt.
+  R2 updates only the three admitted receipt policy methods to 600/840 seconds,
+  including the timeout fixture; every other receipt-test byte remains intact.
+- Fresh R2 validation: 2482 passed in 532.02s (0:08:52), exit 0; the entire receipt gate
+  class separately passes 22 tests in 4.51s, exit 0. Source/test hashes are stable
+  across both runs. Exact commands, output, timing and source identity are in
+  `reports/control_plane/workingrcx-targeted-gate-budget-r2-2026-10-09_2026-10-09_implementation_evidence.json`.
+  Native final gates, approvals, current-head CI/review, conditional individual
+  finding disposition, landing and separately verified PRIMARY sync remain
+  pipeline-owned. Producer retention and remaining PR/cleanup obligations stay open.
+
+### Complete PR1332 terminal-result repair with R2 indexed packet authority (stopped, preserved unmerged)
+
+- Retain the R1 dispatcher repair, actual producer-format and dispatcher-route
+  regressions, and all ten recovery-added real-builder cases. Add two cases
+  separating parser observations from authorization wording without changing
+  commit enforcement or the Phase B producer.
+- The complete R2 packet passes the actual positive/negative predicates and the
+  indexed reader plus real Phase B selector/builder in temporary Git fixtures.
+  The existing PR1332 branch is retained; negative controls keep their prior
+  handoff and Git identity intact. The fresh production probe corrects both
+  parent parser failures and preserves both positive controls.
+- The fresh declared two-module gate passes 2,154 tests in 430.44 seconds, exit 0,
+  with unchanged source/test hashes. R1's 2,142-test receipt predates the
+  recovery-added builder cases and is historical. R1 stopped before
+  handoff/commit on packet authority; its subsequent Phase A retry hit the native
+  skeleton guard. Preserve snapshot `f588d2de`, original buses, receipts and
+  budgets. Existing row40 owns scanner, early builder-admission and recovery
+  routing follow-ups.
+- R2 evidence belongs in
+  `reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09_implementation_evidence.json`.
+  Native staged governance, final review, hooks, CI, independent current-head
+  review, individual finding disposition, landing and PRIMARY sync remain
+  pending. Separate retention and cleanup order remains with rows38/40.
+
+### Repair Phase B terminal-result transport on PR1332 (R1 stopped, preserved unmerged)
+
+- Parse the final standalone result after verbose diagnostics or provider JSONL,
+  retaining compact and pretty JSON compatibility. Consume complete JSON values
+  without promoting nested/event objects; reject malformed, duplicate-key,
+  ambiguous and trailing output. Existing terminal-status, checkpoint and handoff
+  identity checks still govern continuation and commit entry.
+- Preserve complete child stdout/stderr and actual exit code on terminal,
+  continuation and handoff rejection. Keep the existing continuously drained
+  subprocess transport and Phase B producer unchanged. Cover actual CLI formatting,
+  public dispatcher routing, stale handoffs, recovery, protected checkpoints and
+  a disposable child that exceeds both pipe buffers in the two existing modules.
+- The production formatter/parser probe reproduces both reported failures before
+  repair and passes all four controls afterward. The final declared two-module
+  gate passes 2,142 tests in 422.96 seconds, exit 0, with unchanged execution
+  hashes. Two new fixture assertions were corrected after preserved failing
+  runs; production source remained unchanged. Commands, output, timing and hashes
+  are recorded in
+  `reports/control_plane/workingrcx-terminal-result-r1-2026-10-09_2026-10-09_implementation_evidence.json`.
+- Preserve all six reviewed-base/isolation/prompt file hashes, the existing PR
+  branch and parent `5780234`, all 268 task IDs and numbered queue owners. Native
+  final approvals, corrected-head CI, independent current-head review, individual
+  addressed-finding disposition, landing and PRIMARY sync remain outer-owned.
+  Producer retention, remaining PRs and cleanup obligations remain pending.
+
+## 2026-10-08
+
+### Restore reviewed-base binding on the existing PR1332 branch (Phase B; landing pending)
+
+- Restore only the three declared source/test files from verified pre-entry R1
+  snapshot `896a300d21f4f145dc9b3b8c681082c59d7c3330a58f60eb19a09b9beb599cec`,
+  retaining their exact required hashes. Version-2 protected intent preserves
+  complete review identity across native reload; OPEN observations require the
+  reviewed base, and completion requires ordered merge parents matching that
+  base and the exact head. Existing receipt, findings, held-output and
+  at-most-one-request/completion protections remain intact.
+- The fresh R2 declared two-module gate passes 952 tests in 427.65 seconds,
+  exit 0, with unchanged source hashes before/after. R1's eight drift failures,
+  859 passing controls, intermediate failures, 952-pass result and approvals
+  remain historical. Phase-scoped evidence is in
+  `reports/control_plane/workingrcx-merge-base-binding-r2-2026-10-08_2026-10-08_implementation_evidence.json`.
+- The actual Phase B selector returns the existing PR branch
+  `jabramsja/workingrcx-local-review-quota-r3-2026-10-05`; local HEAD and the
+  comparison commit remain `678ca40cfa00643a377a0902756540972738118a`.
+  The outer executor must verify the actual handoff target, ancestry, allowed
+  staged inventory and fresh receipt before any commit-entry branch mutation.
+  Row40 retains typed branch authority and raw terminal-stream obligations.
+- Preserve both unresolved Bot findings and all stopped R1 authority. Fresh
+  native final approval, required corrected-head CI and independent current-head
+  clearance precede conditional exact-thread disposition and aggregate clearance.
+  Native indicator/cap generation, hooks, landing and PRIMARY sync remain pending;
+  the separate ENOTEMPTY fixture issue and other PR/useful-work obligations stay open.
+
+### Restore the protected-merge continuation repair for fresh PR1332 review (Phase B; landing pending)
+
+- Recover exactly the three hash-verified R2 source/test files from snapshot
+  `337faf8fc20d6d0b4493d4c31e49c2f1302157b122b2b37b7c1eb10c5ea0cd4d`.
+  Preserve guarded public continuation seams, bounded exact-head polling,
+  durable identity-bound merge intent and native held/resume output. Existing
+  tests cover interruption, uncertain outcomes, retained findings, CLI/dispatcher
+  boundaries and exactly-once verified completion with fake remote/model I/O.
+- The fresh R3 declared two-module gate passes 855 tests in 216.10 seconds,
+  exit 0, on the exact recovered hashes. Historical parent/R1 defect proofs and
+  R2 gate/boundary observations remain labeled with their own source versions.
+  All 113 R2 and 87 R1 historical/restored files and all three committed protected
+  test hashes remain intact. Phase-scoped evidence is recorded in
+  `reports/control_plane/workingrcx-merge-queue-review-r3-2026-10-08_2026-10-08_implementation_evidence.json`.
+- R2's corrected source lacked fresh review because its pre-review inventory
+  retained an added-then-deleted optional report; unprepared resume refused it.
+  Existing row40 owns staged-inventory reconciliation, real deletion and drift
+  guards, interrupted-preparation coverage and fresh prepared review authority.
+- The exact unresolved Bot P1 remains blocking. Fresh native final approval,
+  corrected-head CI and independent authenticated review must precede any
+  conditional disposition; complete aggregate clearance must precede protected
+  merge. Native indicator/staged-governance generation, review, hooks, landing
+  and PRIMARY sync remain outer-pipeline owned. No GitHub action, physical APPLY,
+  retirement, useful-work completion or producer dedup integration is claimed.
+
+## 2026-10-07
+
+### Recognize GitHub activity controls and protect PR1332 review transitions (Phase B; landing pending)
+
+- Retain the complete recorded Running comment as an offline regression fixture,
+  with the observed Completed variant and complete no-major-issues response.
+  Recognize only fully consumed known payloads; mixed content, unknown rows,
+  malformed boilerplate and retained findings remain blocking.
+- Keep quota-history clearance on the protected exact-head merge path. Require
+  authenticated current-head GitHub clearance or independent quota approval,
+  fresh required CI, complete retained review evidence and unchanged PR identity.
+  Activity metadata and timeouts grant no review or merge authority.
+- The declared two-module gate passes 656 tests in 153.23 seconds. An isolated
+  focused replay fails all six activity cases on the parent and passes all six
+  on the corrected source, preserving the active candidate throughout.
+- Record phase-scoped source/test evidence in
+  `reports/control_plane/workingrcx-review-control-r1-2026-10-07_implementation_evidence.json`.
+  Preserve all three committed bootstrap-isolation/prompt-checkout test hashes.
+  Native final-candidate approval, hooks, CI, merge and PRIMARY sync remain pending.
+  Existing row40 owns adjacent automation obligations; useful-work dispositions,
+  physical cleanup and producer dedup integration remain open.
+
+### Preserve prompt-checkout regression coverage on PR1332 (Phase B; landing pending)
+
+- Verify all 74 restored prompt R1 files and carry only the preserved prompt
+  contract test. Exempt exactly one verified active-checkout injection from the
+  stale-path assertion; retain the actual-checkout check, all nine agents,
+  27 nested/ordinary/canonical cases and 12 stale-reference controls.
+- The declared five-module serial gate freshly passes 255 tests with one
+  unchanged historical-snapshot skip in 20.68 seconds. The committed bootstrap
+  isolation tests, production loader and templates remain unchanged.
+- Preserve R1's passing gate and native code-review GO as historical evidence.
+  Final approval stopped on outdated governance hashes; recovery then entered
+  Phase A and failed the native packet contract, requiring this fresh R2 wave.
+  Record source/test execution evidence in
+  `reports/control_plane/workingrcx-prompt-checkout-test-r2-2026-10-07_implementation_evidence.json`.
+  Fresh native receipts own the final staged package; approval, hooks, required
+  CI, protected merge and PRIMARY sync remain pending on existing PR1332.
+- Keep both observed automation defects with existing row40, alongside its
+  structured-result transport and raw-stream retention obligations. Preserve
+  PRIMARY WIP, prior receipts/budgets and all PR/useful-work dispositions.
+  This auxiliary test repair produces no physical APPLY plan or retirement.
+
+### Isolate bootstrap registry tests on existing PR1332 (Phase B; landing pending)
+
+- Restore registry contents in place after each bootstrap registry test, including
+  exceptional exits. Read empty-registry marker evidence in a fresh Python process
+  so inspection preserves the live runtime's imported `NO_MATCH` identity.
+- Carry only the two verified test modules from preserved CI isolation R1. Add
+  five focused cases for registry/list/sentinel preservation and missing-marker
+  rejection; retain the original marker/path assertions and both victim modules.
+  Fresh R2 runs reproduce all nine original failures before repair and pass the
+  eleven-case ordered reproduction afterward. Exact local commands, results and
+  hashes are recorded in
+  `reports/control_plane/workingrcx-local-review-ci-isolation-r2-2026-10-07_implementation_evidence.json`.
+- Keep PR1332 on its existing branch. R1's tested code carries no review or
+  continuation authority into this corrected R2 packet. Preserve exhausted R3/R1
+  evidence and budgets; native review, governance, CI, merge and PRIMARY sync
+  remain pending. The 2026-10-06 storage retirement of 86 fleet archive folders
+  and 17 sibling checkouts does not complete useful-work or PR disposition.
+
+## 2026-10-05
+
+### Complete local quota review and preserve continuation authority (Phase B; landing pending)
+
+- Reuse the three byte-verified R2 feature sources. Preserve authentic GitHub
+  code-review quota eligibility, independent exact-head/diff/model-bound local
+  approval, retained findings, native generated-governance authority and CI.
+- Reject known-incomplete review connections before route classification and
+  during pre-merge refresh, including the reproduced hidden finding among
+  31 issue comments and truncation arriving during CI.
+- Request JSON across native launcher/dispatcher continuation and require a
+  structured terminal Phase B result before an existing handoff can select
+  commit preparation. Valid continuation keeps its byte-bound checkpoint and
+  original routing, task, bus, script owner and bounded recovery authority.
+- The declared four-module gate passes 1,701 tests in 704.81 seconds (exit 0),
+  retaining all 479 prior local/Step14 cases and all original assertions.
+  Record failing reproductions, source-bound results and donor preservation
+  in `reports/control_plane/workingrcx-local-review-quota-r3-2026-10-05_implementation_evidence.json`.
+  Both donors remain preserved. Native review, generated cap/indicator evidence,
+  CI, landing and protected sync remain pending before PR1330/PR1329 continuation,
+  APPLY/VERIFY, all remaining folders/useful-work owners and PR1325 disposition,
+  then existing Mu work. Keep row38, all 268 task IDs and 44 queue rows; no
+  physical cleanup completion or runtime-investigation progress is claimed.
+
+## 2026-10-04
+
+### Preserve explicit default-bus monitor pin across owner startup (Phase B; landing pending)
+
+- Forward an explicit `.agent_bus` selection into the native background owner.
+  Unpinned default autofollow and existing named-bus/lane/session behavior remain.
+- Extend the existing fake-tmux fixture to require real owner pane construction,
+  verify its PID and wait for all four commands. Keep the original autofollow
+  assertions and ordinary-start cases. The declared module fails on the original
+  production script (1 failed, 23 passed, exit 1) and passes on the minimal fix
+  (45 passed, exit 0). Exact evidence is recorded in
+  `reports/control_plane/workingrcx-monitor-default-pin-r1-2026-10-04_implementation_evidence.json`.
+- Keep row38 and all 268 task IDs/44 queue rows. Native review, indicators, CI,
+  landing and protected PRIMARY sync remain pending before preserved PR1330,
+  preserved PR1329, five-target APPLY/VERIFY and PR1325 useful-work disposition.
+  No old PR closure, physical cleanup or runtime-investigation progress is claimed.
+
 ## 2026-10-03
 
 ### Complete postmerge cleanup fixtures on the preserved enabler (Phase B; landing pending)
