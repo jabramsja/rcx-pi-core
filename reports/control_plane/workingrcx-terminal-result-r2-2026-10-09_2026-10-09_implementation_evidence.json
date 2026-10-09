@@ -1,0 +1,446 @@
+{
+  "schema_version": 1,
+  "wave_id": "workingrcx-terminal-result-r2-2026-10-09",
+  "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+  "phase": "Phase B local implementation",
+  "status": "implemented_and_locally_validated; fresh native approval and landing pending",
+  "generated_utc": "2026-10-09T07:26:47.053362+00:00",
+  "changed_files": [
+    "mu/tools/executors/executor_dispatch.py",
+    "mu/tests/tools/test_executor_dispatch.py",
+    "mu/tests/tools/test_phase_b_executor.py",
+    "TASKS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09.md",
+    "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09_implementation_evidence.json",
+    "reports/control_plane/workingrcx-terminal-result-r1-2026-10-09_2026-10-09.md",
+    "reports/control_plane/workingrcx-terminal-result-r1-2026-10-09_2026-10-09_implementation_evidence.json"
+  ],
+  "inherited_native_indicators_preserved": [
+    "reports/l4_wave_indicators/workingrcx-terminal-result-r1-2026-10-09.json",
+    "reports/l4_wave_indicators/workingrcx-terminal-result-r2-2026-10-09.json"
+  ],
+  "checkout": {
+    "root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "head_before": "5780234568130f7116922ecc29d854a6db9e069e",
+    "head_after": "5780234568130f7116922ecc29d854a6db9e069e",
+    "candidate_index_unchanged_by_implementer": true,
+    "actual_handoff": "outer Phase B owner must verify exact fresh wave/branch/index/receipt after final staging; temporary fixtures do not authorize commit"
+  },
+  "implementation": {
+    "production_delta": "dispatcher only; inherited repair retained byte-for-byte",
+    "phase_b_producer_unchanged": true,
+    "terminal_contract": "Consume complete values; unique final top-level status object without event type. Nested/provider objects do not become terminal authority. Malformed/truncated/duplicate-key/ambiguous/contradictory/trailing output fails closed. Failures retain full stdout/stderr and actual exit identity.",
+    "test_delta": "Retain actual CLI-format, public dispatch-route, stale-handoff, checkpoint and pipe-drain regressions. Preserve all ten recovery-added real-builder cases; add neutral observation and current broad-scanner collision controls.",
+    "shared_parser_callers": "Four Phase B uses only: ordinary error, initial result, continuation result, missing-handoff recovery; Phase A extraction and commit classification are unchanged.",
+    "task_id_count": 268,
+    "task_ids_preserved": true,
+    "numbered_owner_count": 44,
+    "numbered_owners_preserved": true,
+    "unchanged_dispatcher_helpers": {
+      "_validate_phase_b_handoff_identity": "a99d5ebd2fb1b943bd882ddee6fdcb6aa84b53bb435efc3b2ef649713e040c7b",
+      "_classify_commit_executor_result": "a9871d13c891c398bc67902ae76ed9044212d91641fb08a727adbd3c3ea57d5b",
+      "_ordinary_bridge_fix_continuation_issue": "c8548ee30cd52eb0c01d013d0f1d23fcf2f9b7dc5441128d4bee43ab60e0d8a2",
+      "_run_executor_in_group": "4fa63e67901d10baa7d97e13e0216108a96616f0b9bfd7a90ff0a137961d2a8a",
+      "_extract_plan_path": "4bbe0b03f1f6123b8d2daf06a3da4427202eb8abafa48a5c5d40650bb4a8deef"
+    },
+    "primary_tasks_sha256": "fcd2d938bed71111775723fbaf58dedab0b848cc4c87b9d452b1111b3b57429f",
+    "primary_modified": false
+  },
+  "production_reproduction": {
+    "started_utc": "2026-10-09T07:18:46.791924+00:00",
+    "parent": "5780234568130f7116922ecc29d854a6db9e069e",
+    "parent_dispatcher_sha256": "71324e12eabf66ba31beb31ea7a15bce01041830df3e2ece6239edc1d81bf994",
+    "current_dispatcher_sha256": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+    "producer_sha256": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+    "cases": {
+      "json_only": {
+        "stdout": "{\n  \"status\": \"commit_ready\",\n  \"wave_id\": \"disposable-terminal-probe\",\n  \"handoff_path\": \"fixture/phase_b_handoff.json\"\n}\n",
+        "stderr": "producer diagnostic\n",
+        "producer_exit": 0,
+        "before": {
+          "status": "commit_ready",
+          "wave_id": "disposable-terminal-probe",
+          "handoff_path": "fixture/phase_b_handoff.json"
+        },
+        "after": {
+          "status": "commit_ready",
+          "wave_id": "disposable-terminal-probe",
+          "handoff_path": "fixture/phase_b_handoff.json"
+        }
+      },
+      "verbose_pretty": {
+        "stdout": "[phase-b] Complete\n{\n  \"status\": \"commit_ready\",\n  \"wave_id\": \"disposable-terminal-probe\",\n  \"handoff_path\": \"fixture/phase_b_handoff.json\"\n}\n",
+        "stderr": "producer diagnostic\n",
+        "producer_exit": 0,
+        "before": null,
+        "after": {
+          "status": "commit_ready",
+          "wave_id": "disposable-terminal-probe",
+          "handoff_path": "fixture/phase_b_handoff.json"
+        }
+      },
+      "provider_jsonl_pretty": {
+        "stdout": "{\"type\":\"thread.started\",\"thread_id\":\"fixture\"}\n{\n  \"status\": \"commit_ready\",\n  \"wave_id\": \"disposable-terminal-probe\",\n  \"handoff_path\": \"fixture/phase_b_handoff.json\"\n}\n",
+        "stderr": "producer diagnostic\n",
+        "producer_exit": 0,
+        "before": {
+          "type": "thread.started",
+          "thread_id": "fixture"
+        },
+        "after": {
+          "status": "commit_ready",
+          "wave_id": "disposable-terminal-probe",
+          "handoff_path": "fixture/phase_b_handoff.json"
+        }
+      },
+      "prefixed_compact": {
+        "stdout": "[phase-b] Complete\n{\"status\": \"commit_ready\", \"wave_id\": \"disposable-terminal-probe\", \"handoff_path\": \"fixture/phase_b_handoff.json\"}\n",
+        "stderr": "producer diagnostic\n",
+        "producer_exit": 0,
+        "before": {
+          "status": "commit_ready",
+          "wave_id": "disposable-terminal-probe",
+          "handoff_path": "fixture/phase_b_handoff.json"
+        },
+        "after": {
+          "status": "commit_ready",
+          "wave_id": "disposable-terminal-probe",
+          "handoff_path": "fixture/phase_b_handoff.json"
+        }
+      }
+    },
+    "duration_seconds": 0.003229750000173226,
+    "limits": "Actual Phase B main formatter with mocked actor/Git effects; exact parent function AST and current imported production helper. No executor process launched; actual dispatch route covered by the two-module gate."
+  },
+  "indexed_packet_authority": {
+    "before": {
+      "label": "authority-before",
+      "started_utc": "2026-10-09T07:17:59.439879+00:00",
+      "packet_sha256": "011a4026e239ba3f342bd01306239374b14dffd9212880f80d95ee3520e78fc7",
+      "tracker_note_sha256": "24d485f1c0ad817762e30c1ce14dcf4cd2d2e7b9f5246ff65a57bb21516195e9",
+      "predicates": {
+        "positive": true,
+        "negative": false,
+        "authorized": true
+      },
+      "cases": {
+        "indexed": {
+          "indexed_authority": true,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "wave_id": "workingrcx-terminal-result-r2-2026-10-09",
+            "tracked_packet": "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09.md"
+          },
+          "head_index_unchanged": true
+        },
+        "index_only": {
+          "indexed_authority": true,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "wave_id": "workingrcx-terminal-result-r2-2026-10-09",
+            "tracked_packet": "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09.md"
+          },
+          "head_index_unchanged": true
+        },
+        "unindexed": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-terminal-result-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "wrong_wave": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-terminal-result-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "explicit_denial": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-terminal-result-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "narrative_collision": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-terminal-result-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        }
+      },
+      "duration_seconds": 0.44431941700167954,
+      "limits": "Real indexed reader, selector and builder; disposable fixtures only. This is not a native candidate receipt or commit admission. Candidate index is untouched and final staging remains outer-owned."
+    },
+    "after": {
+      "label": "authority-after",
+      "started_utc": "2026-10-09T07:26:46.493260+00:00",
+      "packet_sha256": "12649d8c8ba70d2b6052cc80dda76375b7eb96d9a8701776af78b2911b0232ac",
+      "tracker_note_sha256": "20653ca0906856389b4c42a5c81058a2e5b3b1f70ab2b6937aadf6fe37486b6f",
+      "predicates": {
+        "positive": true,
+        "negative": false,
+        "authorized": true
+      },
+      "cases": {
+        "indexed": {
+          "indexed_authority": true,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "wave_id": "workingrcx-terminal-result-r2-2026-10-09",
+            "tracked_packet": "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09.md"
+          },
+          "head_index_unchanged": true
+        },
+        "index_only": {
+          "indexed_authority": true,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "wave_id": "workingrcx-terminal-result-r2-2026-10-09",
+            "tracked_packet": "reports/control_plane/workingrcx-terminal-result-r2-2026-10-09_2026-10-09.md"
+          },
+          "head_index_unchanged": true
+        },
+        "unindexed": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-terminal-result-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "wrong_wave": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-terminal-result-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "explicit_denial": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-terminal-result-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        },
+        "narrative_collision": {
+          "indexed_authority": false,
+          "selector": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "builder": {
+            "error": "Cannot prepare commit handoff via build_commit_handoff: target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-terminal-result-r2-2026-10-09': jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+            "historical_handoff_unchanged": true
+          },
+          "head_index_unchanged": true
+        }
+      },
+      "duration_seconds": 0.41451862500980496,
+      "limits": "Real indexed reader, selector and builder; disposable fixtures only. This is not a native candidate receipt or commit admission. Candidate index is untouched and final staging remains outer-owned."
+    },
+    "limits": "All index/builder writes occur in disposable Git fixtures. Actual candidate index is unchanged; native staging and fresh receipt remain outer-owned."
+  },
+  "validation": {
+    "gate": {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_phase_b_executor.py --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+      "started_utc": "2026-10-09T07:19:14.380893+00:00",
+      "sha256_before": {
+        "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+        "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+        "mu/tools/executors/commit_executor.py": "eb7246db0cca9fd7eead9215f38da05ba0ccc4e61cf7336c239de1d70c7b043a",
+        "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+        "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8"
+      },
+      "exit_code": 0,
+      "duration_seconds": 430.8448827919783,
+      "finished_utc": "2026-10-09T07:26:25.230437+00:00",
+      "sha256_after": {
+        "mu/tools/executors/executor_dispatch.py": "2bc2148e65cd770ced3fee2c41b6511209af2cce2ef4a1bc7a79b7621fe42979",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_executor_dispatch.py": "dcd0efae3be1e99d6e4e1dc984324fd60dcd41e6944f8168542fe44fecb49bb8",
+        "mu/tests/tools/test_phase_b_executor.py": "5addcf4f6913891532b84df4d6da5b5648c3fc9889d7a2e4fda50cb9942235aa",
+        "mu/tools/executors/commit_executor.py": "eb7246db0cca9fd7eead9215f38da05ba0ccc4e61cf7336c239de1d70c7b043a",
+        "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+        "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8"
+      },
+      "source_hashes_unchanged": true,
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation/gate-1.stdout",
+        "sha256": "6f41c1af0c2aba4d2e4ba0db2c2d81b078e1fb6d43472e5844a7eef2f2f57acd",
+        "bytes": 2433
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation/gate-1.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "summary": "........................................................................ [ 86%]\n........................................................................ [ 90%]\n........................................................................ [ 93%]\n........................................................................ [ 96%]\n..................................................................       [100%]\n2154 passed in 430.44s (0:07:10)"
+    },
+    "scoped_proof_commands": {
+      "authority_before": {
+        "command": "PYTHONDONTWRITEBYTECODE=1 python3 '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation/authority_probe.py' authority-before",
+        "exit_code": 0,
+        "artifact": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation/authority-before.json",
+          "sha256": "8497b4a8d573ebee470ce36abd98e5a16745683678f45ccd0c591c652fd16ca1"
+        }
+      },
+      "parser_before_after": {
+        "command": "PYTHONDONTWRITEBYTECODE=1 python3 '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation/parser_probe.py'",
+        "exit_code": 0,
+        "artifact": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation/production-parser-before-after.json",
+          "sha256": "8390c5d9c2c75d81febef0d627b2c639e2e5596f4da67416e2fbe9a553d9dbc1"
+        }
+      },
+      "authority_after": {
+        "command": "PYTHONDONTWRITEBYTECODE=1 python3 '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation/authority_probe.py' authority-after",
+        "exit_code": 0,
+        "artifact": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation/authority-after.json",
+          "sha256": "9aaefc2bc3774317f20af61d09d3c98a635dddd87118c8c1b95a97e2400ee264"
+        }
+      }
+    },
+    "evidence_directory": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation",
+    "recovery_volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+    "recovery_added_builder_cases_included": 10,
+    "additional_observation_cases": 2
+  },
+  "protected_sha256": {
+    "mu/tools/executors/commit_executor.py": "eb7246db0cca9fd7eead9215f38da05ba0ccc4e61cf7336c239de1d70c7b043a",
+    "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+    "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+    "mu/tests/tools/test_commit_executor_step14_conflict_precheck.py": "a2d156b375d20a79ba8d5b7ca655b5b89c2e6515ee546e7d3c1e01802f5d890a",
+    "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+    "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+    "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+    "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7"
+  },
+  "preservation": {
+    "initial_snapshot": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/terminal-result-r2-validation/initial-state.json",
+    "initial_snapshot_sha256": "b05d425f32d785ce3ebbdc8c59de8c00eac6958da960004e0658cd7ba0acfdde",
+    "r1_snapshot": "f588d2de5794b79446aa7f9785c5113aebb6d3532bb81c5dcc32866dcf1faf42",
+    "r1_snapshot_entries": 111,
+    "r1_original_bus_files_hash_checked": 34,
+    "r1_native_bus_unchanged": true,
+    "r1_original_evidence_values_preserved": true,
+    "r1_receipts_and_budgets": "historical; not R2 approval",
+    "r1_disposition": "stopped_preserved_unmerged; minimal disposition annotation only",
+    "historical_diagnostics_sha256": {
+      "terminal-result-r1-branch-authority-reproduction.json": "18204c5407fe201295217056a6f3779373de38264dc5bb8fafe851937fbd76f2",
+      "terminal-result-r1-terminal-output.json": "50b46957d0b82eade8bec546b414efe7caedee94b891a2a106803cd1d2747f81",
+      "terminal-result-r1-stopped-preserved/preservation.json": "47e0aab7179c4a536b9cd5214957d705d10f1d8a2d7c0e63f130a1f4496fb7e3"
+    }
+  },
+  "governance": {
+    "tracker_authority": "TASKS.md: 2026-10-09 tracker sync note for workingrcx-terminal-result-r2-2026-10-09",
+    "tracker_note_sha256": "20653ca0906856389b4c42a5c81058a2e5b3b1f70ab2b6937aadf6fe37486b6f",
+    "normative_packet_sha256": "011a4026e239ba3f342bd01306239374b14dffd9212880f80d95ee3520e78fc7",
+    "normative_packet_preserved_byte_for_byte": true,
+    "observations_lane": "Non-normative review clarification",
+    "task_id_count": 268,
+    "numbered_owner_count": 44,
+    "task_ids_and_owner_order_preserved": true,
+    "primary_tasks_sha256": "fcd2d938bed71111775723fbaf58dedab0b848cc4c87b9d452b1111b3b57429f",
+    "primary_modified": false,
+    "native_indicator_caps_and_final_staging": "pipeline-owned; initial native indicators preserved, caps untouched",
+    "final_governance_limit": "Phase-local evidence; no self-referential final package hash or native receipt claimed."
+  },
+  "retained_findings": {
+    "snapshot_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/review-baseline.json",
+    "snapshot_sha256": "194dfa697df9778a4ba808b320f212e12d072728fa543dd37de0c5aa837d524f",
+    "snapshot_observed_utc": "2026-10-09T05:53:24.362036+00:00",
+    "offline_verified": true,
+    "records": [
+      {
+        "thread": "PRRT_kwDOQvy8bs6qI-5e",
+        "comment": "PRRC_kwDOQvy8bs77IAg6",
+        "author": {
+          "login": "chatgpt-codex-connector",
+          "__typename": "Bot"
+        },
+        "body_sha256": "ff2c6b22b5f36ec3b2347da074a3be12739fe0643a6748f3cffb1fc883860fbc",
+        "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Wait for merge-queue completion before verifying the landing**\n\nOn a base branch that requires a merge queue, this protected quota path reports an error immediately after successfully enqueueing the PR: `gh pr merge --help` states, \u201cIf required checks have passed, the pull request will be added to the merge queue,\u201d but the YAML-equivalent command flow here queries once and requires the PR to already be landed. The queued PR therefore remains open at this instant, `_verified_remote_merge_sha` returns no merge SHA, and Step 15 fails even though GitHub may merge it later without post-merge completion or cleanup. Poll the exact-head PR until it lands or reaches a terminal failure, as the existing merge wrapper/CI flow does.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+        "is_resolved_in_saved_snapshot": false
+      },
+      {
+        "thread": "PRRT_kwDOQvy8bs6qMIWE",
+        "comment": "PRRC_kwDOQvy8bs77NDtC",
+        "author": {
+          "login": "chatgpt-codex-connector",
+          "__typename": "Bot"
+        },
+        "body_sha256": "c161930ad5ed0dede0fa2aabca3885d88af3712087ef6828783c99c77f39b078",
+        "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Revalidate the reviewed base while polling the merge queue**\n\nWhen another change lands on the base branch while this PR is queued, `baseRefOid` can advance, but this check accepts any well-formed SHA. The local-review receipt is bound to the earlier `identity[\"base_sha\"]`, while the protected intent records only the base branch name, so the queue can land against a base/diff that the independent reviewer never approved. Preserve the admitted base OID in the intent and, while the PR is open, require subsequent observations to match it (or obtain fresh review authority); after landing, verify the merge commit against that stored base.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+        "is_resolved_in_saved_snapshot": false
+      },
+      {
+        "thread": "PRRT_kwDOQvy8bs6qRZES",
+        "comment": "PRRC_kwDOQvy8bs77VkbW",
+        "author": {
+          "login": "chatgpt-codex-connector",
+          "__typename": "Bot"
+        },
+        "body_sha256": "9cfd90ae8c6ce97db941773bf3ee93ff18bde9f38b1d1314c8eb9bf430797661",
+        "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Parse verbose Phase B output before gating commit**\n\nWhen the dispatcher is run with `--verbose`, `build_surface_command` passes both `--verbose` and `--json` to Phase B. Phase B then writes diagnostic lines followed by indented, multi-line JSON, but `_extract_structured_stdout_payload` can parse only an entirely JSON stdout stream or a complete JSON object on one line. Consequently `payload` is `None` here and a genuinely successful Phase B run with a valid handoff is rejected instead of chaining to commit. Emit compact JSON when verbose diagnostics are present, send diagnostics to stderr, or make the extractor handle the trailing multi-line object.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+        "is_resolved_in_saved_snapshot": false
+      }
+    ],
+    "limits": "Saved complete bodies/authors verified only. No fresh GitHub action or finding disposition. Outer review must re-fetch complete current comments/authors/bodies and retain local sweeps, CI and independent current-head clearance."
+  },
+  "existing_row40_followups": [
+    "Broad whole-packet authorization text scanning collides with parser-result narration; preserve explicit denial and all indexed authority guards in a separately admitted enforcement repair.",
+    "Add early end-to-end existing-PR admission through the actual index reader, Phase B selector and commit builder; selector-only checks are insufficient.",
+    "Phase-aware recovery for advanced Phase B packets must preserve exact stage/index/receipt identity or require fresh launch authority; R1 Phase A retry hit the native skeleton guard.",
+    "Postmerge task-ID-only APPLY routing is unexercised by this implementer; any observed routing hold is separate from landing/PRIMARY synchronization and must not fabricate a plan."
+  ],
+  "invariants": {
+    "runtime_substrate_delta": "none",
+    "debt_host_semantics": "No runtime/host/seed or marker change. Numeric ratchets and native L4 gates are outer-owned and were not rerun here."
+  },
+  "boundary": {
+    "pipeline_launches_or_landing_actions_performed": false,
+    "validation_policy": "Declared two-module gate plus locked-plan production/authority proofs only. Read-only repository identity, hashes and required protocol rendering were also checked. No startup gates, attestation, commit/push/PR/merge/closeout command was launched.",
+    "remote_refresh": "No GitHub action in implementation. Complete current comments/authors/bodies must be re-fetched by outer review/disposition; saved bodies are offline-verified only.",
+    "quota_observation": "No one-shot quota observation interface available to this implementer; no percentage asserted.",
+    "proof_limits": [
+      "Mocked external actor/Git/commit effects around real CLI formatter and dispatcher route; disposable real Git fixtures around actual indexed reader and builder.",
+      "Real pipe-drain regression launches only a disposable Python writer.",
+      "Fresh final native approval, actual candidate handoff/receipt, hooks, corrected-head CI, independent authenticated current-head cloud review, full retained local-sweep aggregate and proof-backed individual finding disposition precede landing.",
+      "PRIMARY synchronization, remaining PR disposition, producer retention, historical useful-work/registration reconciliation, paused PR1325 status and Mu remain separately owned. No physical APPLY, source retirement, recovery migration, historical-code reconciliation or backup-setting action occurred."
+    ]
+  },
+  "issues_encountered": "No new Phase B implementation blocker. Existing scanner and advanced-packet retry limitations reproduced/preserved under row40 without modifying their enforcement source.",
+  "pending": "Fresh native staging/inventory/indicator-cap generation/final receipt and handoff, review/hooks/CI/independent current-head clearance, individual addressed-finding disposition and aggregate clearance, protected landing and separate PRIMARY sync."
+}

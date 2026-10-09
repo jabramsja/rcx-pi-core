@@ -4849,24 +4849,34 @@ def _run_pytest_on_files(
     # policy whenever the exact full module is selected, including mixed gates.
     # Keep every selector, the existing finite budget and the marker/import mode.
     full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in test_files
+    # The preserved lifecycle diagnostic took 260.699s on 2026-10-04;
+    # Phase B testcase time totaled 305.332s on 2026-10-09. Both exceed the
+    # ordinary 240s allocation. Only these exact full modules get finite slack;
+    # node selectors and other paths retain the default.
+    selector_budgets = {
+        "mu/tests/tools/test_workingrcx_fleet_apply.py": 900,
+        "mu/tests/tools/test_worktree_lifecycle.py": 600,
+        "mu/tests/tools/test_phase_b_executor.py": 600,
+    }
     effective_timeout = max(timeout, sum(
-        900 if selector == "mu/tests/tools/test_workingrcx_fleet_apply.py" else 240
+        selector_budgets.get(selector, 240)
         for selector in test_files
     ))
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-x",
+        "--tb=short",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        *(["-n", "4", "--dist", "worksteal"] if full_fleet else []),
+        *test_files,
+    ]
     try:
         result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-x",
-                "--tb=short",
-                "--import-mode=importlib",
-                "-m",
-                "not slow and not fuzzer",
-                *(["-n", "4", "--dist", "worksteal"] if full_fleet else []),
-                *test_files,
-            ],
+            command,
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -4899,13 +4909,25 @@ def _run_pytest_on_files(
             "stdout": result.stdout,
             "stderr": result.stderr,
             "passed": passed,
+            **({"command": command, "timeout_seconds": effective_timeout} if not passed else {}),
         }
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        # TimeoutExpired may carry bytes even with text=True. Retain all
+        # available pytest progress, including both ends of long streams.
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="backslashreplace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="backslashreplace")
         return {
             "exit_code": -1,
-            "stdout": "",
-            "stderr": f"pytest timed out after {effective_timeout}s",
+            "stdout": stdout,
+            "stderr": f"pytest timed out after {effective_timeout}s" + (f"\n{stderr}" if stderr else ""),
             "passed": False,
+            "command": command,
+            "timeout_seconds": effective_timeout,
+            "timed_out": True,
         }
 
 
@@ -21972,12 +21994,26 @@ def _run_commit_pipeline_impl(
             stderr = (pytest_result.get("stderr") or "").strip()
             stdout = (pytest_result.get("stdout") or "").strip()
             failure_detail = stderr[:1000] if stderr else stdout[:1000]
+            diagnostic = recovery_command_diagnostic(
+                pytest_result.get("command", []),
+                outcome="timeout" if pytest_result.get("timed_out") else "failed",
+                exit_code=pytest_result["exit_code"],
+                stdout=pytest_result.get("stdout"),
+                stderr=pytest_result.get("stderr"),
+            )
+            diagnostic["argv"] = pytest_result.get("command", [])
+            diagnostic["timeout_seconds"] = pytest_result.get("timeout_seconds")
             return {
                 "status": "error",
                 "step": "run_pre_commit_script",
                 "errors": [
                     f"targeted pytest gate failed (exit={pytest_result['exit_code']}): {failure_detail}"
                 ],
+                # The recovery command summary is bounded; raw pytest streams
+                # must survive this boundary without excerpting or stripping.
+                "stdout": pytest_result.get("stdout") or "",
+                "stderr": pytest_result.get("stderr") or "",
+                "failure_command": diagnostic,
                 "steps_completed": result["steps_completed"],
             }
 
