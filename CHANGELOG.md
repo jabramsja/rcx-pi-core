@@ -6,6 +6,126 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-09
 
+### Bind tracker recovery to the current supervisor failure (R6 Phase B; unmerged)
+
+- Reproduce the 820968-byte captured-stream defect through the public recovery
+  entrypoint in disposable Git repositories: the complete provider/tool stream
+  removed three historical tracker additions, while its terminal result alone
+  selected `needs_phase_b` and preserved TASKS/index bytes. Neither replay
+  matched a learned pattern.
+- Read one coherent supervisor failure with the existing strict terminal
+  parser; exclude incidental source, tool and document output from tracker
+  authority. Require an explicit current finding and matching recovery wave
+  before deletion, including learned routes and direct action entry. Preserve
+  complete raw diagnostics, existing Phase A policy, legitimate tracker repair,
+  anchored negation and mixed-positive controls.
+- Restore the exact three R2/R3/R4 notes from verified snapshot `d2333765…`.
+  Reconcile PRIMARY checkpoint `f8f8cac9…`, retaining 268 canonical task IDs and
+  44 ordered owners, and update the active checkpoint/to-do to R6. Retain R5's
+  original evidence payload as history and append the later packet-fixture and
+  timeout-diagnostic corrections, hashes, validation and scope exceptions.
+  Supervisor343c3277's `NEEDS_PHASE_B` remains a negative historical verdict.
+- Local focused validation passes 182 recovery/classifier/timeout controls and
+  12 historical packet/index/builder controls. The full declared gate passes
+  3,675 tests in 265.41 seconds, exit 0, with six stable source/test hashes.
+  Commands, hashes, retained failed-run diagnostics and complete outputs are
+  recorded in the R6 implementation evidence. All four carried source/test files, ten R2/R3/R4 governance files
+  and the R5 packet/indicator/advisory remain admission-byte-exact.
+- Actual indexed preparation, fresh independent approval, corrected-head CI and
+  complete-PR review, protected landing and separately verified PRIMARY sync
+  remain outer-owned. Row38 retains landing, useful folder work, separate
+  deduplicated retention and PR disposition; row40 retains remaining automatic
+  lifecycle/validation follow-ups. Paused PR1325 remains open.
+
+### Verify historical local-review verdicts before fresh admission (R4 Phase B; unmerged)
+
+- Reproduce all three receipt-relabeling cases with the actual f36 native-v1
+  producer in disposable Git/provider fixtures. R3 admitted a second review
+  for identical candidate/request identity with unchanged negative raw evidence;
+  R3's passing tests and Phase B GO did not clear that operator finding.
+- Require a claimed historical approval to retain the complete native artifact
+  inventory, matching original/observed hashes, reviewed diff identity and a
+  successful completed outcome. Parse the retained raw verdict with the native
+  validator and require exact agreement with the receipt before fresh admission.
+  Conflicting, missing, damaged or unapproved evidence holds without new review,
+  recovery, remediation, backoff or merge; original evidence is never rewritten.
+- Add actual historical-producer and public-continuation regressions, including
+  genuine old approval and corrected-candidate controls. Preserve every earlier
+  test definition, canonical owner/lock and terminal transport fence, and all
+  six R2/R3 governance files byte-for-byte. Reconcile PRIMARY TASKS checkpoint
+  `67bb2913ea1e30f3eef718781723022daa0476c35cf7645725d5b630ec46003c`
+  while retaining all 268 canonical task IDs and 44 ordered owners.
+- The full declared three-module four-worker worksteal gate passes 3,497 tests
+  in 249.08 seconds, exit 0, after the private-attribute test-integrity repair;
+  the earlier 254.17-second pass remains recorded. The concurrent-admission
+  regression now writes a native continuation and enters through the public
+  pipeline API, with checks that no extra review runs and original evidence
+  stays intact.
+  The private-attribute checker and 65 focused serial cases also pass. This
+  changes one existing test body; all other test definitions and all six R2/R3
+  governance files remain byte-exact. Source/test hashes stayed stable during
+  the gate. Exact probes,
+  validation runs (including the initial approval-fixture failure), hashes and
+  proof limits are in
+  `reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09_implementation_evidence.json`.
+  Native staging, final indexed authority, independent approvals, corrected-head
+  CI/full-PR review, protected landing and separately verified PRIMARY sync
+  remain pending. Rows38/40 retain PR/folder/useful-work and separate retention
+  obligations; preserved and tested work is not merged work.
+
+### Bind failed native local reviews across governed buses (R3 Phase B; unmerged)
+
+- Reproduce the active-bus admission gap with the native CLI and production
+  continuation: an identical rejected candidate/request obtained two reviews
+  after a bus change, with unchanged original evidence and zero recovery,
+  remediation or merge calls.
+- Publish candidate/request admission in a fixed repository-owned directory
+  before provider entry, serialize admission, and retain original bus-local
+  evidence. Read compatible historical receipts only from governed root buses.
+  Historical negatives and interrupted attempts stop reentry; historical
+  approvals require fresh review. Damaged evidence holds for governed repair.
+- Extend the three existing modules with fresh-bus native/public controls,
+  corrected input, empty commits, legacy receipts, identity separation,
+  tampering, interruption and concurrency. The final declared gate passes
+  3,433 tests in 879.18 seconds, exit 0, with stable source/test hashes. The
+  earlier two new-fixture failures and 3,423 passes remain recorded; the repaired
+  fixtures and damaged-directory hold also pass 19 focused storage controls.
+  Commands, output, timing and source hashes are in
+  `reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09_implementation_evidence.json`.
+- Reconcile PRIMARY checkpoint `bbdfc59052379befdcdd956f97b3bdef4029c2fd894247b509a13e6499bc87a6`
+  into candidate history, preserving 268 canonical task IDs and 44 ordered
+  owners. Retain the three R2 governance files byte-for-byte. R2's 3,327-test
+  pass and Phase B GO remain historical; differing supervisor envelopes yielded
+  no accepted receipt. Native staging, generated governance, final approvals,
+  corrected-head CI/review, commit/landing and actual PRIMARY sync remain pending.
+
+### Make native local-review failures terminal (Phase B; unmerged)
+
+- Retain adapter refusal metadata, process exit status, complete available raw
+  streams, reviewer/job/turn identity, full verdicts and evidence hashes in the
+  native local-review receipt and typed terminal result.
+- Persist the candidate/request attempt before reviewer entry. Negative or
+  interrupted attempts stop native reentry before review, remediation or merge;
+  a corrected head requires fresh governed review. Prior receipts remain intact.
+- Parse one bound terminal commit result through direct, surface and chained
+  dispatcher paths, and fence it before recovery learning, remediation or
+  backoff. Preserve unrelated transient recovery and existing approval/merge
+  protections. Exercise real producers and consumers with isolated external I/O.
+- The declared full three-module gate passes: 3,327 tests in 732.48 seconds,
+  exit 0, with unchanged source/test hashes throughout the run. The initial
+  reproduction recorded six missing-terminal-field failures and 3,251 passes;
+  the first correction run recorded eight failures and 3,317 passes before
+  repairing merge-protection ordering, the tier expectation and chain fixtures.
+  Exact commands, outputs, timings and hashes remain in the own implementation
+  evidence; no failed run was discarded and no existing test was disabled.
+- Synchronize the exact PRIMARY TASKS checkpoint into candidate documentation,
+  retaining all 268 task IDs, 44 ordered owners and native historical notes.
+  Targeted-gate-budget R2 committed `f36b982b8b45774cf68fc621acf0d9727d72e6d5`
+  and passed CI, then received REQUEST_CHANGES from complete-PR review. The
+  finding used source probes; it was not an observed live provider refusal.
+  Native final governance, fresh CI/review, landing and verified PRIMARY sync
+  remain pending, with PR/folder/retention follow-ups owned by rows38/40.
+
 ### Finish targeted pytest budgets with adjacent receipt coverage (R2 Phase B; landing pending)
 
 - Allocate 600 seconds only to the exact full Phase B and lifecycle modules;

@@ -26,6 +26,7 @@ from mu.tests.tools.test_phase_b_executor import (
     phase_b_terminal_cli,
 )
 from mu.tests.tools.test_worktree_lifecycle import native_base, native_lane
+from mu.tests.tools.test_commit_executor_local_review import carrier, local_terminal_attempt
 
 # Load executor_common first (dependency)
 common_mod = load_module(
@@ -80,6 +81,120 @@ def isolated_pager_transports(monkeypatch):
 
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
 _PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
+
+
+@pytest.mark.parametrize("bus_change", [False, True])
+@pytest.mark.parametrize("kind", ["refusal", "capacity", "findings", "nonzero", "timeout", "malformed", "incomplete"])
+@pytest.mark.parametrize("entry", ["direct", "surface", "chained", "surface-chained"])
+def test_native_local_review_terminal_stops_dispatch_loops(local_terminal_attempt, monkeypatch, kind, entry, bus_change):
+    lane, completed = local_terminal_attempt(kind, bus_change=bus_change)
+    bus = lane.bus.name
+    chained = "chained" in entry
+    route = {"decision": "ROUTE_PHASE_B" if chained else "COMMIT_GO", "wave_id": "quota", "task_id": "[TEST]"}
+    handoff = lane.bus / "executors/phase_b_handoff.json"
+    handoff.write_text(json.dumps(lane.handoff))
+    packet = lane.root / "reports/control_plane/quota.md"
+    packet.parent.mkdir(parents=True)
+    packet.write_text("# Quota\nWave ID: quota\nPhase-A-Lock: LOCKED\n")
+    if chained:
+        route["tracked_packet"] = str(packet.relative_to(lane.root))
+        route["next_candidates"] = [{"candidate": "quota", "bounded": True,
+                                      "tracked_packet": route["tracked_packet"]}]
+        routed_handoff = {**lane.handoff, "tracked_packet": route["tracked_packet"]}
+        handoff.write_text(json.dumps(routed_handoff))
+    path = lane.bus / "route.json"
+    path.write_text(json.dumps(route))
+    calls, forbidden = [], []
+
+    def no_recovery(*args, **kwargs):
+        forbidden.append((args, kwargs))
+        raise AssertionError(f"terminal local review entered recovery/retry/remediation: {args!r}")
+
+    def child(command, **kwargs):
+        calls.append(command)
+        if any(str(arg).endswith("phase_b_executor.py") for arg in command):
+            return subprocess.CompletedProcess(command, 0, json.dumps({
+                "status": "commit_ready", "wave_id": "quota", "handoff_path": str(handoff),
+            }, indent=2), "")
+        assert any(str(arg).endswith("commit_executor.py") for arg in command)
+        return subprocess.CompletedProcess(command, completed.returncode, completed.stdout, completed.stderr)
+
+    monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", child)
+    monkeypatch.setattr(dispatch_mod, "attempt_recovery", no_recovery)
+    monkeypatch.setattr(dispatch_mod, "_retry_commit_only", no_recovery)
+    monkeypatch.setattr(dispatch_mod, "_apply_recovery_overrides", no_recovery)
+    monkeypatch.setattr(dispatch_mod, "_emit_executor_hard_fail_event", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch_mod, "resolve_repo_root_for_dispatch", lambda **k: lane.root)
+    monkeypatch.setattr(dispatch_mod, "load_config", lambda *a, **k: {})
+    monkeypatch.setattr(dispatch_mod, "_LaneMonitor", lambda *a, **k: SimpleNamespace(
+        is_lane=False, spawn=lambda: None, cleanup=lambda: None))
+    monkeypatch.chdir(lane.root)
+    if entry.startswith("surface"):
+        argv = (["phase-b", "--plan", route["tracked_packet"], "--routing-record-json", json.dumps(route)]
+                if chained else ["commit", "--handoff", str(handoff)])
+    else:
+        argv = ["--routing-record", str(path), "--skip-freshness", "--retries", "3"]
+    argv += ["--json", "--bus-dir", bus]
+    assert dispatch_mod.main(argv) == 1
+    assert len(calls) == (2 if chained else 1)
+    assert forbidden == []
+    lane.assert_stopped({"status": "error"}, reviews=1)
+    assert dispatch_mod._classify_commit_executor_result(completed) == ("failed", "COMMIT_GO")  # ANTICHEAT_OK: real subprocess-result consumer
+    result = {"executor": "commit_executor", "status": "failed", "exit_code": completed.returncode,
+              "stdout": completed.stdout, "stderr": completed.stderr, "chained_from": "phase_b_executor"}
+    assert dispatch_mod._is_terminal_executor_outcome(result)  # ANTICHEAT_OK: exact terminal admission
+    assert not dispatch_mod._is_chained_commit_failure(result)  # ANTICHEAT_OK: exact retry admission
+
+
+@pytest.mark.parametrize("fault", [
+    "noisy", "zero-exit", "duplicate", "truncated", "trailing", "nested", "stderr", "prose",
+    "unbound", "wrong-head", "wrong-wave", "wrong-job", "wrong-hash", "wrong-executor", "duplicate-key", "conflicting-success",
+])
+def test_local_terminal_claims_require_one_bound_producer_result(local_terminal_attempt, fault):
+    _, completed = local_terminal_attempt("refusal")
+    payload = dispatch_mod._extract_structured_stdout_payload(completed.stdout)  # ANTICHEAT_OK: real CLI result extraction
+    stdout, stderr = completed.stdout, completed.stderr
+    if fault == "noisy":
+        stdout = '[diagnostic] stderr is separate\n{"type":"thread.started"}\n' + json.dumps(payload, indent=2)
+    elif fault == "duplicate":
+        stdout = json.dumps(payload) + "\n" + json.dumps(payload)
+    elif fault == "truncated":
+        stdout = json.dumps(payload)[:-1]
+    elif fault == "trailing":
+        stdout += "\ntrailing unbound result"
+    elif fault == "nested":
+        stdout = json.dumps({"type": "item.completed", "item": payload}, indent=2)
+    elif fault == "stderr":
+        stdout, stderr = "", json.dumps(payload)
+    elif fault == "prose":
+        stdout = "Example local_review_terminal provider refusal (not a result)"
+    elif fault == "duplicate-key":
+        stdout = json.dumps(payload).replace('"status": "error"', '"status": "error", "status": "error"', 1)
+    elif fault == "conflicting-success":
+        payload["status"] = "success"
+        stdout = json.dumps(payload)
+    elif fault in {"unbound", "wrong-head", "wrong-wave", "wrong-job", "wrong-hash", "wrong-executor"}:
+        if fault == "unbound":
+            payload["local_pr_review"].pop("receipt")
+        elif fault == "wrong-head":
+            payload["commit_sha"] = "0" * 40
+        elif fault == "wrong-wave":
+            payload["wave_id"] = "other"
+        elif fault == "wrong-job":
+            payload["local_pr_review"]["receipt"]["job_id"] = "foreign-job"
+        elif fault == "wrong-hash":
+            payload["local_pr_review"]["receipt_sha256"] = "0" * 64
+        else:
+            payload["executor"] = "phase_b_executor"
+        stdout = json.dumps(payload)
+    result = {"executor": "commit_executor", "status": "failed", "exit_code": 0 if fault in {"zero-exit", "conflicting-success"} else 1,
+              "stdout": stdout, "stderr": stderr, "chained_from": "phase_b_executor"}
+    terminal = fault in {"noisy", "zero-exit"}
+    assert dispatch_mod._is_terminal_executor_outcome(result) is terminal  # ANTICHEAT_OK: producer authority negatives
+    assert dispatch_mod._is_chained_commit_failure(result) is not terminal  # ANTICHEAT_OK: only bound terminals suppress retry
+    classified = dispatch_mod._classify_commit_executor_result(subprocess.CompletedProcess(  # ANTICHEAT_OK: process status never supplies approval
+        completed.args, result["exit_code"], stdout, stderr))
+    assert classified == ("failed", "COMMIT_GO")
 
 
 @pytest.mark.parametrize("case", [

@@ -12,6 +12,7 @@ from contextlib import contextmanager, redirect_stdout, redirect_stderr
 import pytest
 
 from mu.tests.tools.module_loader import load_module
+from mu.tests.tools.test_commit_executor_local_review import carrier, local_terminal_attempt
 
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
 _OBSERVABILITY_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "observability"
@@ -25,6 +26,49 @@ dispatch_mod = load_module(
 dash_mod = load_module("pipeline_dashboard_observability", _OBSERVABILITY_DIR / "pipeline_dashboard.py")
 web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR / "pipeline_dashboard_web.py")
 FailureClass = rg_mod.FailureClass
+
+
+@pytest.mark.parametrize("bus_change", [False, True])
+@pytest.mark.parametrize("kind", ["refusal", "capacity", "findings", "nonzero", "timeout", "malformed", "incomplete"])
+@pytest.mark.parametrize("transport", ["direct", "subprocess", "chained"])
+def test_native_local_review_precedes_all_recovery_effects(local_terminal_attempt, monkeypatch, kind, transport, bus_change):
+    lane, completed = local_terminal_attempt(kind, bus_change=bus_change)
+    result = dispatch_mod._extract_structured_stdout_payload(completed.stdout)  # ANTICHEAT_OK: actual native CLI producer
+    if transport != "direct":
+        result = {"executor": "commit_executor", "status": "failed", "exit_code": completed.returncode,
+                  "stdout": completed.stdout, "stderr": completed.stderr}
+        if transport == "chained":
+            result["chained_from"] = "phase_a_executor → phase_b_executor"
+    forbidden = []
+
+    def no_effect(*args, **kwargs):
+        forbidden.append((args, kwargs))
+        raise AssertionError("native local terminal entered learning, remediation or backoff")
+
+    for name in ("check_learned_patterns", "_load_session_fixed_entries", "run_recovery_loop",
+                 "_rate_limit_sleep", "observe_outcome", "_begin_recovery_status"):
+        monkeypatch.setattr(rg_mod, name, no_effect)
+    before = {p: p.read_bytes() for p in lane.bus.rglob("*") if p.is_file()}
+    assert rg_mod.classify_failure(result) == FailureClass.LOCAL_REVIEW_TERMINAL
+    for _ in range(2):
+        outcome = rg_mod.attempt_recovery(lane.root, result, "quota", bus_dir=lane.bus.name)
+        assert outcome["recovered"] is False and outcome["tier"] == 4
+        assert outcome["failure_class"] == "local_review_terminal"
+    assert {p: p.read_bytes() for p in lane.bus.rglob("*") if p.is_file()} == before
+    assert forbidden == []
+    lane.assert_stopped({"status": "error"}, reviews=1)
+
+
+def test_local_review_prose_does_not_override_unrelated_transient_recovery(tmp_path, monkeypatch):
+    result = {"executor": "commit_executor", "status": "failed", "exit_code": 1,
+              "step": "wait_ci", "stdout": "You've hit your usage limit. Try again later.\n"
+              "Diagnostic example: local_review_terminal provider_refusal, REPAIR_REQUIRED"}
+    assert rg_mod.classify_failure(result) == FailureClass.TRANSIENT_RATE_LIMIT
+    slept = []
+    monkeypatch.setattr(rg_mod, "_rate_limit_sleep", slept.append)
+    outcome = rg_mod.fix_transient_rate_limit(tmp_path, result=result)
+    assert outcome["fixed"] is True
+    assert len(slept) == 1 and 0 < slept[0] <= rg_mod.RATE_LIMIT_BACKOFF_MAX_S
 
 
 @pytest.fixture
@@ -2512,6 +2556,7 @@ class TestTierMapping:
         assert tier4 == {
             FailureClass.NEEDS_PHASE_A,
             FailureClass.CODEX_PROVIDER_SAFETY_REFUSAL,
+            FailureClass.LOCAL_REVIEW_TERMINAL,
             FailureClass.TERMINAL_POLICY,
             FailureClass.UNCLASSIFIED,
         }
@@ -5573,6 +5618,195 @@ class TestOutOfWaveTasksTrackerNoteRecovery:
 
         assert fc == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
         assert rg_mod.tier_for(fc) == 2
+
+    def _captured_supervisor_failure(self):
+        """Small, portable analogue of the R5 complete-stream capture.
+
+        Tool output prints historical TASKS prose and source examples. The one
+        terminal commit result requests evidence reconciliation, not deletion.
+        No mounted-drive fixture or duplicated production transcript is needed.
+        """
+        terminal = {
+            "status": "error", "step": "build_and_run_supervisor",
+            "pre_commit_decision": "NEEDS_PHASE_B", "failure_class": "needs_phase_b",
+            "wave_id": self.active_wave,
+            "errors": ["Supervisor returned NEEDS_PHASE_B: All staged paths match the package. "
+                       "One stale implementation-evidence hash prevents approval."],
+            "pre_commit_summary": "Reconcile later source hashes and the scope exception.",
+        }
+        event = {"type": "item.completed", "item": {
+            "type": "command_execution", "command": "cat TASKS.md recovery_gate.py",
+            "aggregated_output": "Historical TASKS.md tracker note: cover staged additions, "
+                                 "unstaged/out-of-scope drift and interrupted preparation.\n"
+                                 + json.dumps(json.loads(self._result()["stdout"])),
+            "status": "completed", "exit_code": 0,
+        }}
+        result = {"status": "failed", "executor": "commit_executor", "step": "commit",
+                  "exit_code": 1, "stdout": json.dumps(event) + "\n" + json.dumps(terminal),
+                  "stderr": ""}
+        return result, terminal
+
+    def _stage_tracker_history(self, root):
+        base = self._init_repo(root)
+        history = "".join(
+            f"- Tracker sync note (2026-10-09, historical-r{n}-2026-10-09): retained evidence.\n"
+            for n in (2, 3, 4)
+        )
+        current = f"- Tracker sync note (2026-10-09, {self.active_wave}): current evidence.\n"
+        (root / "TASKS.md").write_text(base + history + current + "- Keep this ordinary addition.\n")
+        (root / "other.txt").write_text("unrelated staged content\n")
+        subprocess.run(["git", "add", "TASKS.md", "other.txt"], cwd=root,
+                       check=True, capture_output=True)
+        return history, current
+
+    @pytest.mark.parametrize("transport", ["complete", "terminal", "plain-source", "stderr-source"])
+    @pytest.mark.parametrize("learned_tracker_route", [False, True])
+    def test_current_failure_ignores_transcript_tracker_markers(
+        self, tmp_path, monkeypatch, transport, learned_tracker_route,
+    ):
+        self._stage_tracker_history(tmp_path)
+        result, terminal = self._captured_supervisor_failure()
+        if transport == "terminal":
+            result = terminal
+        elif transport == "plain-source":
+            result["stdout"] = "Historical TASKS.md: staged out-of-wave tracker note.\n" + json.dumps(terminal)
+        elif transport == "stderr-source":
+            result["stdout"] = json.dumps(terminal)
+            result["stderr"] = "Historical TASKS.md: staged out-of-wave tracker note."
+        original = copy.deepcopy(result)
+        before = [(tmp_path / p).read_bytes() for p in ("TASKS.md", ".git/index", "other.txt")]
+        assert rg_mod.classify_failure(result) == FailureClass.NEEDS_PHASE_B
+        if learned_tracker_route:
+            monkeypatch.setattr(rg_mod, "check_learned_patterns", lambda *a: rg_mod.LearnedMatch(
+                failure_class=FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE,
+                tier=2, pattern_id="historical-tracker", action="remove_out_of_wave_tasks_tracker_note",
+            ))
+        with patch.object(rg_mod, "fix_commit_supervisor_out_of_wave_tasks_tracker_note") as repair, \
+                patch.object(rg_mod, "run_recovery_loop", return_value={
+                    "recovered": False, "exhausted": False, "iterations": 0, "log": [],
+                }) as reentry:
+            outcome = rg_mod.attempt_recovery(tmp_path, result, self.active_wave)
+        repair.assert_not_called()
+        reentry.assert_called_once()
+        assert reentry.call_args.args[1].get("stdout") == result.get("stdout")
+        assert outcome["failure_class"] == "needs_phase_b"
+        assert outcome["action"] != "remove_out_of_wave_tasks_tracker_note"
+        assert [(tmp_path / p).read_bytes() for p in ("TASKS.md", ".git/index", "other.txt")] == before
+        assert result == original
+
+    @pytest.mark.parametrize("damage", [
+        "two-results", "duplicate-key", "trailing-output", "truncated-result",
+        "outer-decision", "outer-wave", "outer-step", "outer-executor",
+        "success", "wrong-executor", "nested-errors", "oversize", "stderr-result",
+        "missing-child-step", "outer-only-decision", "missing-step", "malformed-step",
+        "malformed-status", "conflicting-failure-class",
+    ])
+    def test_ambiguous_supervisor_authority_holds_before_public_recovery(
+        self, tmp_path, damage,
+    ):
+        self._stage_tracker_history(tmp_path)
+        result, terminal = self._captured_supervisor_failure()
+        terminal["errors"] = json.loads(self._result()["stdout"])["errors"]
+        if damage == "two-results":
+            result["stdout"] = json.dumps(terminal) + "\n" + json.dumps(terminal)
+        elif damage == "duplicate-key":
+            result["stdout"] = json.dumps(terminal)[:-1] + ', "status": "error"}'
+        elif damage == "trailing-output":
+            result["stdout"] = json.dumps(terminal) + "\nextra diagnostic after terminal"
+        elif damage == "truncated-result":
+            result["stdout"] = json.dumps(terminal)[:-2]
+        else:
+            if damage == "outer-decision":
+                result["pre_commit_decision"] = "NEEDS_PHASE_A"
+            elif damage == "outer-wave":
+                result["wave_id"] = "foreign-wave"
+            elif damage == "outer-step":
+                result["step"] = "run_pre_push_script"
+            elif damage == "outer-executor":
+                result.update(step="build_and_run_supervisor", executor="phase_b_executor")
+            elif damage == "success":
+                terminal["status"] = "success"
+            elif damage == "wrong-executor":
+                terminal["executor"] = "phase_b_executor"
+            elif damage == "nested-errors":
+                terminal["errors"] = [{"tool_output": terminal["errors"][0]}]
+            elif damage == "oversize":
+                terminal["errors"][0] += "x" * 65537
+            elif damage == "stderr-result":
+                result["stderr"] = json.dumps(terminal)
+            elif damage == "missing-child-step":
+                result["step"] = terminal.pop("step")
+            elif damage == "outer-only-decision":
+                result["pre_commit_decision"] = terminal.pop("pre_commit_decision")
+            elif damage == "missing-step":
+                terminal.pop("step")
+            elif damage == "malformed-step":
+                terminal["step"] = ["build_and_run_supervisor"]
+            elif damage == "malformed-status":
+                terminal["status"] = ["error"]
+            elif damage == "conflicting-failure-class":
+                terminal["failure_class"] = "test_failure"
+            result["stdout"] = json.dumps(terminal)
+        before = [(tmp_path / p).read_bytes() for p in ("TASKS.md", ".git/index")]
+        expected = FailureClass.NEEDS_PHASE_A if damage == "outer-decision" else FailureClass.UNCLASSIFIED
+        assert rg_mod.classify_failure(result) == expected
+        with patch.object(rg_mod, "run_recovery_loop") as reentry, \
+                patch.object(rg_mod, "fix_commit_supervisor_out_of_wave_tasks_tracker_note") as repair:
+            outcome = rg_mod.attempt_recovery(tmp_path, result, self.active_wave)
+        assert outcome["tier"] == 4 and outcome["recovered"] is False
+        repair.assert_not_called()
+        reentry.assert_not_called()
+        assert [(tmp_path / p).read_bytes() for p in ("TASKS.md", ".git/index")] == before
+
+    @pytest.mark.parametrize("damage", ["tool-only", "split-findings", "missing-decision", "foreign-wave"])
+    def test_tracker_action_requires_current_finding_and_wave(self, tmp_path, damage):
+        self._stage_tracker_history(tmp_path)
+        result, terminal = self._captured_supervisor_failure()
+        if damage == "tool-only":
+            result["stdout"] = result["stdout"].split("\n", 1)[0]
+        else:
+            if damage == "split-findings":
+                terminal["errors"] = ["TASKS.md staged tracker note is valid.", "Another file has scope drift."]
+            elif damage == "missing-decision":
+                terminal.pop("pre_commit_decision")
+                terminal.pop("failure_class")
+                terminal["errors"] = ["TASKS.md contains a staged out-of-wave tracker note."]
+            elif damage == "foreign-wave":
+                terminal["wave_id"] = "foreign-wave"
+                terminal["errors"] = json.loads(self._result()["stdout"])["errors"]
+            result["stdout"] = json.dumps(terminal)
+        before = [(tmp_path / p).read_bytes() for p in ("TASKS.md", ".git/index")]
+        outcome = rg_mod.fix_commit_supervisor_out_of_wave_tasks_tracker_note(
+            tmp_path, result=result, wave_id=self.active_wave,
+        )
+        assert outcome["fixed"] is False and outcome["action"] == "tracker_repair_not_authorized"
+        with patch.object(rg_mod, "run_recovery_loop", return_value={
+            "recovered": False, "exhausted": False, "iterations": 0, "log": [],
+        }):
+            public = rg_mod.attempt_recovery(tmp_path, result, self.active_wave)
+        assert public["action"] != "remove_out_of_wave_tasks_tracker_note"
+        assert public["recovered"] is False
+        assert [(tmp_path / p).read_bytes() for p in ("TASKS.md", ".git/index")] == before
+
+    @pytest.mark.parametrize("step", ["build_and_run_supervisor", "commit_ready_status_supervisor"])
+    @pytest.mark.parametrize("transport", ["direct", "stream"])
+    def test_explicit_current_tracker_failure_still_repairs_real_index(self, tmp_path, step, transport):
+        history, current = self._stage_tracker_history(tmp_path)
+        result, terminal = self._captured_supervisor_failure()
+        terminal["step"] = step
+        terminal["errors"] = ["The staged TASKS.md diff contains an added out-of-wave tracker note."]
+        if transport == "direct":
+            result = terminal
+        else:
+            result["stdout"] = result["stdout"].split("\n", 1)[0] + "\n" + json.dumps(terminal)
+        assert rg_mod.classify_failure(result) == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+        outcome = rg_mod.attempt_recovery(tmp_path, result, self.active_wave)
+        assert outcome["recovered"] is True and outcome["action"] == "remove_out_of_wave_tasks_tracker_note"
+        tasks = (tmp_path / "TASKS.md").read_text()
+        assert all(line not in tasks for line in history.splitlines())
+        assert current in tasks and "Keep this ordinary addition" in tasks
+        assert subprocess.check_output(["git", "show", ":TASKS.md"], cwd=tmp_path).decode() == tasks
+        assert subprocess.check_output(["git", "show", ":other.txt"], cwd=tmp_path) == b"unrelated staged content\n"
 
     def test_classifies_commit_supervisor_out_of_scope_tasks_tracker_note_as_tier2(self):
         payload = {
@@ -8827,7 +9061,18 @@ class TestHybridDelegateRuntime:
         assert result["ok"] is False
         assert "phase_b_implementer.py" in result["detail"]
 
-    def test_delegate_implementer_timeout_result_is_structured_not_raised(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("stdout, stderr, expected_stdout, expected_stderr", [
+        (None, None, "", ""),
+        ("collected 12 items\npartial progress", "validator diagnostic\n",
+         "collected 12 items\npartial progress", "validator diagnostic\n"),
+        (b"collected 12 items\npartial progress", b"validator diagnostic\n",
+         "collected 12 items\npartial progress", "validator diagnostic\n"),
+        (b"partial UTF-8: \xe2\x82", b"diagnostic: \xff",
+         "partial UTF-8: \ufffd", "diagnostic: \ufffd"),
+    ], ids=["empty", "text", "bytes", "incomplete-encoding"])
+    def test_delegate_implementer_timeout_result_is_structured_not_raised(
+        self, tmp_path, monkeypatch, stdout, stderr, expected_stdout, expected_stderr,
+    ):
         init_hybrid_delegate_tree(tmp_path)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         (config_dir / "executor_config.json").write_text(
@@ -8840,7 +9085,10 @@ class TestHybridDelegateRuntime:
             rg_mod,
             "_run_hybrid_validation_spec",
             lambda *args, **kwargs: (_ for _ in ()).throw(
-                subprocess.TimeoutExpired(cmd=[sys.executable, "-m", "pytest"], timeout=90)
+                subprocess.TimeoutExpired(
+                    cmd=[sys.executable, "-m", "pytest"], timeout=90,
+                    output=stdout, stderr=stderr,
+                )
             ),
         )
 
@@ -8860,9 +9108,21 @@ class TestHybridDelegateRuntime:
         assert validator_result["passed"] is False
         assert validator_result["timed_out"] is True
         assert validator_result["exit_code"] == 124
-        assert validator_result["stderr"] == "hybrid validator timed out after 90s"
+        assert validator_result["stdout"] == expected_stdout
+        timeout_message = "hybrid validator timed out after 90s"
+        assert validator_result["stderr"] == (
+            timeout_message + "\n" + expected_stderr if expected_stderr else timeout_message
+        )
+        assert result["result_update"] == {
+            "stdout": validator_result["stdout"],
+            "stderr": validator_result["stderr"],
+        }
+        # Byte streams must not break recovery's JSON evidence transport.
+        assert json.loads(json.dumps(validator_result)) == validator_result
+        assert result["final_audit"]["observed_drift"] == ["mu/tools/executors/recovery_gate.py"]
 
-    def test_validation_failure_is_fed_into_next_iteration(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("timed_out", [False, True], ids=["failure", "timeout"])
+    def test_validation_failure_is_fed_into_next_iteration(self, tmp_path, monkeypatch, timed_out):
         init_hybrid_delegate_tree(tmp_path)
         config_dir = tmp_path / "mu" / "tools" / "executors"
         (config_dir / "executor_config.json").write_text(
@@ -8888,7 +9148,17 @@ class TestHybridDelegateRuntime:
             "exit_code": 1,
             "passed": False,
         }
-        monkeypatch.setattr(rg_mod, "_run_hybrid_validation_spec", lambda *args, **kwargs: validator_fail)
+
+        def run_validator(*args, **kwargs):
+            if timed_out:
+                raise subprocess.TimeoutExpired(
+                    validator_fail["command"], kwargs["timeout"],
+                    output=validator_fail["stdout"].encode(),
+                    stderr=validator_fail["stderr"].encode(),
+                )
+            return validator_fail
+
+        monkeypatch.setattr(rg_mod, "_run_hybrid_validation_spec", run_validator)
 
         with patch.object(
             rg_mod.subprocess,
@@ -8906,7 +9176,10 @@ class TestHybridDelegateRuntime:
 
         assert out["recovered"] is False
         assert out["iterations"] == 2
+        assert "collected 1 item" in responses[1].received_input
         assert "FAILED validator regression" in responses[1].received_input
+        if timed_out:
+            assert "hybrid validator timed out after 300s" in responses[1].received_input
 
 
 class TestHybridValidatorContract:

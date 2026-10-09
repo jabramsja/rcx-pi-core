@@ -7,10 +7,12 @@ Git repositories without launching the commit pipeline.
 """
 from __future__ import annotations
 
+import ast
 import copy
 from contextvars import ContextVar
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 from types import SimpleNamespace
@@ -260,6 +262,7 @@ class Carrier:
         monkeypatch.setattr(commit, "_run", self.run_command)
         monkeypatch.setattr(commit, "_ACTIVE_BUS_DIR", ContextVar("test_bus", default=Path(BUS)))
         adapters = commit._bridge_adapters  # ANTICHEAT_OK: independent model execution boundary
+        self.native_run_adapter = adapters.run_adapter
         monkeypatch.setattr(adapters, "run_adapter", self.run_reviewer)
         monkeypatch.setattr(adapters, "_codex_home_is_writable", lambda _: True)
         # Lifecycle and landed closeout are outer-pipeline owners; capture entry.
@@ -380,6 +383,587 @@ class Carrier:
 @pytest.fixture
 def carrier(tmp_path, monkeypatch):
     return Carrier(tmp_path, monkeypatch)
+
+
+@pytest.mark.parametrize("wave,digest", [
+    ("workingrcx-local-review-terminal-r2-2026-10-09", "2cd5ee9e69dbf1a9f6ca691eb9813cfd3562f75722d49fd0e64f4a8a83bc5c62"),
+    ("workingrcx-local-review-terminal-r3-2026-10-09", "d95a430c11f033bb3f3d638e35028f163c74d19bcc172428f57d4a918de05358"),
+])
+@pytest.mark.parametrize("index_state", ["indexed", "index-only", "worktree-only"])
+def test_locked_local_terminal_packet_fences_and_real_branch_builder(tmp_path, index_state, wave, digest):
+    """Read the entire canonical packet; mutate only temporary Git authority."""
+    branch = "jabramsja/workingrcx-local-review-quota-r3-2026-10-05"
+    rel = f"reports/control_plane/{wave}_2026-10-09.md"
+    packet = (REPO_ROOT / rel).read_text()
+    note = next(line for line in (REPO_ROOT / "TASKS.md").read_text().splitlines()
+                if line.startswith(f"- Tracker sync note (2026-10-09, {wave}):"))
+    pb = load_module("local_terminal_packet_phase_b", REPO_ROOT / "mu/tools/executors/phase_b_executor.py")
+    launch = load_module("local_terminal_packet_launch", REPO_ROOT / "mu/tools/executors/launch_wave.py")
+    pa = launch._pa  # ANTICHEAT_OK: native packet section extractor, no launcher execution
+    sections = pa._extract_native_stub_exact_sections(packet)  # ANTICHEAT_OK: preserve byte-exact native body
+    body = lambda title: sections[title][0]
+    bullets = lambda title: [line[2:] for line in body(title).splitlines() if line.startswith("- ")]
+    metadata = lambda name: re.search(rf"{name}: ([^.]+)\.", note)[1]
+    scope_items = bullets("scope")
+    scope_authority = pa.native_stub_scope_authority_item(date="2026-10-09", wave_id=wave)
+    assert scope_items.count(scope_authority) == 1
+    # Commit may append an authorized deferred-report block after the tracker
+    # authority item. Only the preceding items belong to the locked digest;
+    # check_packet_fences still validates the entire unmodified packet below.
+    scope_items = scope_items[:scope_items.index(scope_authority)]
+    config = launch.WaveConfig(
+        wave_id=wave, title=packet.splitlines()[0][2:], task_id="[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+        purpose=next(line[9:] for line in packet.splitlines() if line.startswith("Purpose: ")),
+        date="2026-10-09", wave_class=metadata("Class"), target_gate_id=metadata("target_gate_id"),
+        primary_blocker_class=metadata("primary_blocker_class"), primary_invariant_id=metadata("primary_invariant_id"),
+        indicator_artifact_ref=f"reports/l4_wave_indicators/{wave}.json",
+        indicator_collection_command=f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave} --output reports/l4_wave_indicators/{wave}.json",
+        scope_summary=body("scope").split("\n\n")[0], scope_items=scope_items,
+        work_items=[re.sub(r"^\d+\. ", "", line) for line in body("work items").splitlines()],
+        constraints=bullets("constraints"), stop_conditions=bullets("stop conditions"),
+        acceptance_criteria=bullets("acceptance criteria"),
+        evidence_command=body("validation gates").split("`", 2)[1],
+    )
+    assert launch.build_native_stub_packet_contract(config)["digest"] == digest
+    assert launch.check_packet_fences(packet, config, allow_post_lock_machine_sections=True) == []
+    assert "parentf36b982b8b45774cf68fc621acf0d9727d72e6d5" in packet
+    assert f"FOUNDER_OVERRIDE:{wave}" in packet and branch in packet
+    git(tmp_path, "init", "-b", "dev")
+    git(tmp_path, "config", "user.name", "Fixture")
+    git(tmp_path, "config", "user.email", "fixture@example.invalid")
+    git(tmp_path, "config", "commit.gpgsign", "false")
+    git(tmp_path, "config", "core.hooksPath", str(tmp_path / ".git/fixture-hooks"))
+    (tmp_path / "TASKS.md").write_text(note + "\n")
+    git(tmp_path, "add", "TASKS.md")
+    git(tmp_path, "commit", "-m", "comparison ancestor")
+    parent = git(tmp_path, "rev-parse", "HEAD")
+    git(tmp_path, "checkout", "-b", branch)
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True)
+    path.write_text(packet)
+    if index_state != "worktree-only":
+        git(tmp_path, "add", rel)
+    if index_state == "index-only":
+        path.write_text("worktree prose grants no authority\n")
+    selected = pb._phase_b_target_branch_for_current_worktree(  # ANTICHEAT_OK: real Phase B branch selector
+        branch, wave_id=wave, wave_class="L4_ENABLER", plan_content=packet)
+    assert selected == branch
+    kwargs = dict(wave_id=wave, task_id=config.task_id, wave_class=config.wave_class, target_gate_id=config.target_gate_id,
+                  target_branch=selected, tracked_packet=rel, tracker_note_text=note,
+                  supervisor_lane="hooks/agents/bridge control-surface", files_to_stage=[rel, "TASKS.md"],
+                  commit_message="test terminal review handoff", fixes_implemented=["terminal review boundary"],
+                  pre_commit_receipt_path=".agent_bus/meta/pre_commit_receipt.json")
+    index_before = (tmp_path / ".git/index").read_bytes()
+    if index_state == "worktree-only":
+        with pytest.raises(pb.PhaseBExecutorError, match="target_branch must equal the canonical wave branch"):
+            pb.prepare_commit_handoff(tmp_path, **kwargs)
+    else:
+        handoff = json.loads(pb.prepare_commit_handoff(tmp_path, **kwargs).read_text())
+        assert handoff["target_branch"] == branch and handoff["tracker_note_text"] == note
+    assert git(tmp_path, "rev-parse", "HEAD") == parent
+    assert (tmp_path / ".git/index").read_bytes() == index_before
+
+
+def _change_review_bus(lane, monkeypatch):
+    """Fresh governed bus and native continuation; the old evidence stays put."""
+    bridge = lane.bridge_path.read_bytes()
+    lane.bus = lane.root / ".agent_bus-fresh-review"
+    lane.bus.mkdir()
+    lane.bridge_path = lane.bus / "bridge_config.json"
+    lane.bridge_path.write_bytes(bridge)
+    monkeypatch.setattr(commit, "_ACTIVE_BUS_DIR", ContextVar("fresh_review_bus", default=Path(lane.bus.name)))
+    lane.continuation = commit._continuation_record_path(lane.root, lane.handoff["wave_id"])  # ANTICHEAT_OK: native path/writer
+    lane.continuation.parent.mkdir(parents=True, exist_ok=True)
+    commit.write_continuation_record(
+        lane.continuation, handoff_sha=commit.handoff_sha(lane.handoff), target_branch="fixture/quota",
+        commit_sha=lane.head, receipt_decision="COMMIT_GO", pr_number="1331",
+        steps_completed=lane.result["steps_completed"], staged_candidate_sha256="f" * 64,
+    )
+
+
+@pytest.fixture
+def local_terminal_attempt(carrier, monkeypatch):
+    """Real configured adapter, Step15, native continuation and CLI transport.
+
+    Refusal/capacity are simulated at the adapter process boundary; the native
+    adapter authenticates refusal chronology and attaches its own job/turn IDs.
+    """
+    def run(kind, *, bus_change=False):
+        _native_continuation(carrier)
+        carrier.forbidden_local_calls = []
+
+        def no_remediation(*args, **kwargs):
+            carrier.forbidden_local_calls.append((args, kwargs))
+            raise AssertionError("local review must not recover or remediate")
+
+        monkeypatch.setattr(commit, "_attempt_bot_finding_remediation", no_remediation)
+        monkeypatch.setattr(commit, "_load_repo_recovery_symbols", no_remediation)
+        if kind in {"refusal", "capacity", "nonzero", "timeout"}:
+            adapters = commit._bridge_adapters  # ANTICHEAT_OK: provider process boundary
+            monkeypatch.setattr(adapters, "run_adapter", carrier.native_run_adapter)
+            message = {
+                "refusal": adapters._CODEX_SAFETY_REFUSAL_MESSAGE,  # ANTICHEAT_OK: exact observed provider error fixture
+                "capacity": "You've hit your usage limit. Try again at 10:00 AM.",
+                "nonzero": "review process exited unexpectedly",
+                "timeout": "review process timed out",
+            }[kind]
+            raw = "\n".join(json.dumps(e) for e in [
+                {"type": "error", "message": message},
+                {"type": "turn.failed", "error": {"message": message}},
+            ]) + "\n"
+
+            def process(spec, cmd, env, prompt, root, raw_path, *args):
+                carrier.reviews.append((spec, {"raw_output_path": raw_path}))
+                raw_path.write_text(raw)
+                raise adapters.BridgeAdapterError(message, output=message,
+                    returncode=-9 if kind == "timeout" else 1,
+                    raw_stdout=raw, raw_stderr="provider diagnostic\n")
+
+            monkeypatch.setattr(adapters, "_run_adapter_buffered", process)
+            monkeypatch.setattr(adapters, "_run_adapter_streaming", process)
+        elif kind == "findings":
+            carrier.verdict_change = lambda e: e.update(decision="REQUEST_CHANGES", findings=[{
+                "class": "DEFECT", "severity": "high", "disposition": "blocking",
+                "title": "candidate needs repair", "file": "earlier.py", "line_start": 1,
+                "line_end": 1, "evidence_cmd": "read earlier.py", "evidence_result": "defect",
+                "status": "new",
+            }])
+        elif kind == "malformed":
+            carrier.output_change = lambda _: "incomplete review without a verdict"
+        elif kind == "incomplete":
+            carrier.terminal = "item.completed"
+        else:
+            raise AssertionError(kind)
+        completed = _held_cli_envelope(carrier, monkeypatch, json_output=True, verbose=True)
+        assert completed.returncode == 1, completed
+        if bus_change:
+            original = {p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/*") if p.is_file()}
+            assert _resume_native(carrier)["failure_class"] == "local_review_terminal"
+            _change_review_bus(carrier, monkeypatch)
+            carrier.commands.clear()
+            completed = _held_cli_envelope(
+                carrier, monkeypatch, json_output=True, verbose=True, bus_dir=carrier.bus.name,
+            )
+            assert completed.returncode == 1, completed
+            carrier.assert_stopped({"status": "error"}, reviews=1)
+            assert not any(a[0] == "gh" for a in carrier.commands)
+            assert {p: p.read_bytes() for p in original} == original
+            assert not list(carrier.bus.glob("meta/local_pr_reviews/*"))
+        assert carrier.forbidden_local_calls == []
+        return carrier, completed
+    return run
+
+
+@pytest.mark.parametrize("bus_change", [False, True])
+@pytest.mark.parametrize("kind", ["refusal", "capacity", "findings", "nonzero", "timeout", "malformed", "incomplete"])
+def test_local_terminal_cli_retains_evidence_and_blocks_native_reentry(local_terminal_attempt, kind, bus_change):
+    lane, completed = local_terminal_attempt(kind, bus_change=bus_change)
+    dispatch = load_module("local_terminal_cli_dispatch", REPO_ROOT / "mu/tools/executors/executor_dispatch.py")
+    payload = dispatch._extract_structured_stdout_payload(completed.stdout)  # ANTICHEAT_OK: actual CLI consumer
+    assert payload["failure_class"] == "local_review_terminal"
+    proof = payload["local_pr_review"]
+    receipt = lane.root / proof["receipt_path"]
+    assert hashlib.sha256(receipt.read_bytes()).hexdigest() == proof["receipt_sha256"]
+    assert proof["receipt"] == json.loads(receipt.read_text())
+    if kind == "refusal":
+        refusal = proof["receipt"]["provider_refusal"]
+        assert refusal["job_id"] == proof["receipt"]["job_id"]
+        assert refusal["turn_id"] == proof["receipt"]["turn_id"]
+        assert refusal["raw_stdout"] == proof["receipt"]["raw_stdout"]
+    if kind in {"refusal", "capacity", "nonzero", "timeout"}:
+        assert proof["receipt"]["raw_stderr"] == "provider diagnostic\n"
+        assert proof["receipt"]["process_exit_code"] != 0
+    if kind == "findings":
+        assert proof["receipt"]["envelope"]["decision"] == "REQUEST_CHANGES"
+        assert proof["receipt"]["envelope"]["findings"][0]["disposition"] == "blocking"
+    before = {p: p.read_bytes() for p in receipt.parent.iterdir() if p.is_file()}
+    for _ in range(2):
+        again = _resume_native(lane, bus_dir=lane.bus.name)
+        lane.assert_stopped(again, reviews=1)
+        assert again["failure_class"] == "local_review_terminal"
+    assert lane.forbidden_local_calls == []
+    assert {p: p.read_bytes() for p in before} == before
+
+
+@pytest.mark.parametrize("bus_change", [False, True])
+@pytest.mark.parametrize("when", ["before-receipt", "after-receipt", "after-terminal", "after-owner"])
+def test_local_negative_interruption_cannot_reenter_reviewer(carrier, monkeypatch, when, bus_change):
+    _native_continuation(carrier)
+    carrier.verdict_change = lambda e: e.update(decision="REQUEST_CHANGES")
+    write = commit._atomic_write_fsynced_json  # ANTICHEAT_OK: inject interruption at durable write boundary
+
+    def interrupted(path, payload):
+        if path.name == "receipt.json" and when == "before-receipt":
+            raise SystemExit(77)
+        write(path, payload)
+        if ((path.name == "receipt.json" and when == "after-receipt")
+                or (path.name == "terminal.json" and when == "after-terminal")
+                or (path.parent.name == "local_pr_review_admissions" and when == "after-owner")):
+            raise SystemExit(77)
+
+    monkeypatch.setattr(commit, "_atomic_write_fsynced_json", interrupted)
+    with pytest.raises(SystemExit, match="77"):
+        carrier.execute()
+    monkeypatch.setattr(commit, "_atomic_write_fsynced_json", write)
+    before = {p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/*") if p.is_file()}
+    if bus_change:
+        _change_review_bus(carrier, monkeypatch)
+    # Even subsequent cloud clearance cannot erase this head's local failure.
+    _cloud_clearance(carrier)
+    carrier.commands.clear()
+    again = _resume_native(carrier, bus_dir=carrier.bus.name)
+    assert again["failure_class"] == "local_review_terminal"
+    carrier.assert_stopped(again, reviews=int(when != "after-owner"))
+    assert not any(a[0] == "gh" for a in carrier.commands)
+    assert {p: p.read_bytes() for p in before} == before
+
+
+def test_local_negative_receipt_cannot_be_changed_to_approval(local_terminal_attempt):
+    lane, _ = local_terminal_attempt("findings")
+    path = next(lane.bus.glob("meta/local_pr_reviews/*/receipt.json"))
+    receipt = json.loads(path.read_text())
+    receipt["status"] = "APPROVED"
+    path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    outcome = _resume_native(lane)
+    assert outcome["status"] == "held"
+    assert outcome["failure_class"] == "local_review_evidence_hold"
+    lane.assert_stopped(outcome, reviews=1)
+
+
+@pytest.mark.parametrize("filename", ["receipt.json", "terminal.json"])
+def test_local_negative_persistence_failure_still_stops_before_recovery(carrier, monkeypatch, filename):
+    _native_continuation(carrier)
+    carrier.verdict_change = lambda e: e.update(decision="REQUEST_CHANGES")
+    write = commit._atomic_write_fsynced_json  # ANTICHEAT_OK: filesystem failure after durable admission
+
+    def failed(path, payload):
+        if path.name == filename:
+            raise OSError("fixture persistence unavailable")
+        write(path, payload)
+
+    monkeypatch.setattr(commit, "_atomic_write_fsynced_json", failed)
+    first = carrier.execute()
+    assert first["failure_class"] == "local_review_terminal"
+    monkeypatch.setattr(commit, "_atomic_write_fsynced_json", write)
+    again = _resume_native(carrier)
+    assert again["failure_class"] == "local_review_terminal"
+    carrier.assert_stopped(again, reviews=1)
+
+
+@pytest.mark.parametrize("bus_change", [False, True])
+def test_empty_commit_cannot_repeat_a_negative_review(local_terminal_attempt, monkeypatch, bus_change):
+    lane, _ = local_terminal_attempt("findings")
+    before = {p: p.read_bytes() for p in lane.bus.glob("meta/local_pr_reviews/*/*") if p.is_file()}
+    git(lane.root, "commit", "--allow-empty", "-m", "unchanged review input")
+    lane.head = git(lane.root, "rev-parse", "HEAD")
+    lane.pr["headRefOid"] = lane.head
+    commit.write_continuation_record(
+        lane.continuation, handoff_sha=commit.handoff_sha(lane.handoff), target_branch="fixture/quota",
+        commit_sha=lane.head, receipt_decision="COMMIT_GO", pr_number="1331",
+        steps_completed=lane.result["steps_completed"], staged_candidate_sha256="f" * 64,
+    )
+    if bus_change:
+        _change_review_bus(lane, monkeypatch)
+    outcome = _resume_native(lane, bus_dir=lane.bus.name)
+    assert outcome["status"] == "held"
+    assert "unchanged PR content" in " ".join(outcome["errors"])
+    lane.assert_stopped(outcome, reviews=1)
+    assert lane.forbidden_local_calls == []
+    assert {p: p.read_bytes() for p in before} == before
+
+
+@pytest.mark.parametrize("bus_change", [False, True])
+def test_corrected_candidate_requires_new_native_review_and_preserves_negative(local_terminal_attempt, monkeypatch, bus_change):
+    lane, _ = local_terminal_attempt("findings")
+    old_receipt = next(lane.bus.glob("meta/local_pr_reviews/*/receipt.json"))
+    before = {p: p.read_bytes() for p in old_receipt.parent.iterdir() if p.is_file()}
+    old_head = lane.head
+    (lane.root / "earlier.py").write_text("value = 3  # governed candidate correction\n")
+    git(lane.root, "add", "earlier.py")
+    git(lane.root, "commit", "-m", "correct candidate")
+    lane.head = git(lane.root, "rev-parse", "HEAD")
+    lane.pr["headRefOid"] = lane.head
+    lane.pr["comments"]["nodes"] += [
+        {"databaseId": 3, "author": {"login": "founder", "__typename": "User"},
+         "body": "@codex review", "createdAt": "2026-10-04T14:08:00Z"},
+        {"databaseId": 4, "author": {"login": BOT, "__typename": "Bot"},
+         "body": QUOTA, "createdAt": "2026-10-04T14:08:19Z"},
+    ]
+    commit.write_continuation_record(
+        lane.continuation, handoff_sha=commit.handoff_sha(lane.handoff), target_branch="fixture/quota",
+        commit_sha=lane.head, receipt_decision="COMMIT_GO", pr_number="1331",
+        steps_completed=lane.result["steps_completed"], staged_candidate_sha256="f" * 64,
+    )
+    original_command = lane.run_command
+
+    def remote(args, **kwargs):
+        if args[:3] == ["gh", "pr", "comment"]:
+            lane.commands.append(args)
+            return subprocess.CompletedProcess(args, 0, "https://github.com/fixture/repo/pull/1331#issuecomment-3\n", "")
+        return original_command(args, **kwargs)
+
+    monkeypatch.setattr(commit, "_run", remote)
+    lane.verdict_change = None
+    if bus_change:
+        _change_review_bus(lane, monkeypatch)
+    outcome = _resume_native(lane, bus_dir=lane.bus.name)
+    assert outcome["status"] == "success", outcome
+    assert len(lane.reviews) == 2 and len(lane.landed) == 1
+    fresh = next(r for r in lane.receipts() if r["identity"]["head_sha"] != old_head)
+    assert fresh["status"] == "APPROVED" and fresh["request_comment"]["databaseId"] == 3
+    assert fresh["identity"]["diff_sha256"] != json.loads(before[old_receipt])["identity"]["diff_sha256"]
+    assert {p: p.read_bytes() for p in before} == before
+
+
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_cross_bus_retains_compatible_unindexed_native_stops(carrier, monkeypatch, version, interrupted):
+    """Model the old native writer's schema, with no canonical owner published."""
+    _native_continuation(carrier)
+    carrier.verdict_change = lambda e: e.update(decision="REQUEST_CHANGES")
+    write = commit._atomic_write_fsynced_json  # ANTICHEAT_OK: historical persistence boundary
+
+    def historical(path, payload):
+        if path.parent.name == "local_pr_review_admissions":
+            return
+        if path.name == "receipt.json" and interrupted:
+            raise SystemExit(77)
+        if path.name in {"attempt.json", "receipt.json"}:
+            payload = {**payload, "version": version}
+        write(path, payload)
+
+    with monkeypatch.context() as old:
+        old.setattr(commit, "_atomic_write_fsynced_json", historical)
+        if interrupted:
+            with pytest.raises(SystemExit, match="77"):
+                carrier.execute()
+        else:
+            assert carrier.execute()["failure_class"] == "local_review_terminal"
+    saved = {p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/*") if p.is_file()}
+    _change_review_bus(carrier, monkeypatch)
+    carrier.commands.clear()
+    outcome = _resume_native(carrier, bus_dir=carrier.bus.name)
+    assert outcome["failure_class"] == "local_review_terminal", outcome
+    assert outcome["local_pr_review"]["receipt"]["version"] == version
+    carrier.assert_stopped(outcome, reviews=1)
+    assert not any(a[0] == "gh" for a in carrier.commands)
+    assert {p: p.read_bytes() for p in saved} == saved
+
+
+@pytest.mark.parametrize("damage", ["owner", "owner-path", "attempt", "receipt", "terminal", "artifact", "missing-receipt",
+                                    "missing-attempt", "receipt-symlink", "directory-symlink", "identity", "request"])
+def test_cross_bus_damaged_owned_evidence_holds_before_external_effects(local_terminal_attempt, monkeypatch, damage):
+    lane, _ = local_terminal_attempt("findings")
+    path = next(lane.bus.glob("meta/local_pr_reviews/*/receipt.json"))
+    scratch = lane.root / ".scratch"
+    scratch.mkdir(exist_ok=True)
+    if damage in {"identity", "request"}:
+        payload = json.loads(path.read_text())
+        if damage == "identity":
+            payload["identity"]["pr_number"] = 9000
+        else:
+            payload["request_comment"]["databaseId"] = 9000
+        path.write_text(json.dumps(payload))
+    elif damage.startswith("missing-"):
+        path.with_name(damage.removeprefix("missing-") + ".json").unlink()
+    elif damage == "receipt-symlink":
+        relocated = scratch / "unowned-receipt.json"
+        relocated.write_bytes(path.read_bytes())
+        path.unlink()
+        path.symlink_to(relocated)
+    elif damage == "directory-symlink":
+        directory = path.parent
+        relocated = scratch / "unowned-review"
+        directory.rename(relocated)
+        directory.symlink_to(relocated, target_is_directory=True)
+    elif damage == "owner-path":
+        owner_path = next((lane.root / ".agent_bus/meta/local_pr_review_admissions").glob("local-pr-review-*.json"))
+        owner = json.loads(owner_path.read_text())
+        owner["attempt"]["receipt_path"] = ""
+        owner_path.write_text(json.dumps(owner))
+    else:
+        target = (next((lane.root / ".agent_bus/meta/local_pr_review_admissions").glob("local-pr-review-*.json"))
+                  if damage == "owner" else path.with_name({"artifact": "pr.diff"}.get(damage, damage + ".json")))
+        target.write_text("damaged native evidence\n")
+    _change_review_bus(lane, monkeypatch)
+    lane.commands.clear()
+    outcome = _resume_native(lane, bus_dir=lane.bus.name)
+    assert outcome["failure_class"] == "local_review_evidence_hold", outcome
+    lane.assert_stopped(outcome, reviews=1)
+    assert lane.forbidden_local_calls == []
+    assert not any(a[0] == "gh" for a in lane.commands)
+
+
+@pytest.mark.parametrize("directory", [".agent_bus/meta/local_pr_review_admissions", ".agent_bus/meta",
+                                      BUS + "/meta/local_pr_reviews"])
+def test_damaged_review_directory_holds_before_external_effects(carrier, directory):
+    _native_continuation(carrier)
+    path = carrier.root / directory
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("damaged directory")
+    outcome = _resume_native(carrier)
+    assert outcome["failure_class"] == "local_review_evidence_hold", outcome
+    carrier.assert_stopped(outcome, reviews=0)
+    assert not any(a[0] == "gh" for a in carrier.commands)
+
+
+@pytest.mark.parametrize("phase,approved", [("admission", False), ("completion", False), ("completion", True)])
+def test_cross_bus_owner_persistence_failure_cannot_repeat_review(carrier, monkeypatch, phase, approved):
+    _native_continuation(carrier)
+    if not approved:
+        carrier.verdict_change = lambda e: e.update(decision="REQUEST_CHANGES")
+    write = commit._atomic_write_fsynced_json  # ANTICHEAT_OK: actual ownership write failure
+
+    def unavailable(path, payload):
+        if (path.parent.name == "local_pr_review_admissions"
+                and ("completion" in payload) == (phase == "completion")):
+            raise OSError("fixture owner storage unavailable")
+        write(path, payload)
+
+    with monkeypatch.context() as failing:
+        failing.setattr(commit, "_atomic_write_fsynced_json", unavailable)
+        outcome = carrier.execute()
+    assert outcome["failure_class"] == "local_review_terminal", outcome
+    original = {p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/*") if p.is_file()}
+    _change_review_bus(carrier, monkeypatch)
+    carrier.commands.clear()
+    again = _resume_native(carrier, bus_dir=carrier.bus.name)
+    assert again["failure_class"] == "local_review_terminal", again
+    carrier.assert_stopped(again, reviews=int(phase == "completion"))
+    assert not any(a[0] == "gh" for a in carrier.commands)
+    assert {p: p.read_bytes() for p in original} == original
+
+
+def test_cross_bus_interrupted_approval_keeps_started_admission(carrier, monkeypatch):
+    _native_continuation(carrier)
+    write = commit._atomic_write_fsynced_json  # ANTICHEAT_OK: interruption before approval ownership publication
+
+    def interrupted(path, payload):
+        if path.parent.name == "local_pr_review_admissions" and "completion" in payload:
+            raise SystemExit(77)
+        write(path, payload)
+
+    with monkeypatch.context() as failing:
+        failing.setattr(commit, "_atomic_write_fsynced_json", interrupted)
+        with pytest.raises(SystemExit, match="77"):
+            carrier.execute()
+    assert carrier.receipts()[0]["status"] == "APPROVED"
+    original = {p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/*") if p.is_file()}
+    _change_review_bus(carrier, monkeypatch)
+    again = _resume_native(carrier, bus_dir=carrier.bus.name)
+    assert again["failure_class"] == "local_review_terminal", again
+    assert again["local_pr_review"]["receipt"]["status"] == "STARTED"
+    carrier.assert_stopped(again, reviews=1)
+    assert {p: p.read_bytes() for p in original} == original
+
+
+@pytest.mark.parametrize("foreign", ["repo_root", "repository", "pr_number", "head_branch", "base_branch"])
+def test_cross_bus_foreign_native_identity_never_owns_current_candidate(carrier, monkeypatch, foreign):
+    """Foreign, intact historical evidence is not clearance or a stop for this PR."""
+    _native_continuation(carrier)
+    carrier.verdict_change = lambda e: e.update(decision="REQUEST_CHANGES")
+    assert carrier.execute()["failure_class"] == "local_review_terminal"
+    # Change the live candidate's scope, leaving every original evidence byte.
+    changes = {"repo_root": str(carrier.root / "another-worktree"), "repository": "other/repo",
+               "pr_number": 9000, "head_branch": "fixture/other", "base_branch": "other-base"}
+    original = {p: p.read_bytes() for p in carrier.root.glob(".agent_bus*/meta/local_pr_review*/*/*") if p.is_file()}
+    if foreign == "repository":
+        git(carrier.root, "remote", "set-url", "origin", "https://github.com/other/repo.git")
+    elif foreign == "repo_root":
+        # Even identical Git objects and copied native evidence cannot rebind
+        # an admission owned by another canonical repository root.
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="rcx-foreign-review-") as temp:
+            other = Path(temp).resolve() / "repo"
+            shutil.copytree(carrier.root, other)
+            assert git(other, "rev-parse", "HEAD") == carrier.head
+            assert commit._prior_local_review_stop(other, carrier.result, target_branch="fixture/quota", base_branch="dev") is None  # ANTICHEAT_OK: bounded admission probe
+        assert {p: p.read_bytes() for p in original} == original
+        return
+    result = {**carrier.result, "pr_number": str(changes[foreign])} if foreign == "pr_number" else carrier.result
+    outcome = commit._prior_local_review_stop(  # ANTICHEAT_OK: identity exclusion at native admission
+        carrier.root, result,
+        target_branch=changes[foreign] if foreign == "head_branch" else "fixture/quota",
+        base_branch=changes[foreign] if foreign == "base_branch" else "dev",
+    )
+    assert outcome is None
+    assert {p: p.read_bytes() for p in original} == original
+
+
+def test_cross_bus_started_admission_stops_concurrent_entry(carrier, monkeypatch):
+    _native_continuation(carrier)
+    concurrent_bus = carrier.root / ".agent_bus-concurrent"
+    continuation = concurrent_bus / carrier.continuation.relative_to(carrier.bus)
+    continuation.parent.mkdir(parents=True)
+    commit.write_continuation_record(
+        continuation, handoff_sha=commit.handoff_sha(carrier.handoff), target_branch="fixture/quota",
+        commit_sha=carrier.head, receipt_decision="COMMIT_GO", pr_number="1331",
+        steps_completed=carrier.result["steps_completed"], staged_candidate_sha256="e" * 64,
+    )
+    carrier.verdict_change = lambda e: e.update(decision="REQUEST_CHANGES")
+    write = commit._atomic_write_fsynced_json  # ANTICHEAT_OK: second caller during durable admission
+    observed = []
+
+    def concurrent(path, payload):
+        write(path, payload)
+        if path.parent.name == "local_pr_review_admissions" and "completion" not in payload:
+            original = {p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/*") if p.is_file()}
+            command_count = len(carrier.commands)
+            observed.append(commit.run_commit_pipeline(
+                carrier.handoff, repo_root=carrier.root, bus_dir=concurrent_bus.name,
+            ))
+            assert not carrier.reviews
+            assert not any(a[0] == "gh" for a in carrier.commands[command_count:])
+            assert {p: p.read_bytes() for p in original} == original
+
+    monkeypatch.setattr(commit, "_atomic_write_fsynced_json", concurrent)
+    assert carrier.execute()["failure_class"] == "local_review_terminal"
+    assert len(observed) == 1 and observed[0]["failure_class"] == "local_review_terminal"
+    assert observed[0]["local_pr_review"]["receipt"]["status"] == "STARTED"
+    assert not list(concurrent_bus.glob("meta/local_pr_reviews/*/receipt.json"))
+    carrier.assert_stopped(observed[0], reviews=1)
+
+
+def test_cross_bus_concurrent_admission_lock_holds_without_provider_entry(carrier, monkeypatch):
+    _native_continuation(carrier)
+    _change_review_bus(carrier, monkeypatch)
+    with commit._local_review_admission_lock(carrier.root):  # ANTICHEAT_OK: real competing flock owner before publication
+        outcome = carrier.execute()
+    assert outcome["failure_class"] == "local_review_evidence_hold", outcome
+    carrier.assert_stopped(outcome, reviews=0)
+    carrier.verdict_change = lambda e: e.update(decision="REQUEST_CHANGES")
+    assert carrier.execute()["failure_class"] == "local_review_terminal"
+    carrier.assert_stopped(outcome, reviews=1)
+
+
+def test_cross_bus_historical_approval_requires_fresh_native_review(carrier, monkeypatch):
+    _native_continuation(carrier)
+    assert carrier.execute()["status"] == "success"
+    original = {p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/*") if p.is_file()}
+    carrier.pr["state"] = "OPEN"
+    _change_review_bus(carrier, monkeypatch)
+    outcome = _resume_native(carrier, bus_dir=carrier.bus.name)
+    assert outcome["status"] == "success", outcome
+    assert len(carrier.reviews) == 2
+    assert len(carrier.receipts()) == 1 and carrier.receipts()[0]["status"] == "APPROVED"
+    assert {p: p.read_bytes() for p in original} == original
+
+
+def test_cross_bus_new_request_cannot_clear_failed_input(local_terminal_attempt, monkeypatch):
+    lane, _ = local_terminal_attempt("findings")
+    original = lane.receipts()[0]
+    lane.pr["comments"]["nodes"].append({
+        "databaseId": 999, "author": {"login": "founder", "__typename": "User"},
+        "body": "@codex review", "createdAt": "2026-10-04T15:00:00Z",
+    })
+    _change_review_bus(lane, monkeypatch)
+    outcome = _resume_native(lane, bus_dir=lane.bus.name)
+    assert outcome["failure_class"] == "local_review_terminal"
+    assert outcome["local_pr_review"]["receipt"]["identity"] == original["identity"]
+    assert outcome["local_pr_review"]["receipt"]["request_comment"] == original["request_comment"]
+    lane.assert_stopped(outcome, reviews=1)
+    assert lane.forbidden_local_calls == []
 
 
 @pytest.mark.parametrize("body", [SERVICE_ACTIVITY_RUNNING, SERVICE_ACTIVITY_COMPLETED],
@@ -2522,13 +3106,13 @@ def _native_continuation(carrier, receipt_decision="COMMIT_GO"):
     return copy.deepcopy(json.loads(path.read_text()))
 
 
-def _resume_native(carrier):
+def _resume_native(carrier, bus_dir=BUS):
     # New result built by the production driver; no observation dictionary is
     # carried over. Both CLI resume guard and driver reload the native record.
     loaded = commit._load_continuation_for_resume(  # ANTICHEAT_OK: real continuation loader
-        carrier.handoff, repo_root=carrier.root, bus_dir=BUS)
+        carrier.handoff, repo_root=carrier.root, bus_dir=bus_dir)
     assert loaded is not None
-    return commit.run_commit_pipeline(carrier.handoff, repo_root=carrier.root, bus_dir=BUS)
+    return commit.run_commit_pipeline(carrier.handoff, repo_root=carrier.root, bus_dir=bus_dir)
 
 
 @pytest.mark.parametrize("lane", ["cloud", "local"])
@@ -2783,7 +3367,7 @@ def test_protected_continuation_resume_checks_fresh_evidence(carrier, monkeypatc
         assert len(reads) == 3 and carrier.elapsed == 24
 
 
-def _held_cli_envelope(carrier, monkeypatch, *, json_output, verbose):
+def _held_cli_envelope(carrier, monkeypatch, *, json_output, verbose, bus_dir=BUS):
     """Actual main/output/recovery/driver with fake remote I/O; no CLI launch."""
     from contextlib import redirect_stdout, redirect_stderr
     import io
@@ -2791,7 +3375,7 @@ def _held_cli_envelope(carrier, monkeypatch, *, json_output, verbose):
 
     path = carrier.bus / "handoff.json"
     path.write_text(json.dumps(carrier.handoff))
-    argv = ["commit_executor", "--handoff", str(path), "--bus-dir", BUS,
+    argv = ["commit_executor", "--handoff", str(path), "--bus-dir", bus_dir,
             "--standalone", "--resume-continuation"]
     if json_output:
         argv.append("--json")
@@ -3085,3 +3669,648 @@ def test_local_review_resume_retains_original_base_authority(carrier, monkeypatc
     assert carrier.continuation.read_bytes() == saved
     assert not carrier.landed and len(carrier.reviews) == 1
     assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == 1
+
+
+@pytest.fixture(scope="module")
+def historical_local_review_producer():
+    """Execute the actual f36 native-v1 writer, not a modeled receipt schema."""
+    source = subprocess.run(
+        ["git", "show", "f36b982b8b45774cf68fc621acf0d9727d72e6d5:mu/tools/executors/commit_executor.py"],
+        cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+    ).stdout
+    function = next(node for node in ast.parse(source).body
+                    if isinstance(node, ast.FunctionDef) and node.name == "_run_local_quota_review")
+    namespace = {}
+    # Bind the unchanged old function to the same isolated Git/provider I/O as
+    # today's producer, without replacing any of today's admission functions.
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "historical-f36-producer", "exec"),
+         commit.__dict__, namespace)
+    return namespace["_run_local_quota_review"]
+
+
+@pytest.fixture
+def legacy_native_review(carrier, monkeypatch, historical_local_review_producer):
+    def produce(kind="negative"):
+        _native_continuation(carrier)
+        carrier.forbidden_local_calls = []
+
+        def forbidden(*args, **kwargs):
+            carrier.forbidden_local_calls.append((args, kwargs))
+            raise AssertionError("historical local evidence must stop before recovery/remediation")
+
+        monkeypatch.setattr(commit, "_attempt_bot_finding_remediation", forbidden)
+        monkeypatch.setattr(commit, "_load_repo_recovery_symbols", forbidden)
+        if kind in {"negative", "no-go", "error"}:
+            decision = {"negative": "REQUEST_CHANGES", "no-go": "NO_GO", "error": "ERROR"}[kind]
+            carrier.verdict_change = lambda e: e.update(decision=decision)
+        elif kind == "malformed":
+            carrier.output_change = lambda _: "Review interrupted without an envelope"
+        elif kind == "incomplete":
+            carrier.terminal = "item.completed"
+        elif kind == "conflicting":
+            carrier.output_change = lambda output: output + "\n" + output.replace('"GO"', '"REQUEST_CHANGES"')
+        elif kind == "duplicate-key":
+            carrier.output_change = lambda output: output.replace('"decision": "GO"', '"decision": "NO_GO", "decision": "GO"')
+        elif kind == "blocking":
+            carrier.verdict_change = lambda e: e.update(findings=[{
+                "class": "DEFECT", "severity": "high", "disposition": "blocking",
+                "title": "candidate needs repair", "file": "earlier.py", "line_start": 1,
+                "line_end": 1, "evidence_cmd": "read earlier.py", "evidence_result": "defect",
+                "status": "new",
+            }])
+        elif kind in {"refusal", "capacity"}:
+            adapters = commit._bridge_adapters  # ANTICHEAT_OK: real adapter with isolated provider process
+            message = (adapters._CODEX_SAFETY_REFUSAL_MESSAGE if kind == "refusal"  # ANTICHEAT_OK: exact provider error fixture
+                       else "You've hit your usage limit. Try again at 10:00 AM.")
+            raw = "\n".join(json.dumps(event) for event in [
+                {"type": "error", "message": message},
+                {"type": "turn.failed", "error": {"message": message}},
+            ]) + "\n"
+
+            def process(spec, cmd, env, prompt, root, raw_path, *args):
+                carrier.reviews.append((spec, {"raw_output_path": raw_path}))
+                raw_path.write_text(raw)
+                raise adapters.BridgeAdapterError(message, output=message, returncode=1,
+                                                  raw_stdout=raw, raw_stderr="provider diagnostic\n")
+
+            monkeypatch.setattr(adapters, "run_adapter", carrier.native_run_adapter)
+            monkeypatch.setattr(adapters, "_run_adapter_buffered", process)
+            monkeypatch.setattr(adapters, "_run_adapter_streaming", process)
+        else:
+            assert kind == "approval"
+            # Retain a genuine old review without completing the modeled merge:
+            # reopening a landed PR would correctly hit the durable landing guard.
+            carrier.ci_failure = True
+        with monkeypatch.context() as old:
+            old.setattr(commit, "_run_local_quota_review", historical_local_review_producer)
+            outcome = carrier.execute()
+        assert outcome["status"] != "success", outcome
+        if kind == "approval":
+            assert outcome["step"] == "wait_ci", outcome
+        carrier.ci_failure = False
+        path = next(carrier.bus.glob("meta/local_pr_reviews/*/receipt.json"))
+        receipt = json.loads(path.read_text())
+        assert receipt["version"] == 1
+        assert receipt["status"] == ("APPROVED" if kind == "approval" else "ERROR")
+        assert not path.with_name("attempt.json").exists() and not path.with_name("terminal.json").exists()
+        assert not list(carrier.root.glob(".agent_bus/meta/local_pr_review_admissions/*.json"))
+        assert len(carrier.reviews) == 1 and carrier.forbidden_local_calls == []
+        carrier.verdict_change = carrier.output_change = None
+        carrier.terminal = "turn.completed"
+        monkeypatch.setattr(commit._bridge_adapters, "run_adapter", carrier.run_reviewer)  # ANTICHEAT_OK: fresh reviewer I/O
+        return path, receipt
+    return produce
+
+
+def _assert_legacy_hold(carrier, saved, *, entry="public"):
+    carrier.commands.clear()
+    sleeps = list(carrier.sleeps)
+    candidate = git(carrier.root, "rev-parse", "HEAD")
+    outcome = (carrier.execute() if entry == "production"
+               else _resume_native(carrier, bus_dir=carrier.bus.name))
+    assert outcome["failure_class"] == "local_review_evidence_hold", outcome
+    assert outcome["retry_allowed"] is False
+    carrier.assert_stopped(outcome, reviews=1)
+    assert not any(command[0] == "gh" for command in carrier.commands)
+    assert carrier.forbidden_local_calls == [] and carrier.sleeps == sleeps
+    assert git(carrier.root, "rev-parse", "HEAD") == candidate
+    assert {path: path.read_bytes() for path in saved} == saved
+    assert len(list(carrier.root.glob(".agent_bus*/meta/local_pr_reviews/*/receipt.json"))) == 1
+    assert not list(carrier.root.glob(".agent_bus/meta/local_pr_review_admissions/*.json"))
+
+
+@pytest.mark.parametrize("variant", ["status-and-envelope", "also-remove-error", "also-relabel-output"])
+@pytest.mark.parametrize("bus_change", [False, True])
+@pytest.mark.parametrize("entry", ["production", "public"])
+def test_actual_legacy_receipt_relabel_cannot_erase_raw_negative(
+    carrier, monkeypatch, legacy_native_review, variant, bus_change, entry,
+):
+    path, receipt = legacy_native_review()
+    original = {p: p.read_bytes() for p in path.parent.iterdir() if p.is_file() and p != path}
+    intact = commit._prior_local_review_stop(  # ANTICHEAT_OK: intact old writer admission control
+        carrier.root, carrier.result, target_branch="fixture/quota", base_branch="dev")
+    assert intact["failure_class"] == "local_review_terminal"
+    identity, request = copy.deepcopy(receipt["identity"]), copy.deepcopy(receipt["request_comment"])
+    receipt["status"] = "APPROVED"
+    receipt["envelope"]["decision"] = "GO"
+    if variant != "status-and-envelope":
+        receipt.pop("error")
+    if variant == "also-relabel-output":
+        assert "REQUEST_CHANGES" in receipt["output"]
+        receipt["output"] = receipt["output"].replace("REQUEST_CHANGES", "GO")
+    path.write_text(json.dumps(receipt))
+    if bus_change:
+        _change_review_bus(carrier, monkeypatch)
+    _assert_legacy_hold(carrier, {**original, path: path.read_bytes()}, entry=entry)
+    assert json.loads(path.read_text())["identity"] == identity
+    assert json.loads(path.read_text())["request_comment"] == request
+
+
+@pytest.mark.parametrize("kind", ["no-go", "error", "malformed", "incomplete", "refusal", "capacity",
+                                  "conflicting", "duplicate-key", "blocking"])
+@pytest.mark.parametrize("bus_change", [False, True])
+def test_actual_legacy_unapproved_raw_cannot_be_replaced_by_receipt_claim(
+    carrier, monkeypatch, legacy_native_review, kind, bus_change,
+):
+    path, receipt = legacy_native_review(kind)
+    original = {p: p.read_bytes() for p in path.parent.iterdir() if p.is_file() and p != path}
+    # Claim an internally consistent success in the receipt while retaining the
+    # actual old producer's negative/malformed/refused/incomplete raw evidence.
+    prompt = path.with_name("prompt.md").read_text()
+    envelope = copy.deepcopy(receipt.get("envelope")) or json.loads(
+        prompt.split("BEGIN_AGENT_ENVELOPE\n")[1].split("\nEND_AGENT_ENVELOPE")[0])
+    envelope.update(decision="GO", findings=[])
+    receipt.update(status="APPROVED", envelope=envelope, process_exit_code=0)
+    # Preserve the actual returned stdout when available so the native parser
+    # itself must reject malformed, ambiguous or contradictory verdicts.
+    receipt.setdefault("output", "BEGIN_AGENT_ENVELOPE\n" + json.dumps(envelope) + "\nEND_AGENT_ENVELOPE")
+    receipt.pop("error")
+    path.write_text(json.dumps(receipt))
+    if bus_change:
+        _change_review_bus(carrier, monkeypatch)
+    _assert_legacy_hold(carrier, {**original, path: path.read_bytes()})
+
+
+@pytest.mark.parametrize("damage", [
+    "missing-raw", "missing-prompt", "missing-diff", "damaged-raw", "non-utf8-raw",
+    "raw-symlink", "raw-directory", "empty-inventory", "omit-raw", "omit-prompt", "omit-diff",
+    "empty-observed", "omit-observed-raw", "conflicting-hashes", "diff-identity", "renamed-raw",
+    "copied-envelope", "copied-output", "missing-output", "missing-envelope", "nonzero",
+    "missing-exit", "boolean-exit", "unfinished", "error", "provider-refusal", "unknown-version",
+])
+def test_actual_legacy_approval_requires_complete_consistent_evidence(
+    carrier, monkeypatch, legacy_native_review, damage,
+):
+    path, receipt = legacy_native_review("approval")
+    carrier.pr["state"] = "OPEN"
+    carrier.landed.clear()
+    raw = path.with_name("raw.jsonl")
+    relative = lambda name: str(path.with_name(name).relative_to(carrier.root))
+    if damage.startswith("missing-") and damage.split("-", 1)[1] in {"raw", "prompt", "diff"}:
+        path.with_name({"missing-raw": "raw.jsonl", "missing-prompt": "prompt.md", "missing-diff": "pr.diff"}[damage]).unlink()
+    elif damage == "damaged-raw":
+        raw.write_text("broken native output\n")
+    elif damage == "non-utf8-raw":
+        raw.write_bytes(b"\xff\x00")
+        for key in ("artifacts", "observed_artifact_sha256"):
+            receipt[key][relative("raw.jsonl")] = hashlib.sha256(raw.read_bytes()).hexdigest()
+    elif damage == "raw-symlink":
+        saved_raw = path.with_name("saved-raw.jsonl")
+        raw.rename(saved_raw)
+        raw.symlink_to(saved_raw)
+    elif damage == "raw-directory":
+        raw.unlink()
+        raw.mkdir()
+    elif damage == "empty-inventory":
+        receipt["artifacts"] = receipt["observed_artifact_sha256"] = {}
+    elif damage in {"omit-raw", "omit-prompt", "omit-diff", "renamed-raw"}:
+        name = {"omit-raw": "raw.jsonl", "omit-prompt": "prompt.md", "omit-diff": "pr.diff", "renamed-raw": "raw.jsonl"}[damage]
+        for key in ("artifacts", "observed_artifact_sha256"):
+            digest = receipt[key].pop(relative(name))
+            if damage == "renamed-raw":
+                receipt[key][relative("copied-raw.jsonl")] = digest
+        if damage == "renamed-raw":
+            raw.rename(path.with_name("copied-raw.jsonl"))
+    elif damage == "empty-observed":
+        receipt["observed_artifact_sha256"] = {}
+    elif damage == "omit-observed-raw":
+        receipt["observed_artifact_sha256"].pop(relative("raw.jsonl"))
+    elif damage == "conflicting-hashes":
+        receipt["artifacts"][relative("prompt.md")] = "0" * 64
+    elif damage == "diff-identity":
+        receipt["identity"]["diff_sha256"] = "0" * 64
+    elif damage == "copied-envelope":
+        receipt["envelope"]["summary"] = "Unrelated receipt verdict"
+    elif damage == "copied-output":
+        receipt["output"] += "\nUnrelated copied output"
+    elif damage in {"missing-output", "missing-envelope", "missing-exit", "unfinished"}:
+        receipt.pop({"missing-output": "output", "missing-envelope": "envelope",
+                     "missing-exit": "process_exit_code", "unfinished": "finished_at_utc"}[damage])
+    elif damage in {"nonzero", "boolean-exit"}:
+        receipt["process_exit_code"] = 1 if damage == "nonzero" else False
+    elif damage == "error":
+        receipt["error"] = "Post-verdict verification failed"
+    elif damage == "provider-refusal":
+        receipt["provider_refusal"] = {"message": "retained provider refusal"}
+    elif damage == "unknown-version":
+        receipt["version"] = 999
+    else:
+        raise AssertionError(damage)
+    path.write_text(json.dumps(receipt))
+    saved = {p: p.read_bytes() for p in path.parent.iterdir() if p.is_file()}
+    _change_review_bus(carrier, monkeypatch)
+    _assert_legacy_hold(carrier, saved)
+
+
+@pytest.mark.parametrize("bus_change", [False, True])
+def test_actual_legacy_approval_admits_fresh_review_without_reusing_authority(
+    carrier, monkeypatch, legacy_native_review, bus_change,
+):
+    path, old = legacy_native_review("approval")
+    saved = {p: p.read_bytes() for p in path.parent.iterdir() if p.is_file()}
+    carrier.pr["state"] = "OPEN"
+    carrier.landed.clear()
+    carrier.commands.clear()
+    if bus_change:
+        _change_review_bus(carrier, monkeypatch)
+    else:
+        _native_continuation(carrier)
+    outcome = _resume_native(carrier, bus_dir=carrier.bus.name)
+    assert outcome["status"] == "success", outcome
+    assert len(carrier.reviews) == 2 and len(carrier.landed) == 1
+    fresh = next(r for r in carrier.receipts() if r["job_id"] != old["job_id"])
+    assert fresh["version"] == 2 and fresh["status"] == "APPROVED"
+    assert fresh["identity"] == old["identity"] and fresh["request_comment"] == old["request_comment"]
+    assert {p: p.read_bytes() for p in saved} == saved
+    assert carrier.forbidden_local_calls == []
+
+
+@pytest.mark.parametrize("bus_change", [False, True])
+def test_actual_legacy_negative_allows_fresh_review_of_corrected_candidate(
+    carrier, monkeypatch, legacy_native_review, bus_change,
+):
+    path, old = legacy_native_review()
+    saved = {p: p.read_bytes() for p in path.parent.iterdir() if p.is_file()}
+    (carrier.root / "earlier.py").write_text("value = 3  # governed correction\n")
+    git(carrier.root, "add", "earlier.py")
+    git(carrier.root, "commit", "-m", "correct historical candidate")
+    carrier.head = git(carrier.root, "rev-parse", "HEAD")
+    carrier.result["commit_sha"] = carrier.pr["headRefOid"] = carrier.head
+    # The native continuation writer records the new head; the public driver
+    # must request review for it rather than reusing old request authority.
+    if bus_change:
+        _change_review_bus(carrier, monkeypatch)
+    else:
+        _native_continuation(carrier)
+    carrier.pr["comments"]["nodes"] += [
+        {"databaseId": 3, "author": {"login": "founder", "__typename": "User"},
+         "body": "@codex review", "createdAt": "2026-10-04T14:08:00Z"},
+        {"databaseId": 4, "author": {"login": BOT, "__typename": "Bot"},
+         "body": QUOTA, "createdAt": "2026-10-04T14:08:19Z"},
+    ]
+    remote = carrier.run_command
+
+    def new_request(args, **kwargs):
+        if args[:3] == ["gh", "pr", "comment"]:
+            carrier.commands.append(args)
+            return subprocess.CompletedProcess(args, 0, "https://github.com/fixture/repo/pull/1331#issuecomment-3\n", "")
+        return remote(args, **kwargs)
+
+    monkeypatch.setattr(commit, "_run", new_request)
+    outcome = _resume_native(carrier, bus_dir=carrier.bus.name)
+    assert outcome["status"] == "success", outcome
+    assert len(carrier.reviews) == 2 and len(carrier.landed) == 1
+    fresh = next(r for r in carrier.receipts() if r["job_id"] != old["job_id"])
+    assert fresh["status"] == "APPROVED" and fresh["request_comment"]["databaseId"] == 3
+    assert fresh["identity"]["head_sha"] != old["identity"]["head_sha"]
+    assert fresh["identity"]["diff_sha256"] != old["identity"]["diff_sha256"]
+    assert {p: p.read_bytes() for p in saved} == saved
+    assert carrier.forbidden_local_calls == []
+
+
+@pytest.mark.parametrize("index_state", ["indexed", "index-only", "worktree-only"])
+def test_locked_r4_packet_preserves_real_index_branch_and_builder(tmp_path, index_state):
+    # Apply the retained native reader/selector/builder controls to this exact
+    # packet in disposable Git authority; the real worktree index is outer-owned.
+    test_locked_local_terminal_packet_fences_and_real_branch_builder(
+        tmp_path, index_state, "workingrcx-local-review-terminal-r4-2026-10-09",
+        "b0d72c3cd7cc240d2c07decd897defde5cf696d45352831d0528e46933109156",
+    )
+
+
+@pytest.mark.parametrize("damage", ["intact", "missing-receipt", "repository", "pr_number", "head_branch"])
+@pytest.mark.parametrize("second_verdict", ["GO", "REQUEST_CHANGES"])
+@pytest.mark.parametrize("bus_change", [False, True])
+def test_actual_legacy_admission_damage_stops_public_continuation(
+    carrier, monkeypatch, legacy_native_review, damage, second_verdict, bus_change,
+):
+    """R5 supervisor/root reproductions: only a receipt header or file changes."""
+    path, receipt = legacy_native_review()
+    identity, request = copy.deepcopy(receipt["identity"]), copy.deepcopy(receipt["request_comment"])
+    original = {p: p.read_bytes() for p in path.parent.iterdir() if p.is_file() and p != path}
+    if damage == "missing-receipt":
+        path.unlink()
+    elif damage != "intact":
+        receipt["identity"][damage] = {
+            "repository": "other/repository", "pr_number": 9000, "head_branch": "other/branch",
+        }[damage]
+        path.write_text(json.dumps(receipt))
+    if bus_change:
+        _change_review_bus(carrier, monkeypatch)
+    saved_continuation = carrier.continuation.read_bytes()
+    saved_handoff, saved_pr = copy.deepcopy(carrier.handoff), copy.deepcopy(carrier.pr)
+    carrier.verdict_change = lambda e: e.update(decision=second_verdict)
+    carrier.commands.clear()
+    sleeps = list(carrier.sleeps)
+    outcome = _resume_native(carrier, bus_dir=carrier.bus.name)
+    fresh = [r for r in carrier.receipts() if r["job_id"] != receipt["job_id"]]
+    # Captured in the before/after command logs. All provider/GitHub/merge
+    # effects are modeled by Carrier; the repository and continuation are real.
+    print("R5_PUBLIC_ADMISSION", json.dumps({
+        "damage": damage, "bus_change": bus_change, "second_verdict": second_verdict,
+        "status": outcome.get("status"), "failure_class": outcome.get("failure_class"),
+        "reviewer_calls": len(carrier.reviews), "mocked_merges": len(carrier.landed),
+        "github_calls": sum(cmd[0] == "gh" for cmd in carrier.commands),
+        "fresh_receipts": len(fresh),
+        "same_fresh_identity": bool(fresh) and fresh[0]["identity"] == identity,
+        "same_fresh_request": bool(fresh) and fresh[0]["request_comment"] == request,
+        "original_artifacts_unchanged": all(p.read_bytes() == b for p, b in original.items()),
+    }))
+    assert outcome.get("failure_class") == (
+        "local_review_terminal" if damage == "intact" else "local_review_evidence_hold"), outcome
+    assert outcome["retry_allowed"] is False
+    carrier.assert_stopped(outcome, reviews=1)
+    assert not any(cmd[0] == "gh" for cmd in carrier.commands)
+    assert carrier.forbidden_local_calls == [] and carrier.sleeps == sleeps
+    assert not fresh
+    assert carrier.continuation.read_bytes() == saved_continuation
+    assert carrier.handoff == saved_handoff and carrier.pr == saved_pr
+    assert git(carrier.root, "rev-parse", "HEAD") == identity["head_sha"]
+    assert all(p.read_bytes() == b for p, b in original.items())
+    if damage == "missing-receipt":
+        assert not path.exists()
+
+
+@pytest.fixture
+def retained_native_review(carrier, monkeypatch, legacy_native_review):
+    def produce(generation):
+        if generation == "legacy":
+            return legacy_native_review()
+        _native_continuation(carrier)
+        carrier.forbidden_local_calls = []
+
+        def forbidden(*args, **kwargs):
+            carrier.forbidden_local_calls.append((args, kwargs))
+            raise AssertionError("retained history entered recovery/remediation")
+
+        monkeypatch.setattr(commit, "_attempt_bot_finding_remediation", forbidden)
+        monkeypatch.setattr(commit, "_load_repo_recovery_symbols", forbidden)
+        carrier.verdict_change = lambda e: e.update(decision="REQUEST_CHANGES")
+        write = commit._atomic_write_fsynced_json  # ANTICHEAT_OK: real native persistence boundary
+
+        def historical(path, payload):
+            if generation == "unindexed-current" and path.parent.name == "local_pr_review_admissions":
+                return
+            write(path, payload)
+
+        with monkeypatch.context() as old:
+            old.setattr(commit, "_atomic_write_fsynced_json", historical)
+            assert carrier.execute()["failure_class"] == "local_review_terminal"
+        carrier.verdict_change = None
+        path = next(carrier.bus.glob("meta/local_pr_reviews/*/receipt.json"))
+        return path, json.loads(path.read_text())
+    return produce
+
+
+def _assert_retained_history_hold(carrier, evidence):
+    """A real public reload must stop without changing candidate or evidence."""
+    saved = {p: p.read_bytes() for p in evidence.iterdir() if p.is_file()}
+    directories = sorted(carrier.root.glob(".agent_bus*/meta/local_pr_reviews/*"))
+    continuation = carrier.continuation.read_bytes()
+    handoff, pr = copy.deepcopy(carrier.handoff), copy.deepcopy(carrier.pr)
+    head, sleeps = git(carrier.root, "rev-parse", "HEAD"), list(carrier.sleeps)
+    carrier.commands.clear()
+    outcome = _resume_native(carrier, bus_dir=carrier.bus.name)
+    assert outcome.get("failure_class") == "local_review_evidence_hold", outcome
+    assert outcome["status"] == "held" and outcome["retry_allowed"] is False
+    carrier.assert_stopped(outcome, reviews=1)
+    assert not any(cmd[0] == "gh" for cmd in carrier.commands)
+    assert carrier.forbidden_local_calls == [] and carrier.sleeps == sleeps
+    assert carrier.handoff == handoff and carrier.pr == pr
+    assert carrier.continuation.read_bytes() == continuation
+    assert git(carrier.root, "rev-parse", "HEAD") == head
+    assert sorted(carrier.root.glob(".agent_bus*/meta/local_pr_reviews/*")) == directories
+    assert {p: p.read_bytes() for p in evidence.iterdir() if p.is_file()} == saved
+
+
+@pytest.mark.parametrize("generation", ["legacy", "unindexed-current", "current"])
+@pytest.mark.parametrize("field", [
+    "repo_root", "repository", "pr_number", "url", "head_branch", "base_branch",
+    "head_sha", "base_sha", "merge_base_sha", "diff_sha256", "diff_command",
+])
+def test_retained_native_identity_fields_bind_before_candidate_exclusion(
+    carrier, monkeypatch, retained_native_review, generation, field,
+):
+    path, receipt = retained_native_review(generation)
+    replacements = {
+        "repo_root": str(carrier.root / "other"), "repository": "other/repository", "pr_number": 9000,
+        "url": "https://github.com/other/repository/pull/9000", "head_branch": "other/branch",
+        "base_branch": "other-base", "head_sha": carrier.base, "base_sha": carrier.head,
+        "merge_base_sha": carrier.head, "diff_sha256": "0" * 64, "diff_command": ["git", "diff"],
+    }
+    receipt["identity"][field] = replacements[field]
+    path.write_text(json.dumps(receipt))
+    _change_review_bus(carrier, monkeypatch)
+    _assert_retained_history_hold(carrier, path.parent)
+
+
+@pytest.mark.parametrize("retained", ["all", "raw.jsonl", "prompt.md", "pr.diff", "partial", "empty"])
+@pytest.mark.parametrize("bus_change", [False, True])
+def test_actual_legacy_orphan_inventory_never_disappears(
+    carrier, monkeypatch, legacy_native_review, retained, bus_change,
+):
+    path, _ = legacy_native_review()
+    for artifact in path.parent.iterdir():
+        if artifact == path or (retained != "all" and artifact.name != retained):
+            artifact.unlink()
+    if retained == "partial":
+        path.with_name("receipt.json.partial").write_text('{"status":')
+    if bus_change:
+        _change_review_bus(carrier, monkeypatch)
+    _assert_retained_history_hold(carrier, path.parent)
+
+
+@pytest.mark.parametrize("generation", ["legacy", "unindexed-current", "current"])
+@pytest.mark.parametrize("damage", [
+    "missing-raw.jsonl", "missing-prompt.md", "missing-pr.diff", "empty-inventory",
+    "omit-raw.jsonl", "omit-prompt.md", "omit-pr.diff", "empty-observed", "conflicting-hash",
+    "missing-identity", "missing-head", "unknown-version", "receipt-and-prompt", "receipt-and-raw",
+    "raw-without-copied-envelope", "duplicate-prompt-key", "unparseable-prompt",
+])
+def test_retained_negative_inventory_and_independent_evidence_are_required(
+    carrier, monkeypatch, retained_native_review, generation, damage,
+):
+    path, receipt = retained_native_review(generation)
+    relative = lambda name: str(path.with_name(name).relative_to(carrier.root))
+    if damage.startswith("missing-") and damage.split("-", 1)[1] in {"raw.jsonl", "prompt.md", "pr.diff"}:
+        path.with_name(damage.split("-", 1)[1]).unlink()
+    elif damage.startswith("omit-"):
+        for key in ("artifacts", "observed_artifact_sha256"):
+            receipt[key].pop(relative(damage.split("-", 1)[1]))
+    elif damage == "empty-inventory":
+        receipt["artifacts"] = receipt["observed_artifact_sha256"] = {}
+    elif damage == "empty-observed":
+        receipt["observed_artifact_sha256"] = {}
+    elif damage == "conflicting-hash":
+        receipt["artifacts"][relative("prompt.md")] = "0" * 64
+    elif damage == "missing-identity":
+        receipt.pop("identity")
+    elif damage == "missing-head":
+        receipt["identity"].pop("head_sha")
+    elif damage == "unknown-version":
+        receipt["version"] = 999
+    else:
+        prompt_path, raw_path = path.with_name("prompt.md"), path.with_name("raw.jsonl")
+        if damage in {"receipt-and-prompt", "receipt-and-raw"}:
+            receipt["identity"]["head_branch"] = "other/branch"
+        if damage in {"receipt-and-prompt", "duplicate-prompt-key", "unparseable-prompt"}:
+            prompt = prompt_path.read_text()
+            prompt = (prompt.replace("fixture/quota", "other/branch") if damage == "receipt-and-prompt"
+                      else prompt.replace('"pr_number": 1331', '"pr_number": 9000, "pr_number": 1331')
+                      if damage == "duplicate-prompt-key" else "partial native prompt")
+            prompt_path.write_text(prompt)
+            changed = "prompt.md"
+        else:
+            raw_path.write_text(raw_path.read_text().replace("fixture/quota", "other/branch"))
+            receipt["output"] = receipt["output"].replace("fixture/quota", "other/branch")
+            if damage == "raw-without-copied-envelope":
+                receipt.pop("envelope")
+            else:
+                receipt["envelope"]["review_identity"]["head_branch"] = "other/branch"
+            changed = "raw.jsonl"
+        for key in ("artifacts", "observed_artifact_sha256"):
+            receipt[key][relative(changed)] = hashlib.sha256(path.with_name(changed).read_bytes()).hexdigest()
+    path.write_text(json.dumps(receipt))
+    _change_review_bus(carrier, monkeypatch)
+    _assert_retained_history_hold(carrier, path.parent)
+
+
+@pytest.mark.parametrize("generation", ["legacy", "unindexed-current", "current"])
+@pytest.mark.parametrize("foreign", ["repo_root", "repository", "pr_number", "head_branch", "base_branch"])
+def test_intact_native_foreign_history_allows_public_candidate_review(
+    carrier, monkeypatch, retained_native_review, generation, foreign,
+):
+    """Change the live candidate scope; every byte of the old attempt remains."""
+    if foreign == "base_branch":
+        # Public continuation admits dev only. Produce genuine historical
+        # evidence for another base, then resume the current dev candidate.
+        git(carrier.root, "branch", "historical-base", carrier.base)
+        carrier.pr["baseRefName"] = "historical-base"
+
+        def historical_base_entry():
+            return commit._run_post_commit_pipeline(  # ANTICHEAT_OK: native historical producer entry with its actual base
+                handoff=carrier.handoff, repo_root=carrier.root, result=carrier.result,
+                target_branch="fixture/quota", base_branch="historical-base",
+                continuation_path=carrier.continuation, log=lambda _: None)
+
+        with monkeypatch.context() as historical:
+            historical.setattr(carrier, "execute", historical_base_entry)
+            path, old = retained_native_review(generation)
+        carrier.pr["baseRefName"] = "dev"
+    else:
+        path, old = retained_native_review(generation)
+    saved = {p: p.read_bytes() for p in path.parent.iterdir() if p.is_file()}
+    if foreign == "repo_root":
+        import shutil
+        other = carrier.root.parent / (carrier.root.name + "-other")
+        shutil.copytree(carrier.root, other)
+        original_root = carrier.root
+        for key, value in vars(carrier).copy().items():
+            if isinstance(value, Path) and value.is_relative_to(original_root):
+                setattr(carrier, key, other / value.relative_to(original_root))
+    elif foreign == "repository":
+        git(carrier.root, "remote", "set-url", "origin", "https://github.com/other/repository.git")
+        carrier.pr.update(url="https://github.com/other/repository/pull/1331",
+                          headRepository={"nameWithOwner": "other/repository"},
+                          baseRepository={"nameWithOwner": "other/repository"})
+    elif foreign == "pr_number":
+        carrier.pr.update(number=9000, url="https://github.com/fixture/repo/pull/9000")
+    elif foreign == "head_branch":
+        git(carrier.root, "checkout", "-b", "other/quota")
+        carrier.pr["headRefName"] = "other/quota"
+        carrier.handoff.update(target_branch="other/quota", branch_prefix="other")
+    commit.write_continuation_record(
+        carrier.continuation, handoff_sha=commit.handoff_sha(carrier.handoff),
+        target_branch=carrier.pr["headRefName"], commit_sha=carrier.head, receipt_decision="COMMIT_GO",
+        pr_number=str(carrier.pr["number"]), steps_completed=carrier.result["steps_completed"],
+        staged_candidate_sha256="e" * 64,
+    )
+    remote = carrier.run_command
+
+    def current_remote(args, **kwargs):
+        # Extend only the modeled provider boundary to serve this other PR.
+        translations = {"owner=other": "owner=fixture", "repo=repository": "repo=repo",
+                        "number=9000": "number=1331",
+                        "repos/other/repository/issues/comments/1/reactions": "repos/fixture/repo/issues/comments/1/reactions"}
+        return remote([translations.get(arg, arg) for arg in args], **kwargs)
+
+    monkeypatch.setattr(commit, "_run", current_remote)
+    outcome = _resume_native(carrier, bus_dir=carrier.bus.name)
+    assert outcome["status"] == "success", outcome
+    assert len(carrier.reviews) == 2 and len(carrier.landed) == 1
+    fresh = next(r for r in carrier.receipts() if r["job_id"] != old["job_id"])
+    assert fresh["status"] == "APPROVED" and fresh["identity"][foreign] != old["identity"][foreign]
+    assert all(p.read_bytes() == b for p, b in saved.items())
+    assert carrier.forbidden_local_calls == []
+
+
+@pytest.mark.parametrize("bus_change", [False, True])
+def test_actual_legacy_empty_commit_retains_negative_hold(carrier, monkeypatch, legacy_native_review, bus_change):
+    path, receipt = legacy_native_review()
+    git(carrier.root, "commit", "--allow-empty", "-m", "same historical review input")
+    carrier.head = git(carrier.root, "rev-parse", "HEAD")
+    assert carrier.head != receipt["identity"]["head_sha"]
+    carrier.result["commit_sha"] = carrier.pr["headRefOid"] = carrier.head
+    if bus_change:
+        _change_review_bus(carrier, monkeypatch)
+    else:
+        _native_continuation(carrier)
+    _assert_retained_history_hold(carrier, path.parent)
+
+
+@pytest.mark.parametrize("index_state", ["indexed", "index-only", "worktree-only"])
+def test_locked_r5_packet_preserves_real_index_branch_and_builder(tmp_path, index_state):
+    test_locked_local_terminal_packet_fences_and_real_branch_builder(
+        tmp_path, index_state, "workingrcx-local-review-terminal-r5-2026-10-09",
+        "b521c5e5056d09a9d964d470956af9f9add466511fcdb2d86d5fa622272bde84",
+    )
+
+
+def test_unindexed_current_retains_started_identity_after_terminal_loss(carrier, retained_native_review):
+    path, receipt = retained_native_review("unindexed-current")
+    # Relabel every completed copy but preserve the original STARTED input.
+    # Even without a final marker, that input still owns the failed candidate.
+    original_attempt = path.with_name("attempt.json").read_bytes()
+    receipt["identity"]["head_branch"] = "other/branch"
+    receipt["envelope"]["review_identity"]["head_branch"] = "other/branch"
+    receipt["output"] = receipt["output"].replace("fixture/quota", "other/branch")
+    for name in ("prompt.md", "raw.jsonl"):
+        artifact = path.with_name(name)
+        artifact.write_text(artifact.read_text().replace("fixture/quota", "other/branch"))
+        for key in ("artifacts", "observed_artifact_sha256"):
+            receipt[key][str(artifact.relative_to(carrier.root))] = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    path.with_name("terminal.json").unlink()
+    _assert_retained_history_hold(carrier, path.parent)
+    assert path.with_name("attempt.json").read_bytes() == original_attempt
+
+
+@pytest.mark.parametrize("disappearance", ["before-admission", "between-reads"])
+def test_historical_correction_with_unavailable_base_holds_without_fetch(
+    carrier, monkeypatch, legacy_native_review, disappearance,
+):
+    path, _ = legacy_native_review()
+    (carrier.root / "earlier.py").write_text("value = 3  # corrected candidate\n")
+    git(carrier.root, "add", "earlier.py")
+    git(carrier.root, "commit", "-m", "correct historical input")
+    carrier.head = git(carrier.root, "rev-parse", "HEAD")
+    carrier.result["commit_sha"] = carrier.pr["headRefOid"] = carrier.head
+    _native_continuation(carrier)
+    local = carrier.run_command
+    base_read = False
+
+    def unavailable(args, **kwargs):
+        nonlocal base_read
+        if args == ["git", "cat-file", "-e", f"{carrier.base}^{{commit}}"]:
+            if disappearance == "between-reads" and not base_read:
+                base_read = True
+                return local(args, **kwargs)
+            carrier.commands.append(args)
+            raise subprocess.CalledProcessError(1, args, stderr="historical object unavailable")
+        if disappearance == "between-reads" and base_read and args[:2] == ["git", "merge-base"]:
+            carrier.commands.append(args)
+            raise subprocess.CalledProcessError(1, args, stderr="historical object disappeared")
+        return local(args, **kwargs)
+
+    monkeypatch.setattr(commit, "_run", unavailable)
+    _assert_retained_history_hold(carrier, path.parent)

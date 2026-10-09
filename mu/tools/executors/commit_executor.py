@@ -31,6 +31,7 @@ import argparse
 import copy
 import fcntl
 from contextlib import contextmanager
+from dataclasses import asdict
 from datetime import datetime, timezone
 import hashlib
 import inspect
@@ -11378,7 +11379,7 @@ def _local_quota_review_identity(
 
 
 def _quota_review_git_identity(
-    repo_root: Path, *, base_sha: str, head_sha: str,
+    repo_root: Path, *, base_sha: str, head_sha: str, fetch_missing_base: bool = True,
 ) -> tuple[dict[str, Any], str]:
     """Recompute the complete immutable Git diff, including on native reload."""
     if not all(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
@@ -11389,6 +11390,8 @@ def _quota_review_git_identity(
     try:
         _run(["git", "cat-file", "-e", f"{base_sha}^{{commit}}"], cwd=repo_root)
     except subprocess.CalledProcessError:
+        if not fetch_missing_base:
+            raise
         _run(["git", "fetch", "--no-tags", "origin", base_sha], cwd=repo_root, timeout=60)
         _run(["git", "cat-file", "-e", f"{base_sha}^{{commit}}"], cwd=repo_root)
     merge_base = _run(["git", "merge-base", "--all", base_sha, head_sha], cwd=repo_root).stdout.strip()
@@ -11455,6 +11458,19 @@ def _local_quota_review_envelope(
                    and isinstance(e["item"].get("text"), str) and e["item"]["text"].strip()]
     if not agent_texts or stdout != "\n".join(agent_texts):
         raise ValueError("Local review verdict is not authoritative agent stdout")
+    return _local_quota_review_bound_envelope(
+        stdout, job_id=job_id, turn_id=turn_id, identity=identity,
+    )
+
+
+def _local_quota_review_bound_envelope(
+    stdout: str, *, job_id: str, turn_id: str, identity: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind the native prompt or verdict with the same strict envelope parser.
+
+    Parsing the prompt establishes historical ownership only; approval still
+    requires the authoritative completed provider transcript and explicit GO.
+    """
     candidates = _bridge_adapters.extract_agent_envelope_candidates(stdout)
     if len(candidates) != 1:
         raise ValueError("Local review requires exactly one native verdict envelope")
@@ -11564,7 +11580,361 @@ def _verify_local_quota_review(
         raise ValueError(f"Unresolved retained sweep findings block local approval/merge: {sweep_findings}")
 
 
+class LocalQuotaReviewStopped(ValueError):
+    """A native attempt spent its review authority; only a correction can proceed."""
+
+    def __init__(self, proof: dict[str, Any]) -> None:
+        self.proof = proof
+        super().__init__(f"Local quota review stopped; evidence: {proof['receipt_path']}")
+
+
+class LocalQuotaReviewHeld(ValueError):
+    """Admission ownership or retained evidence needs governed repair."""
+
+
+def _local_review_evidence_hold(result: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {
+        "status": "held", "step": "ensure_review_clear_and_merge",
+        "failure_class": "local_review_evidence_hold", "retry_allowed": False,
+        "errors": [f"Native local-review evidence needs repair: {reason}"],
+        "steps_completed": result.get("steps_completed", []), "pr_number": result.get("pr_number"),
+    }
+
+
+def _local_review_owned_path(repo_root: Path, path: Path) -> Path:
+    """Only literal paths under a governed repository bus may own evidence."""
+    root = repo_root.resolve()
+    path = path if path.is_absolute() else root / path
+    relative = path.relative_to(root)
+    if not relative.parts:
+        raise ValueError("Native local-review evidence has no governed bus")
+    bus = resolve_agent_bus_dir(root, relative.parts[0])
+    if ".." in relative.parts or path.resolve() != path:
+        raise ValueError("Native local-review evidence uses path indirection")
+    for parent in (path, *path.parents):
+        if parent == root:
+            break
+        if parent.is_symlink():
+            raise ValueError("Native local-review evidence uses a symlink")
+        if parent != path and parent.exists() and not parent.is_dir():
+            raise ValueError("Native local-review evidence parent is not a directory")
+    if not path.is_relative_to(bus):
+        raise ValueError("Native local-review evidence escapes its governed bus")
+    return path
+
+
+def _local_review_admission_dir(repo_root: Path) -> Path:
+    # Explicit canonical bus: neither the selected bus nor environment chooses
+    # this owner. Bus-local raw evidence remains at its original native paths.
+    return _local_review_owned_path(
+        repo_root, Path(".agent_bus/meta/local_pr_review_admissions"),
+    )
+
+
+def _local_review_directory_entries(repo_root: Path, directory: Path) -> list[Path]:
+    # glob silently suppresses unreadable/non-directory errors. Only absence
+    # means no historical owner; damaged storage must hold before external I/O.
+    directory = _local_review_owned_path(repo_root, directory)
+    try:
+        return sorted(directory.iterdir())
+    except FileNotFoundError:
+        return []
+
+
+@contextmanager
+def _local_review_admission_lock(repo_root: Path):
+    try:
+        directory = _local_review_admission_dir(repo_root)
+        _mkdir_durable(directory)
+        path = _local_review_owned_path(repo_root, directory / "admission.lock")
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise LocalQuotaReviewHeld(str(exc)) from exc
+    with os.fdopen(fd, "a+") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            raise LocalQuotaReviewHeld("Another native local review owns admission") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _local_review_attempt_proofs(repo_root: Path):
+    """Canonical anchors plus bounded, read-only discovery of older receipts.
+
+    Historical evidence can stop admission, never provide fresh approval. Walk
+    only governed root buses and the one native review directory, not archives,
+    other worktrees or arbitrary filesystem roots.
+    """
+    owned = set()
+    for owner_path in _local_review_directory_entries(repo_root, _local_review_admission_dir(repo_root)):
+        if not owner_path.match("local-pr-review-*.json"):
+            continue
+        owner = json.loads(_local_review_owned_path(repo_root, owner_path).read_text())
+        if owner["version"] != 1:
+            raise ValueError("Unknown native local-review admission owner")
+        started = owner["attempt"]
+        path = _local_review_owned_path(repo_root, Path(started["receipt_path"]))
+        attempt = path.parent
+        if (path.name != "attempt.json" or attempt.name != owner_path.stem
+                or attempt.parent.name != "local_pr_reviews" or attempt.parent.parent.name != "meta"
+                or len(path.relative_to(repo_root.resolve()).parts) != 5
+                or started != _local_review_proof(repo_root, path)
+                or started["receipt"]["status"] != "STARTED"):
+            raise ValueError("Native local-review admission binding changed")
+        owned.add(attempt)
+        completed = owner.get("completion")
+        final_path = _local_review_owned_path(repo_root, attempt / "receipt.json")
+        proof = _local_review_proof(repo_root, final_path) if final_path.exists() else started
+        if completed is not None and completed != proof:
+            raise ValueError("Native local-review owned receipt changed or disappeared")
+        if any(proof["receipt"].get(key) != started["receipt"].get(key) for key in (
+                "identity", "request_comment", "reviewer", "source_sha256", "job_id", "turn_id", "wave_id")):
+            raise ValueError("Native local-review candidate/request binding changed")
+        if completed is None and proof["receipt"].get("status") == "APPROVED":
+            proof = started  # Interrupted publication cannot release spent admission.
+        yield attempt, proof
+    for bus in sorted(repo_root.resolve().iterdir()):
+        try:
+            # Validate the namespace separately so invalid names are ignored,
+            # while symlinked governed evidence fails closed below.
+            agent_bus_relpath(bus.name)
+        except ExecutorCommonError:
+            continue
+        directory = bus / "meta/local_pr_reviews"
+        for attempt in _local_review_directory_entries(repo_root, directory):
+            if not attempt.match("local-pr-review-*") or attempt in owned:
+                continue
+            path = _local_review_owned_path(repo_root, attempt / "receipt.json")
+            if not path.exists():
+                path = _local_review_owned_path(repo_root, attempt / "attempt.json")
+            if path.exists():
+                yield attempt, _local_review_proof(repo_root, path)
+            else:
+                # Native v1 never wrote attempt/terminal markers. The discovered
+                # directory itself is evidence of an attempted publication, even
+                # if only raw/prompt/diff, a partial file, or an empty dir remains.
+                raise ValueError(f"Native local-review metadata disappeared: {attempt}")
+
+
+def _local_review_proof(repo_root: Path, path: Path) -> dict[str, Any]:
+    raw = path.read_bytes()
+    return {
+        "source": "commit_executor", "receipt_path": str(path.relative_to(repo_root)),
+        "receipt_sha256": hashlib.sha256(raw).hexdigest(), "receipt": json.loads(raw),
+    }
+
+
+def _local_review_terminal_result(result: dict[str, Any], proof: dict[str, Any]) -> dict[str, Any]:
+    receipt = proof["receipt"]
+    identity = receipt["identity"]
+    return {
+        "status": "error", "executor": "commit_executor", "step": "ensure_review_clear_and_merge",
+        "failure_class": "local_review_terminal", "terminal_decision": "REPAIR_REQUIRED",
+        "retry_allowed": False, "wave_id": receipt["wave_id"],
+        "commit_sha": identity["head_sha"], "pr_number": str(identity["pr_number"]),
+        "steps_completed": result.get("steps_completed", []), "local_pr_review": proof,
+        "errors": [receipt.get("error") or "Local review interrupted before durable approval",
+                   "This candidate has no local approval. Preserve evidence and obtain a governed correction."],
+    }
+
+
+def _validate_local_review_historical_approval(
+    repo_root: Path, attempt: Path, receipt: dict[str, Any],
+) -> None:
+    """A receipt's copied verdict cannot overrule its retained native evidence."""
+    paths = {name: _local_review_owned_path(repo_root, attempt / name)
+             for name in ("pr.diff", "prompt.md", "raw.jsonl")}
+    required = {str(path.relative_to(repo_root)) for path in paths.values()}
+    artifacts = receipt["artifacts"]
+    observed = receipt.get("observed_artifact_sha256", artifacts)
+    # Both native generations retain these three artifacts on success. Checking
+    # only the entries a receipt volunteers would let omission erase a negative
+    # raw verdict, or let post-review damage replace the original input hashes.
+    if (not isinstance(artifacts, dict) or not required.issubset(artifacts)
+            or observed != artifacts
+            or artifacts[str(paths["pr.diff"].relative_to(repo_root))] != receipt["identity"]["diff_sha256"]):
+        raise ValueError("Incomplete or conflicting native local-review approval artifacts")
+    if (type(receipt.get("version")) is not int or receipt["version"] not in {1, 2}
+            or type(receipt.get("process_exit_code")) is not int or receipt["process_exit_code"] != 0
+            or not receipt.get("finished_at_utc") or "error" in receipt or "provider_refusal" in receipt):
+        raise ValueError("Historical local-review approval retains a failed or incomplete outcome")
+    envelope = _local_quota_review_envelope(
+        receipt["output"], paths["raw.jsonl"].read_text(encoding="utf-8"),
+        job_id=receipt["job_id"], turn_id=receipt["turn_id"], identity=receipt["identity"],
+    )
+    if envelope != receipt["envelope"]:
+        raise ValueError("Historical local-review receipt contradicts its native raw verdict")
+    _require_local_quota_review_approval(envelope)
+
+
+def _validate_local_review_historical_binding(
+    repo_root: Path, attempt: Path, receipt: dict[str, Any],
+) -> None:
+    """Validate retained ownership before using any header to exclude history.
+
+    Both native generations put the full identity in the hashed prompt. A
+    receipt's editable scope cannot supersede that independent input or any
+    retained output. STARTED owns admission even before a raw file exists.
+    """
+    identity = receipt["identity"]
+    if (type(receipt.get("version")) is not int or receipt["version"] not in {1, 2}
+            or receipt.get("receipt_type") != "github_quota_local_review"
+            or receipt.get("status") not in {"STARTED", "ERROR", "APPROVED"}
+            or receipt.get("job_id") != attempt.name
+            or receipt.get("turn_id") != attempt.name + "--reviewer"
+            or not isinstance(identity, dict)
+            or type(identity.get("pr_number")) is not int or identity["pr_number"] <= 0
+            or any(not isinstance(identity.get(key), str) or not identity[key]
+                   for key in ("repo_root", "repository", "url", "head_branch", "base_branch"))
+            or not Path(identity["repo_root"]).is_absolute()
+            or identity["url"] != f"https://github.com/{identity['repository']}/pull/{identity['pr_number']}"
+            or any(not isinstance(identity.get(key), str) or not re.fullmatch(r"[0-9a-f]{40}", identity[key])
+                   for key in ("head_sha", "base_sha", "merge_base_sha"))
+            or not isinstance(identity.get("diff_sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", identity["diff_sha256"])
+            or identity.get("diff_command") != [
+                "git", "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--binary", "--full-index",
+                f"{identity['merge_base_sha']}..{identity['head_sha']}", "--"]):
+        raise ValueError("Unbound native local-review historical identity")
+    names = ["pr.diff", "prompt.md"]
+    if receipt["status"] != "STARTED":
+        names.append("raw.jsonl")
+        if receipt["version"] == 2:
+            names.append("attempt.json")
+    required = {str((attempt / name).relative_to(repo_root)) for name in names}
+    artifacts = receipt["artifacts"]
+    observed = receipt.get("observed_artifact_sha256", artifacts)
+    if (not isinstance(artifacts, dict) or not required.issubset(artifacts)
+            or observed != artifacts
+            or artifacts[str((attempt / "pr.diff").relative_to(repo_root))] != identity["diff_sha256"]):
+        raise ValueError("Incomplete or conflicting native local-review historical artifacts")
+    for relpath, digest in artifacts.items():
+        artifact = _local_review_owned_path(repo_root, Path(relpath))
+        if artifact.parent != attempt or hashlib.sha256(artifact.read_bytes()).hexdigest() != digest:
+            raise ValueError("Native local-review artifact changed")
+    binding = dict(job_id=receipt["job_id"], turn_id=receipt["turn_id"], identity=identity)
+    prompt = _local_review_owned_path(repo_root, attempt / "prompt.md").read_text(encoding="utf-8")
+    _local_quota_review_bound_envelope(prompt, **binding)
+    if receipt["status"] == "STARTED":
+        return  # The durable input is sufficient to fence interrupted entry.
+    started_path = _local_review_owned_path(repo_root, attempt / "attempt.json")
+    if started_path.exists():
+        # Unindexed v2 history still retains its independently written input;
+        # losing the canonical owner/terminal marker cannot unbind that input.
+        started = _local_review_proof(repo_root, started_path)["receipt"]
+        if (started.get("status") != "STARTED"
+                or any(started.get(key) != receipt.get(key) for key in (
+                    "identity", "request_comment", "reviewer", "source_sha256", "job_id", "turn_id", "wave_id"))):
+            raise ValueError("Native local-review historical attempt binding changed")
+        _validate_local_review_historical_binding(repo_root, attempt, started)
+    raw = _local_review_owned_path(repo_root, attempt / "raw.jsonl").read_text(encoding="utf-8")
+    if "envelope" in receipt:
+        envelope = _local_quota_review_envelope(receipt["output"], raw, **binding)
+        if envelope != receipt["envelope"]:
+            raise ValueError("Historical local-review receipt contradicts its native raw verdict")
+    else:
+        # A refused, failed or malformed turn can lack a completed envelope.
+        # Still reject any contradictory ownership it did retain; failure does
+        # not make a copied output or an edited scope trustworthy.
+        texts = [receipt.get("output", "")]
+        for line in raw.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            item = event.get("item") if isinstance(event, dict) else None
+            if (isinstance(item, dict) and item.get("type") == "agent_message"
+                    and isinstance(item.get("text"), str)):
+                texts.append(item["text"])
+        for text in texts:
+            if _bridge_adapters.extract_agent_envelope_candidates(text):
+                _local_quota_review_bound_envelope(text, **binding)
+
+
+def _prior_local_review_stop(
+    repo_root: Path, result: dict[str, Any], *, target_branch: str, base_branch: str,
+) -> dict[str, Any] | None:
+    """Consult native append-only attempts before any review/remediation/merge.
+
+    A new comment or wave cannot clear a failed head. A corrected head must pass
+    normal admission and fresh review; every old receipt remains historical.
+    An attempt persisted before provider entry also fences process interruption.
+    """
+    try:
+        attempts = list(_local_review_attempt_proofs(repo_root))
+        if not attempts:
+            return None
+        head = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+        repository = "/".join(_parse_origin_owner_repo(repo_root))
+        for attempt, proof in attempts:
+            receipt = proof["receipt"]
+            identity = receipt["identity"]
+            _validate_local_review_historical_binding(repo_root, attempt, receipt)
+            scope = {
+                "repo_root": str(repo_root.resolve()), "repository": repository,
+                "pr_number": int(result.get("pr_number") or 0),
+                "head_branch": target_branch, "base_branch": base_branch,
+            }
+            # A negative marker anchors the final bytes independently of the
+            # receipt; never overwrite it or silently accept changed evidence.
+            marker = _local_review_owned_path(repo_root, attempt / "terminal.json")
+            if marker.exists() and json.loads(marker.read_text()) != {k: proof[k] for k in ("receipt_path", "receipt_sha256")}:
+                raise ValueError("Native local-review terminal receipt changed")
+            if receipt.get("status") == "APPROVED" and not marker.exists():
+                _validate_local_review_historical_approval(repo_root, attempt, receipt)
+                continue  # Approval is not reused; retain the existing fresh-review path.
+            if receipt.get("status") not in {"ERROR", "STARTED"}:
+                raise ValueError("Unknown native local-review outcome")
+            terminal = _local_review_terminal_result(result, proof)
+            from recovery_gate import local_review_terminal_payload
+            if local_review_terminal_payload(terminal) is None:
+                raise ValueError("Incomplete native local-review terminal binding")
+            if any(identity[key] != value for key, value in scope.items()):
+                continue  # Only validated foreign evidence can be excluded.
+            if identity["head_sha"] != head:
+                # An empty commit changes the object ID, not the review input.
+                # Only changed PR content can admit a fresh correction review.
+                # Unresolvable history must hold without fetching, including
+                # an object lost between successive local Git reads.
+                current, _ = _quota_review_git_identity(
+                    repo_root, base_sha=identity["base_sha"], head_sha=head, fetch_missing_base=False,
+                )
+                if current["diff_sha256"] == identity["diff_sha256"]:
+                    raise ValueError("New head retains unchanged PR content after a negative local review")
+                continue
+            return terminal
+    except (OSError, ValueError, KeyError, TypeError, AttributeError,
+            ExecutorCommonError, subprocess.SubprocessError) as exc:
+        return _local_review_evidence_hold(result, str(exc))
+    return None
+
+
 def _run_local_quota_review(
+    *, repo_root: Path, pr_data: dict[str, Any], result: dict[str, Any], wave_id: str,
+    repo_owner: str, repo_name: str, pr_number: str, head_sha: str,
+    target_branch: str, base_branch: str, continuation_path: Path,
+) -> dict[str, Any]:
+    """Serialize native admission across every governed bus before provider entry."""
+    with _local_review_admission_lock(repo_root):
+        stop = _prior_local_review_stop(
+            repo_root, result, target_branch=target_branch, base_branch=base_branch,
+        )
+        if stop is not None:
+            if stop["failure_class"] == "local_review_terminal":
+                raise LocalQuotaReviewStopped(stop["local_pr_review"])
+            raise LocalQuotaReviewHeld("; ".join(stop["errors"]))
+        return _run_admitted_local_quota_review(
+            repo_root=repo_root, pr_data=pr_data, result=result, wave_id=wave_id,
+            repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+            head_sha=head_sha, target_branch=target_branch, base_branch=base_branch,
+            continuation_path=continuation_path,
+        )
+
+
+def _run_admitted_local_quota_review(
     *, repo_root: Path, pr_data: dict[str, Any], result: dict[str, Any], wave_id: str,
     repo_owner: str, repo_name: str, pr_number: str, head_sha: str,
     target_branch: str, base_branch: str, continuation_path: Path,
@@ -11598,7 +11968,9 @@ def _run_local_quota_review(
     source_digest = _local_quota_review_source_digest(repo_root)
     job_id = f"local-pr-review-{uuid.uuid4().hex}"
     turn_id = f"{job_id}--reviewer"
-    directory = agent_bus_path(repo_root, _active_bus_dir(), "meta", "local_pr_reviews", job_id)
+    directory = _local_review_owned_path(
+        repo_root, agent_bus_path(repo_root, _active_bus_dir(), "meta", "local_pr_reviews", job_id),
+    )
     directory.mkdir(parents=True, exist_ok=False)
     diff_path, prompt_path, raw_path = (directory / name for name in ("pr.diff", "prompt.md", "raw.jsonl"))
     diff_path.write_text(diff, encoding="utf-8")
@@ -11630,7 +12002,7 @@ def _run_local_quota_review(
     )
     prompt_path.write_text(prompt, encoding="utf-8")
     review = {
-        "version": 1, "receipt_type": "github_quota_local_review", "wave_id": wave_id,
+        "version": 2, "receipt_type": "github_quota_local_review", "wave_id": wave_id,
         "job_id": job_id, "turn_id": turn_id, "identity": identity, "reviewer": provenance,
         "quota_comment": matching[0], "source_sha256": source_digest,
         "request_comment": request,
@@ -11639,7 +12011,22 @@ def _run_local_quota_review(
         "started_at_utc": datetime.now(timezone.utc).isoformat(), "status": "ERROR",
     }
     receipt_path = directory / "receipt.json"
+    attempt_path = directory / "attempt.json"
+    # Spend this exact candidate/request before crossing the provider boundary.
+    # A killed process leaves an immutable STARTED record, never fresh authority.
+    for path in (diff_path, prompt_path):
+        with path.open("rb") as artifact:
+            os.fsync(artifact.fileno())
+    _atomic_write_fsynced_json(attempt_path, {**review, "status": "STARTED"})
+    owner_path = _local_review_admission_dir(repo_root) / f"{job_id}.json"
+    owner = {"version": 1, "attempt": _local_review_proof(repo_root, attempt_path)}
+    try:
+        _atomic_write_fsynced_json(owner_path, owner)
+    except OSError as exc:
+        raise LocalQuotaReviewStopped(owner["attempt"]) from exc
+    review["artifacts"][str(attempt_path.relative_to(repo_root))] = hashlib.sha256(attempt_path.read_bytes()).hexdigest()
     result["local_pr_review"] = {"receipt_path": str(receipt_path.relative_to(repo_root)), "status": "ERROR"}
+    failure: Exception | None = None
     try:
         output = _bridge_adapters.run_adapter(
             adapter, prompt_text=prompt, prompt_path=prompt_path, repo_root=repo_root,
@@ -11664,22 +12051,49 @@ def _run_local_quota_review(
         )
         review["status"] = "APPROVED"
     except Exception as exc:
+        failure = exc
         review["error"] = str(exc)
         if getattr(exc, "returncode", None) is not None:
             review["process_exit_code"] = exc.returncode
-        raise ValueError(f"Local quota review stopped: {exc}; evidence: {receipt_path}") from exc
+        if isinstance(exc, _bridge_adapters.BridgeAdapterError):
+            for key in ("output", "raw_stdout", "raw_stderr"):
+                value = getattr(exc, key, None)
+                if value is not None:
+                    review[key] = value
+                    review[key + "_sha256"] = hashlib.sha256(value.encode()).hexdigest()
+            refusal = exc.provider_refusal
+            if (isinstance(refusal, _bridge_adapters.CodexProviderSafetyRefusal)
+                    and refusal.job_id == job_id and refusal.turn_id == turn_id
+                    and refusal.agent_role == "reviewer" and refusal.provider == adapter.name
+                    and refusal.returncode == exc.returncode
+                    and refusal.raw_stdout == exc.raw_stdout
+                    and refusal.raw_stderr == (exc.raw_stderr or "")):
+                review["provider_refusal"] = asdict(refusal)
     finally:
         review["finished_at_utc"] = datetime.now(timezone.utc).isoformat()
-        for path in (diff_path, prompt_path, raw_path):
-            if path.exists():
-                with path.open("rb") as artifact:
-                    os.fsync(artifact.fileno())
-                relpath = str(path.relative_to(repo_root))
-                digest = hashlib.sha256(path.read_bytes()).hexdigest()
-                review["artifacts"].setdefault(relpath, digest)
-                review.setdefault("observed_artifact_sha256", {})[relpath] = digest
-        _atomic_write_fsynced_json(receipt_path, review)
-        result["local_pr_review"].update(status=review["status"], receipt_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest())
+        try:
+            for path in (diff_path, prompt_path, raw_path, attempt_path):
+                if path.exists():
+                    with path.open("rb") as artifact:
+                        os.fsync(artifact.fileno())
+                    relpath = str(path.relative_to(repo_root))
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                    review["artifacts"].setdefault(relpath, digest)
+                    review.setdefault("observed_artifact_sha256", {})[relpath] = digest
+            _atomic_write_fsynced_json(receipt_path, review)
+            result["local_pr_review"].update(status=review["status"], receipt_sha256=hashlib.sha256(receipt_path.read_bytes()).hexdigest())
+            if review["status"] != "APPROVED":
+                proof = _local_review_proof(repo_root, receipt_path)
+                _atomic_write_fsynced_json(directory / "terminal.json", {k: proof[k] for k in ("receipt_path", "receipt_sha256")})
+            _atomic_write_fsynced_json(owner_path, {**owner, "completion": _local_review_proof(repo_root, receipt_path)})
+        except OSError as exc:
+            # The pre-call admission is already durable. Persistence failure
+            # cannot turn the spent attempt into generic recoverable work.
+            proof = _local_review_proof(repo_root, attempt_path)
+            proof["persistence_error"] = str(exc)
+            raise LocalQuotaReviewStopped(proof) from exc
+    if failure is not None:
+        raise LocalQuotaReviewStopped(proof) from failure
     review["artifacts"][str(receipt_path.relative_to(repo_root))] = result["local_pr_review"]["receipt_sha256"]
     return review
 
@@ -17635,6 +18049,12 @@ def _run_post_commit_pipeline_impl(
             continuation_path=continuation_path, log=log,
         )
 
+    local_stop = _prior_local_review_stop(
+        repo_root, result, target_branch=target_branch, base_branch=base_branch,
+    )
+    if local_stop is not None:
+        return local_stop
+
     # ── Step 11: run_pre_push_script ──────────────────────────────────
     if "run_pre_push_script" not in result["steps_completed"]:
         pre_push_script = repo_root / "mu" / "tools" / "hooks" / "pre-push-fast"
@@ -18145,6 +18565,10 @@ def _run_post_commit_pipeline_impl(
                 base_branch=base_branch, continuation_path=continuation_path,
             )
             log(f"Step 15: independent local quota review approved {head_sha_before_merge[:8]}")
+        except LocalQuotaReviewStopped as exc:
+            return _local_review_terminal_result(result, exc.proof)
+        except LocalQuotaReviewHeld as exc:
+            return _local_review_evidence_hold(result, str(exc))
         except Exception as exc:
             return {"status": "error", "step": "ensure_review_clear_and_merge",
                     "errors": [f"Connector usage-limit exhaustion; local review blocked: {exc}"],

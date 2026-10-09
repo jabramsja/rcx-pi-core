@@ -127,6 +127,7 @@ except ImportError:
 try:
     from recovery_gate import (
         attempt_recovery,
+        local_review_terminal_payload,
         clear_stale_recovery_status_on_success,
         _normalize_phase_a_retry_plan_name,
     )
@@ -139,6 +140,7 @@ except ImportError:
     sys.modules["recovery_gate"] = _recovery_mod
     _recovery_spec.loader.exec_module(_recovery_mod)
     attempt_recovery = _recovery_mod.attempt_recovery
+    local_review_terminal_payload = _recovery_mod.local_review_terminal_payload
     clear_stale_recovery_status_on_success = _recovery_mod.clear_stale_recovery_status_on_success
     _normalize_phase_a_retry_plan_name = _recovery_mod._normalize_phase_a_retry_plan_name
 
@@ -2292,6 +2294,9 @@ def run_recoverable_surface_command(
             if _is_protected_ordinary_dispatch_error(result, repo_root=repo_root, bus_dir=bus_dir):
                 _emit_surface_stop_result(result, json_output=bool(getattr(args, "json", False)))
                 break
+            if local_review_terminal_payload(result) is not None:
+                _emit_executor_hard_fail_event(repo_root, result, wave_id, surface_record, bus_dir=bus_dir)
+                break
             embedded_recovery = result.get("recovery")
             if isinstance(embedded_recovery, dict) and embedded_recovery.get("recovered"):
                 if getattr(args, "verbose", False):
@@ -2464,7 +2469,12 @@ def _is_terminal_executor_outcome(result: dict[str, Any]) -> bool:
     max bridge rounds exhausted) should not be retried — retrying would
     re-invoke the executor with the same inputs and the same result.
     """
+    if local_review_terminal_payload(result) is not None:
+        return True
     stdout = result.get("stdout", "")
+    if result.get("executor") == "commit_executor":
+        payload = _extract_structured_stdout_payload(stdout)
+        return isinstance(payload, dict) and payload.get("status") in _TERMINAL_EXECUTOR_STATUSES
     if not stdout:
         return False
     # Try full JSON parse (executor with --json)
@@ -2499,7 +2509,7 @@ def _is_chained_commit_failure(result: dict[str, Any]) -> bool:
     fail while earlier phases succeeded.  Retrying should only re-run the
     commit executor, not the full chain.
     """
-    if _looks_like_private_attr_test_integrity_failure(result):
+    if local_review_terminal_payload(result) is not None or _looks_like_private_attr_test_integrity_failure(result):
         return False
     return (
         result.get("status") == "failed"
@@ -2544,35 +2554,21 @@ def _classify_commit_executor_result(
     if commit_result.returncode != 0:
         return "failed", "COMMIT_GO"
     stdout = commit_result.stdout or ""
-    try:
-        payload = json.loads(stdout)
-        if isinstance(payload, dict):
-            status = payload.get("status")
-            if status == "held":
-                return "held", "COMMIT_HELD"
-            if status == "success":
-                return "success", "COMMIT_GO"
-            if status in {"error", "failed", "timeout"}:
-                return "failed", "COMMIT_GO"
-    except (json.JSONDecodeError, ValueError, TypeError):
-        pass
-    for line in stdout.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("{"):
-            continue
-        try:
-            payload = json.loads(stripped)
-        except (json.JSONDecodeError, ValueError, TypeError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+    payload = _extract_structured_stdout_payload(stdout)
+    if payload is not None:
         status = payload.get("status")
+        if payload.get("failure_class") == "local_review_terminal":
+            return "failed", "COMMIT_GO"
         if status == "held":
             return "held", "COMMIT_HELD"
         if status == "success":
             return "success", "COMMIT_GO"
-        if status in {"error", "failed", "timeout"}:
-            return "failed", "COMMIT_GO"
+        return "failed", "COMMIT_GO"
+    # A malformed/ambiguous JSON result cannot become success by exit code or
+    # by borrowing a compact nested status. Keep legacy text-only output.
+    if any(line.lstrip().startswith(("{", '[{', '["')) or line.strip() == "["
+           for line in stdout.splitlines()):
+        return "failed", "COMMIT_GO"
     if "[commit-executor] Status: held" in stdout:
         return "held", "COMMIT_HELD"
     if "[commit-executor] Status: error" in stdout:
@@ -6018,6 +6014,12 @@ def main(argv: list[str] | None = None) -> int:
                         bus_dir=args.bus_dir,
                     )
                 if _is_protected_ordinary_dispatch_error(result, repo_root=repo_root, bus_dir=args.bus_dir):
+                    break
+                if local_review_terminal_payload(result) is not None:
+                    _emit_executor_hard_fail_event(
+                        repo_root, result, str(record.get("wave_name") or record.get("wave_id") or ""),
+                        record, bus_dir=args.bus_dir,
+                    )
                     break
                 embedded_recovery = result.get("recovery")
                 if isinstance(embedded_recovery, dict) and embedded_recovery.get("recovered"):
