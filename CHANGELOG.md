@@ -6,6 +6,49 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-12
 
+### Bounded authenticated clearance wording (Phase B local validation PASS)
+
+- Accept the captured complete service sentence `Already looking forward to the
+  next diff.` alongside `Nice work!`. Keep compact forms, full-message consumption,
+  the 65,536-character limit, explicit head token and exact known footer. The
+  classification, authentication, request/time, finding and merge gates are unchanged.
+- Pin the complete PR1332 comment6132765003 as an offline fixture. Disposable real
+  Git carriers exercise Step15, quota-history clearance and protected exact-head
+  merge with fake remote/model I/O. Add both-form actor/request/head/time/pagination
+  and mixed-content negatives, plus new-variant retained finding channels; preserve
+  every baseline collected node and assertion. Baseline collection passed2,343,
+  exit0; corrected cohort and unchanged integrity receipts are recorded in
+  `reports/control_plane/workingrcx-local-review-clearance-format-r1-2026-10-12_2026-10-12_implementation_evidence.json`.
+- Retain the first corrected-source gate:2,531passed/4failed in206.55s, exit1.
+  The four new initial missing/wrong recorded-head cases exposed the fixture's
+  reused request ID when native code posts a new request. Give that fake post a
+  distinct ID and require the old response to HOLD; preserve the direct native
+  binding rejection, baseline assertions and full failure output. Production
+  authority is unchanged. The repeated complete declared cohort passed2,535tests
+  in194.07s, exit0 (194.442s process wall); unchanged test integrity passed, exit0.
+  All2,343baseline nodes and674original assertions remain, with192new cases.
+  The final tracker bytes receive the same declared gate; its receipt remains
+  separate in the implementation evidence.
+- R10's native COMMIT_GO decisions, published e043 commit and green-gate38306008740
+  are real historical outcomes: CI recorded14,381passed/22skipped, then516passed
+  and154passed. The authenticated21:17:21Z service response names e043abde39;
+  the strict parser rejected its courtesy sentence. Terminal snapshot586b37ae
+  preserves122files/bridge integrity. Service review, native clearance, CI,
+  publication, preservation and actual landing remain separate.
+- Reconcile PRIMARY observations and the current checkpoint/to-do/rows38/40 under
+  the existing owner. Retain268IDs,44owners, historical notes, R1 interruption,
+  a705 approval=false, a928 negative review and R6/R7/R8/R9 terminal histories.
+  Keep the same physical checkout, e043 comparison and original PR1332 branch.
+  Cap175/64 and historical provenance remain unchanged; packet/indicator generation
+  and indexed handoff verification belong to native automation.
+- Fresh independent review, native final validation/commit/pre-push, corrected-head
+  CI and authenticated full-PR review, protected PR1332 merge and PRIMARY sync
+  remain required. Then verify PR1331 disposition, prepared folder work, separate
+  retention and final coverage/native disposition/physical/useful-work obligations.
+  Unlaunched v4 drafts require a fresh landed base; pausedPR1325, unrelated WIP,
+  startup-canary and PRIMARY docs-registry limitations remain protected.
+
+
 ### Explicit original-PR candidate admission (R10 Phase B)
 
 - R10 Phase B local validation PASS2204/150.33s, exit0 (185.489s process wall time). The exact

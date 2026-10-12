@@ -96,6 +96,37 @@ SERVICE_CLEAR = (
 )
 
 
+# Exact PR1332 comment 6132765003, captured 2026-10-12 from raw GitHub
+# evidence SHA256 627391cd8b71248578e66cba17ff4297b20fff0bedce8096f7dbc972372f3aeb.
+# Retain its actor, timestamp, reviewed head and all body whitespace offline.
+SERVICE_CLEAR_NEXT_DIFF = {'author': {'__typename': 'Bot', 'login': 'chatgpt-codex-connector'},
+ 'body': "Codex Review: Didn't find any major issues. Already looking forward to the next diff.\n"
+         '\n'
+         '**Reviewed commit:** `e043abde39`\n'
+         '\n'
+         '<details> <summary>ℹ️ About Codex in GitHub</summary>\n'
+         '<br/>\n'
+         '\n'
+         '[Your team has set up Codex to review pull requests in this '
+         'repo](https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you\n'
+         '- Open a pull request for review\n'
+         '- Mark a draft as ready\n'
+         '- Comment "@codex review".\n'
+         '\n'
+         'If Codex has suggestions, it will comment; otherwise it will react with 👍.\n'
+         '\n'
+         '\n'
+         '\n'
+         '\n'
+         'Codex can also answer questions or update the PR. Try commenting "@codex address that '
+         'feedback".\n'
+         '            \n'
+         '</details>',
+ 'createdAt': '2026-10-12T21:17:21Z',
+ 'databaseId': 6132765003}
+SERVICE_CLEAR_NEXT_DIFF_BODY_SHA256 = "4c58eb3e6877fe3830c8187f8c94e61ea9e561a553ac6d729bd3ca6ff371c494"
+
+
 # Complete PR1332 formal body and unresolved P1, saved 2026-10-07T23:50:09Z.
 SAVED_REVIEW_HEAD = 'bb837df21e053ce5ad577e36550cb1126dc97055'
 SERVICE_FORMAL_REVIEW = {'author': {'login': 'chatgpt-codex-connector', '__typename': 'Bot'},
@@ -1145,6 +1176,13 @@ def _cloud_clearance(carrier, form="service"):
         carrier.pr["comments"]["nodes"].append({
             "databaseId": 6047647915, "author": {"login": BOT, "__typename": "Bot"},
             "body": body, "createdAt": "2026-10-04T13:09:00Z"})
+        if form == "next-diff":
+            observed = copy.deepcopy(SERVICE_CLEAR_NEXT_DIFF)
+            # Model a fresh response for this disposable Git head and request;
+            # never edit the captured fixture or use it as live authority.
+            observed["body"] = observed["body"].replace("`e043abde39`", f"`{carrier.head[:10]}`")
+            observed["createdAt"] = "2026-10-04T13:09:00Z"
+            carrier.pr["comments"]["nodes"][-1] = observed
 
 
 @pytest.mark.parametrize("phase", ["initial", "review", "ci"])
@@ -1276,7 +1314,7 @@ def test_formal_metadata_preserves_real_threads_and_review_gates(carrier, fault)
     assert all(p.read_bytes() == value for p, value in prior.items())
 
 
-@pytest.mark.parametrize("form", ["service", "compact", "formal"])
+@pytest.mark.parametrize("form", ["service", "compact", "formal", "next-diff"])
 def test_quota_history_cloud_clearance_uses_protected_exact_head_merge(carrier, form):
     assert hashlib.sha256(SERVICE_CLEAR.encode()).hexdigest() == (
         "7d939bab6b6089e0ea89d069a9e3d8cb37e3df052fa58c7c54dee81a228e816b")
@@ -1299,6 +1337,211 @@ def test_quota_history_cloud_clearance_uses_protected_exact_head_merge(carrier, 
     assert any("--watch" in a for a in checks) and any("--json" in a for a in checks)
     assert carrier.landed[0]["verified_merge_sha"] == carrier.merge_evidence["oid"]
     assert carrier.landed[0]["review_state"]["headRefOid"] == carrier.head
+
+
+def test_captured_next_diff_clearance_preserves_exact_service_payload():
+    observed = SERVICE_CLEAR_NEXT_DIFF
+    assert hashlib.sha256(observed["body"].encode()).hexdigest() == SERVICE_CLEAR_NEXT_DIFF_BODY_SHA256
+    assert observed["author"] == {"__typename": "Bot", "login": "chatgpt-codex-connector"}
+    assert observed["databaseId"] == 6132765003
+    assert observed["createdAt"] == "2026-10-12T21:17:21Z"
+    assert commit._connector_no_issues_control_head(observed["body"]) == "e043abde39"  # ANTICHEAT_OK: exact captured parser regression
+
+
+@pytest.mark.parametrize("form", ["service", "next-diff"])
+@pytest.mark.parametrize("phase", ["initial", "ci"])
+@pytest.mark.parametrize("failure", [
+    "missing-actor", "missing-actor-type", "forged-user-actor", "wrong-actor-login",
+    "missing-comment-id", "boolean-comment-id", "missing-request", "wrong-request-id",
+    "missing-request-id", "boolean-request-id", "request-bot-actor", "missing-request-actor-type",
+    "missing-recorded-head", "wrong-recorded-head", "missing-recorded-request-id",
+    "wrong-reviewed-head", "missing-reviewed-head", "stale-response", "equal-response-time",
+    "invalid-response-time", "invalid-request-time", "pending-review", "unresolved-thread",
+    "formal-changes", "incomplete-comments", "incomplete-reviews", "incomplete-threads",
+    "incomplete-thread-comments", "missing-page-info",
+])
+def test_complete_service_clearance_requires_live_authority(carrier, monkeypatch, form, phase, failure):
+    _cloud_clearance(carrier, form)
+    reposted = []
+    provider_io = carrier.run_command
+
+    def remote_io(args, **kwargs):
+        if args[:3] == ["gh", "pr", "comment"]:
+            assert args[-1] == "@codex review"
+            carrier.commands.append(list(args))
+            reposted.append(99)
+            # A newly posted request cannot reuse the old request's ID. Model
+            # its successful post before it appears in the queried snapshot:
+            # the old response must not authenticate to this new request.
+            return subprocess.CompletedProcess(
+                args, 0, "https://github.com/fixture/repo/pull/1331#issuecomment-99\n", "")
+        return provider_io(args, **kwargs)
+
+    monkeypatch.setattr(commit, "_run", remote_io)  # ANTICHEAT_OK: fake provider I/O, native authority unchanged
+    # Bound any native freshness polling without changing classification or
+    # authority. All GitHub and model operations stay at Carrier's fake I/O.
+    clock = iter([0, 0, *range(10000, 1000000, 10000)])
+    monkeypatch.setattr(commit, "time", SimpleNamespace(
+        time=lambda: next(clock), sleep=lambda _: None, monotonic=commit.time.monotonic))
+    prior = _prior_review_bytes(carrier)
+    expected_pr = {}
+
+    def invalidate():
+        comments = carrier.pr["comments"]["nodes"]
+        clear, request = comments[-1], comments[0]
+        if failure == "missing-actor":
+            clear.pop("author")
+        elif failure == "missing-actor-type":
+            clear["author"].pop("__typename")
+        elif failure == "forged-user-actor":
+            clear["author"]["__typename"] = "User"
+        elif failure == "wrong-actor-login":
+            clear["author"]["login"] = "untrusted-bot"
+        elif failure == "missing-comment-id":
+            clear.pop("databaseId")
+        elif failure == "boolean-comment-id":
+            clear["databaseId"] = True
+        elif failure == "missing-request":
+            comments.remove(request)
+        elif failure == "wrong-request-id":
+            request["databaseId"] = 99
+        elif failure == "missing-request-id":
+            request.pop("databaseId")
+        elif failure == "boolean-request-id":
+            request["databaseId"] = True
+        elif failure == "request-bot-actor":
+            request["author"]["__typename"] = "Bot"
+        elif failure == "missing-request-actor-type":
+            request["author"].pop("__typename")
+        elif failure in {"missing-recorded-head", "wrong-recorded-head", "missing-recorded-request-id"}:
+            record = json.loads(carrier.continuation.read_text())
+            if failure == "missing-recorded-head":
+                record.pop("bot_review_request_sha")
+            elif failure == "wrong-recorded-head":
+                record["bot_review_request_sha"] = carrier.base
+            else:
+                record.pop("bot_review_request_comment_id")
+            carrier.continuation.write_text(json.dumps(record))
+            prior[carrier.continuation] = carrier.continuation.read_bytes()
+            with pytest.raises(ValueError, match="recorded current-head request"):
+                commit._require_quota_history_cloud_clearance(  # ANTICHEAT_OK: native binding gate before any new request
+                    carrier.pr, carrier.head, carrier.continuation)
+        elif failure == "wrong-reviewed-head":
+            clear["body"] = clear["body"].replace(carrier.head[:10], carrier.base[:10])
+        elif failure == "missing-reviewed-head":
+            clear["body"] = clear["body"].replace(f"**Reviewed commit:** `{carrier.head[:10]}`", "")
+        elif failure == "stale-response":
+            clear["createdAt"] = "2026-10-04T13:07:30Z"
+        elif failure == "equal-response-time":
+            clear["createdAt"] = request["createdAt"]
+        elif failure == "invalid-response-time":
+            clear["createdAt"] = "2026-99-04T13:09:00Z"
+        elif failure == "invalid-request-time":
+            request["createdAt"] = "2026-00-04T13:08:00Z"
+        elif failure == "pending-review":
+            carrier.pr["latestReviews"]["nodes"].append({
+                "author": {"login": BOT, "__typename": "Bot"}, "state": "PENDING", "body": "",
+                "commit": {"oid": carrier.head}, "submittedAt": "2026-10-04T13:08:30Z"})
+        elif failure in {"unresolved-thread", "incomplete-thread-comments"}:
+            item = thread(outdated=True)
+            if failure == "incomplete-thread-comments":
+                item["isResolved"] = True
+                item["comments"]["pageInfo"] = {"hasPreviousPage": True}
+            carrier.pr["reviewThreads"]["nodes"].append(item)
+        elif failure == "formal-changes":
+            carrier.pr["reviewDecision"] = "CHANGES_REQUESTED"
+        elif failure == "incomplete-comments":
+            carrier.pr["comments"]["pageInfo"]["hasPreviousPage"] = True
+        elif failure == "incomplete-reviews":
+            carrier.pr["latestReviews"]["pageInfo"]["hasNextPage"] = True
+        elif failure == "incomplete-threads":
+            carrier.pr["reviewThreads"]["pageInfo"]["hasNextPage"] = True
+        else:
+            assert failure == "missing-page-info"
+            carrier.pr["comments"].pop("pageInfo")
+        expected_pr.update(copy.deepcopy(carrier.pr))
+
+    if phase == "initial":
+        invalidate()
+    else:
+        carrier.after_ci = invalidate
+    outcome = carrier.execute()
+
+    carrier.assert_stopped(outcome, reviews=0)
+    assert not carrier.receipts()
+    assert carrier.pr == expected_pr
+    if reposted:
+        assert reposted == [99]
+        assert phase == "initial" and failure in {"missing-recorded-head", "wrong-recorded-head"}
+        saved = json.loads(carrier.continuation.read_text())
+        assert type(saved.pop("updated_at_unix")) is int
+        expected = json.loads(prior[carrier.continuation])
+        expected.update(bot_review_request_sha=carrier.head, bot_review_request_comment_id=99)
+        assert saved == expected
+        assert "recorded current-head request" in " ".join(outcome["errors"])
+    else:
+        assert carrier.continuation.read_bytes() == prior[carrier.continuation]
+    assert all(p.read_bytes() == value for p, value in prior.items() if p != carrier.continuation)
+    assert outcome["step"] == "ensure_review_clear_and_merge"
+
+
+@pytest.mark.parametrize("service_body", [SERVICE_CLEAR, SERVICE_CLEAR_NEXT_DIFF["body"]],
+                         ids=["nice-work", "next-diff"])
+@pytest.mark.parametrize("phase", ["initial", "review", "ci"])
+@pytest.mark.parametrize("mutation", [
+    "leading-finding", "trailing-finding", "quoted", "footer-finding", "altered-footer",
+    "unknown-courtesy", "extra-sentence", "both-courtesies", "oversize",
+])
+def test_complete_service_mixed_content_retains_full_finding(carrier, service_body, phase, mutation):
+    body = service_body.replace("`b27d1d8861`", f"`{carrier.head[:10]}`").replace(
+        "`e043abde39`", f"`{carrier.head[:10]}`")
+    defect = "Retained defect in earlier.py. " * 30
+    if mutation == "leading-finding":
+        body = defect + "\n" + body
+    elif mutation == "trailing-finding":
+        body += "\n" + defect
+    elif mutation == "quoted":
+        body = "> " + body.replace("\n", "\n> ")
+    elif mutation == "footer-finding":
+        body = body.replace("</details>", defect + "\n</details>")
+    elif mutation == "altered-footer":
+        body = body.replace("If Codex has suggestions", "If Codex overlooks findings")
+    elif mutation == "unknown-courtesy":
+        body = body.replace("Nice work!", "Ship it!").replace(
+            "Already looking forward to the next diff.", "Ship it!")
+    elif mutation == "extra-sentence":
+        body = body.replace("\n\n**Reviewed commit:**", " Another sentence.\n\n**Reviewed commit:**")
+    elif mutation == "both-courtesies":
+        body = body.replace("Nice work!", "Nice work! Nice work!").replace(
+            "Already looking forward to the next diff.", "Nice work! Already looking forward to the next diff.")
+    else:
+        assert mutation == "oversize"
+        body = body.replace("\n\n**Reviewed commit:**", "\n" + " " * 65537 + "\n**Reviewed commit:**")
+    assert commit._connector_no_issues_control_head(body) is None  # ANTICHEAT_OK: complete-message parser boundary
+    finding = {"databaseId": 3, "author": {"login": BOT, "__typename": "Bot"},
+               "body": body, "createdAt": "2026-10-04T13:08:20Z"}
+    prior = _prior_review_bytes(carrier)
+
+    def arrive():
+        prior.update({p: p.read_bytes() for p in carrier.bus.glob("meta/local_pr_reviews/*/receipt.json")})
+        carrier.pr["comments"]["nodes"].append(copy.deepcopy(finding))
+
+    if phase == "initial":
+        arrive()
+    else:
+        setattr(carrier, "after_review" if phase == "review" else "after_ci", arrive)
+    outcome = carrier.execute()
+
+    carrier.assert_stopped(outcome, reviews=int(phase != "initial"))
+    assert all(p.read_bytes() == value for p, value in prior.items())
+    assert carrier.pr["comments"]["nodes"][-1] == finding
+    assert outcome["step"] == "ensure_review_clear_and_merge"
+    if phase == "initial":
+        assert outcome["bot_findings"] == [{"author": BOT, "body": body, "path": "", "line": None}]
+        assert not carrier.receipts()
+    else:
+        assert repr(body) in outcome["errors"][0]
+        assert carrier.receipts()[0]["status"] == ("ERROR" if phase == "review" else "APPROVED")
 
 
 @pytest.mark.parametrize("mutation", [
@@ -1837,7 +2080,8 @@ def test_later_mixed_clear_cannot_disable_quota_finding_retention(carrier, phase
         assert prior_receipts
 
 
-@pytest.mark.parametrize("service_control", [False, True], ids=["compact", "complete-service"])
+@pytest.mark.parametrize("service_control", [False, True, "next-diff"],
+                         ids=["compact", "complete-service", "next-diff"])
 @pytest.mark.parametrize("channel", ["issue", "formal", "outdated-thread", "sweep", "malformed-sweep"])
 @pytest.mark.parametrize("phase", ["initial", "review", "ci", "ci-after-clear"])
 def test_later_clear_preserves_each_quota_finding_channel(carrier, phase, channel, service_control):
@@ -1846,6 +2090,8 @@ def test_later_clear_preserves_each_quota_finding_channel(carrier, phase, channe
     body = "A blocking defect remains in earlier.py"
     if service_control:
         clear["body"] = SERVICE_CLEAR.replace("`b27d1d8861`", f"`{carrier.head[:10]}`")
+        if service_control == "next-diff":
+            clear["body"] = SERVICE_CLEAR_NEXT_DIFF["body"].replace("`e043abde39`", f"`{carrier.head[:10]}`")
         body += "\nFull retained finding detail." * 40
         carrier.pr["comments"]["nodes"].append({
             "databaseId": 6047467226, "author": {"login": BOT, "__typename": "Bot"},

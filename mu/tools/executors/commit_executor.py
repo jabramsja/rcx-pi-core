@@ -10686,7 +10686,8 @@ def _connector_no_issues_control_head(body: str) -> str | None:
     ):
         return ""
     match = re.fullmatch(
-        r"Codex Review: Didn't find any major issues\. Nice work! "
+        r"Codex Review: Didn't find any major issues\. "
+        r"(?:Nice work!|Already looking forward to the next diff\.) "
         r"\*\*Reviewed commit:\*\* `([0-9a-f]{7,40})` " + re.escape(_CONNECTOR_CLEAR_DETAILS),
         normalized,
     )
