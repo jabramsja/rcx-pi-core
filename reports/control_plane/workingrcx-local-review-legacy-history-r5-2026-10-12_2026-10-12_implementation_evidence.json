@@ -1,0 +1,817 @@
+{
+  "wave_id": "workingrcx-local-review-legacy-history-r5-2026-10-12",
+  "phase": "Phase B initial implementer; before outer native staging",
+  "observed_utc": "2026-10-12T05:25:01.004951+00:00",
+  "status": "Local implementation and declared validation complete; current indexed authority, independent review, supervision, native commit and landing remain outer-owned and pending.",
+  "authorization": {
+    "task_id": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+    "wave_class": "L4_ENABLER",
+    "existing_owners": [
+      "row38",
+      "row40"
+    ],
+    "founder_override": "FOUNDER_OVERRIDE:workingrcx-local-review-legacy-history-r5-2026-10-12",
+    "admission": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-admission/initial-facts.json",
+      "sha256": "5d33d7a727d9dbe441ebdd1a89a8f9cef390ad2294ddd0c8117c1280a58ed929",
+      "size": 27517
+    },
+    "comparison_commit": "e75ce9f7db3fd66cb240026e75f7066d68b9f6fc",
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "primary_tasks_admission_sha256": "649ed45be720e96dc1c5cca3edf3c5a8d8fce9de8d0a31c4636ec824248b3a15",
+    "r5_canonical_tracker_note_sha256": "ebdb464a733e540758e297c0e455b60e6df1052243968079995853f18ff582ce"
+  },
+  "implementation": [
+    "Materialized only the entire expected R5 growth-cap postimage returned by the existing native HEAD/index capture. Numeric caps remain 175/64; the only delta from R4 is its two wave-provenance suffixes. No production or test definition changed.",
+    "Left the actual own locked packet body, seven launcher headings, lock and status byte-exact. Implementation narrative belongs here and in bounded tracker/changelog entries. Recognized later machine sections and status updates remain outer-owned.",
+    "Reconciled TASKS against the exact PRIMARY admission baseline, retained all canonical IDs and ordered owners, all pre-existing tracker lines and missing PRIMARY historical checkpoints, and kept the distinct R3 and R4 stop reasons. Updated current checkpoint, to-do and row38/row40 for R5.",
+    "Retained all 21 carried paths, all 43 protected path hashes, 79 old authority hashes, the R1 IN_FLIGHT checkpoint and original a705/a928 evidence. Only R5 has an active newly collected indicator; carried R2/R3/R4 indicators remain historical."
+  ],
+  "changed_by_this_implementer": [
+    "mu/tests/docs/test_growth_caps.py",
+    "TASKS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12_implementation_evidence.json"
+  ],
+  "unchanged_optional_surface": {
+    "path": "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r5-2026-10-12_bridge_nonblockers.md",
+    "reason": "No new reviewer finding or advisory disposition was authored by this implementer; independent bridge review remains outer-owned."
+  },
+  "native_packet_contract": {
+    "invocation": "config = launch_wave.load_wave_config(Path(actual_frozen_config)); launch_wave._native_post_commit_packet_matches_config(repo_root, config)",
+    "before_implementation": {
+      "predicate": "launch_wave._native_post_commit_packet_matches_config(repo_root, launch_wave.load_wave_config(actual_frozen_config))",
+      "result": true,
+      "binding": {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md",
+        "sha256": "e1efec260a309c3f74e8f2cc8b1ed3daaf4c907ba4e7149fc6104344b02ee343",
+        "size": 14631
+      },
+      "headings": [
+        "## Scope",
+        "## Work items",
+        "## Constraints",
+        "## Stop conditions",
+        "## Validation gates",
+        "## Acceptance criteria",
+        "## Grounding / Authorization"
+      ],
+      "old_r4_actual_result": false,
+      "old_r4_packet": {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/reports/control_plane/workingrcx-local-review-legacy-history-r4-2026-10-12_2026-10-12.md",
+        "sha256": "7419347a78883eda39082ab90a7ee714215064bedb38fe57143d23a8c74a0b1e",
+        "size": 23634
+      },
+      "config": {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_wave_config.json",
+        "sha256": "cf27a7b91b049f2b855baa6ab5617bb6d91c5eefc41c354238912914f1c97323",
+        "size": 18973
+      },
+      "sources": {
+        "mu/tools/executors/launch_wave.py": {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/mu/tools/executors/launch_wave.py",
+          "sha256": "a43c3069fb662688f74559c39e348bb354d460a5fad6333dca3f6aa74172107f",
+          "size": 185101
+        },
+        "mu/tools/executors/phase_a_executor.py": {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/mu/tools/executors/phase_a_executor.py",
+          "sha256": "ce6d4bc0fd3bcf9f88f1cc0c57af6412c206cc12501b18b2ba2bc3c43435c43f",
+          "size": 180642
+        },
+        "mu/tools/executors/commit_executor.py": {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/mu/tools/executors/commit_executor.py",
+          "sha256": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+          "size": 1003413
+        }
+      }
+    },
+    "before_implementation_completion": {
+      "predicate": "launch_wave._native_post_commit_packet_matches_config(repo_root, launch_wave.load_wave_config(actual_frozen_config))",
+      "result": true,
+      "elapsed_seconds": 0.0005164580070413649,
+      "binding": {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md",
+        "sha256": "e1efec260a309c3f74e8f2cc8b1ed3daaf4c907ba4e7149fc6104344b02ee343",
+        "size": 14631
+      },
+      "config": {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_wave_config.json",
+        "sha256": "cf27a7b91b049f2b855baa6ab5617bb6d91c5eefc41c354238912914f1c97323",
+        "size": 18973
+      },
+      "sources": {
+        "mu/tools/executors/launch_wave.py": {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/mu/tools/executors/launch_wave.py",
+          "sha256": "a43c3069fb662688f74559c39e348bb354d460a5fad6333dca3f6aa74172107f",
+          "size": 185101
+        },
+        "mu/tools/executors/phase_a_executor.py": {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/mu/tools/executors/phase_a_executor.py",
+          "sha256": "ce6d4bc0fd3bcf9f88f1cc0c57af6412c206cc12501b18b2ba2bc3c43435c43f",
+          "size": 180642
+        },
+        "mu/tools/executors/commit_executor.py": {
+          "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/mu/tools/executors/commit_executor.py",
+          "sha256": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+          "size": 1003413
+        }
+      },
+      "packet_bytes_unchanged": true,
+      "config_bytes_unchanged": true,
+      "headings": [
+        "## Scope",
+        "## Work items",
+        "## Constraints",
+        "## Stop conditions",
+        "## Validation gates",
+        "## Acceptance criteria",
+        "## Grounding / Authorization"
+      ],
+      "old_r4_actual_result": false,
+      "old_r4_binding": {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/reports/control_plane/workingrcx-local-review-legacy-history-r4-2026-10-12_2026-10-12.md",
+        "sha256": "7419347a78883eda39082ab90a7ee714215064bedb38fe57143d23a8c74a0b1e",
+        "size": 23634
+      },
+      "old_r4_config": {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-local-review-legacy-history-r4-2026-10-12_wave_config.json",
+        "sha256": "553932160bc3ecba48c6bc220455305e7949b95b958d10ca69c435a797f428b8",
+        "size": 19858
+      },
+      "diagnostic_projection_used_as_authority": false
+    },
+    "predicate_results": [
+      true,
+      true
+    ],
+    "actual_bytes_not_in_memory_repair": true,
+    "native_validator_unchanged": true,
+    "initial_h2_count": 7,
+    "post_staging_check": "PENDING: independent native reviewer repeats this SAME actual predicate after outer staging.",
+    "pre_commit_check": "PENDING: independent review/supervision repeats this SAME actual predicate before native commit.",
+    "proof_limit": "These are actual worktree locked-packet checks against the frozen config. They do not claim staging authority, a review verdict, commit approval or landing."
+  },
+  "growth_cap_reconciliation": {
+    "materialization": {
+      "observed_utc": "2026-10-12T05:17:56.658538+00:00",
+      "method": "commit_executor._capture_growth_cap_retry_authority(repo_root, wave_id=R5, base_branch=\"dev\") -> snapshot[\"expected_bytes\"]; full worktree-file write only",
+      "worktree_before_sha256": "f2d3161eb471aee86f93f57298105ddc08023debd026d230e51e41c75fca68f3",
+      "worktree_after_sha256": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+      "authority_digest": "40a7604527fb120add58a309159eaa3e8005aba8c25ad54b3bdbab68bfd8f225",
+      "expected_blob_oid": "41e4d69a8c5a8be1ba6ff07acd2e2bafdcea5a4e",
+      "candidate_state": "invalid",
+      "worktree_equals_expected": true,
+      "index_equals_expected": false,
+      "raw_index_unchanged": true,
+      "numeric_caps": {
+        "CAP_TEST_FILES": 175,
+        "CAP_TOOL_SCRIPTS": 64
+      },
+      "unrelated_bytes_unchanged": true,
+      "required_outer_action": "Native staging, then independent actual packet predicate and indexed-cap classifier repeated after staging and before native commit."
+    },
+    "final_actual_authority": {
+      "capture_error": null,
+      "authority_digest": "40a7604527fb120add58a309159eaa3e8005aba8c25ad54b3bdbab68bfd8f225",
+      "expected_sha256": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+      "expected_blob_oid": "41e4d69a8c5a8be1ba6ff07acd2e2bafdcea5a4e",
+      "worktree_sha256": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+      "index_sha256": "f2d3161eb471aee86f93f57298105ddc08023debd026d230e51e41c75fca68f3",
+      "worktree_equals_native_expected": true,
+      "index_equals_native_expected": false,
+      "actual_candidate_state": "invalid",
+      "staging_performed": false,
+      "caps": {
+        "CAP_TEST_FILES": 175,
+        "CAP_TOOL_SCRIPTS": 64
+      }
+    },
+    "classifier": "commit_executor._growth_cap_snapshot_candidate_state(commit_executor._capture_growth_cap_retry_authority(repo_root, wave_id=R5, base_branch=\"dev\")[0])",
+    "native_expected_bytes": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/growth-cap-native-r5-expected.py",
+      "sha256": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+      "size": 19866
+    },
+    "initial_index_and_worktree_sha256": "f2d3161eb471aee86f93f57298105ddc08023debd026d230e51e41c75fca68f3",
+    "scope_of_proof": "The actual worktree equals the entire native expected R5 postimage. The untouched actual index is still R4 and the native classifier returns invalid. Missing staged authority is a hold on review/commit; it is not permission for the implementer to stage or relax guards.",
+    "required_outer_transition": "Native staging must make index and worktree equal the exact R5 postimage. Independent reviewers must record actual postimage classification after staging and again before native commit."
+  },
+  "validation_runs": [
+    {
+      "name": "Full declared five-selector four-worker gate",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "4",
+        "--dist",
+        "worksteal",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_local_review_history_recovery.py",
+        "mu/tests/tools/test_recovery_gate.py",
+        "mu/tests/docs/test_growth_caps.py",
+        "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+        "--tb=short"
+      ],
+      "environment_overrides": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "inherited_environment_sha256": "b725b63f1f620c4b825cb70cc6a0c24fa8c54915e2281111dc32f0b08b574b40",
+      "safe_inherited_environment": {
+        "PATH": "/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex-path:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.bun/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.codeium/windsurf/bin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.elan/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/TeX/texbin:/Users/jeffabrams/.codex/tmp/arg0/codex-arg0q6K9H6:/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex-path:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.bun/bin:/Users/jeffabrams/.codeium/windsurf/bin:/Users/jeffabrams/.elan/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/Users/jeffabrams/.codex/tmp/arg0/codex-arg0dG9ltv:/Users/jeffabrams/.cargo/bin:/Users/jeffabrams/.cabal/bin:/Users/jeffabrams/.ghcup/bin",
+        "TMPDIR": "/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/",
+        "RCX_IMPLEMENTER_AGENT_OVERRIDE": "codex",
+        "RCX_REVIEWER_AGENT_OVERRIDE": "codex"
+      },
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+      "started_utc": "2026-10-12T05:18:16.617000+00:00",
+      "source_hashes_before": {
+        "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09_implementation_evidence.json": "88f56342296570dc7e024c3b33c1c31f0839b3acbe8bfb144d3680d1c370d497",
+        "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09.md": "7b21d2f22e054e2f90d16220c9dc2498c9f02e895aaa9eb367b2f6905f3cede2",
+        "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09.md": "129a9cb76cfecd1efd5a7972107b3567c1419f963c90532b3d2f3752d48a5745",
+        "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09_implementation_evidence.json": "ac26a18399e146bf22a00e854796aed18a8611f7b0eaccd02c944c9697a9572b",
+        "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09.md": "ecffc2ce35fd0a0fad01e9a33af0acde81da9a5a6b1be523c9eb8170cffa6682",
+        "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09_implementation_evidence.json": "d558c86ffef26887f30f7c4bcc92319972b7b6eccbfa1b0166b38542dc76e08c",
+        "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09.md": "a160038d2a67219737f1259ce0a52d518dc99bed033d5bb7fc703453b0192478",
+        "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09_implementation_evidence.json": "8ba800c21b317246efa2a4a1ee57914c0e888a9bd62cc98c6b8ddac0294d0343",
+        "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09_implementation_evidence.json": "629bcb0b13c29469e9e664b505a0042fed50e9295f4d6ebb5a7274f849ffb206",
+        "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09.md": "de6ce705355789302912125757278692d9a97bec4aee9cf151199115da03ef9b",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r6-2026-10-09.json": "bb955750fa42152f4c0b30001697e247c6127ae1ccc2b439bd9ac38e7cda92e1",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r5-2026-10-09.json": "f62a601d39f7cbc299853491025ca87e6a8c6271ec3c53d4a3677f81a69871c5",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r2-2026-10-09.json": "29e666f8ab4a79485d012db2f8f3b15e2ab4086df21031a5267ad22cfe829d96",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r3-2026-10-09.json": "f3c22540e49c387f8e1331626ba4d2436ce36b02ea3b66b58054b4b8101abea8",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r4-2026-10-09.json": "4f77315f4daa4333088bfcd63c1b390cd0688b4d679bb3fc5340891fc74f2571",
+        "reports/deferred/non_blocking/workingrcx-local-review-terminal-r5-2026-10-09_bridge_nonblockers.md": "3588224e4f98b5e69d083536690301b02bd7be5bc79a6551e2dd8bd6d0963334",
+        "reports/deferred/non_blocking/workingrcx-local-review-terminal-r6-2026-10-09_bridge_nonblockers.md": "b35de1fdbcc4d9ad4439470fabd938e7e95f9bd5cc8e0aeed15010a8cb6050b6",
+        "reports/deferred/non_blocking/workingrcx-local-review-terminal-r4-2026-10-09_bridge_nonblockers.md": "c24c27bcc9bace2ee1dee6124e322e242f48e85b74bfe65cd4858bd18aebe201",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tools/executors/launch_wave.py": "a43c3069fb662688f74559c39e348bb354d460a5fad6333dca3f6aa74172107f",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09.md": "43a4060c08207521be66dab1362b81ecf6cd50b78e8df38ca9c96c9eecdef931",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09_implementation_evidence.json": "d34d5a86c10bf946e0221abeaf2dcfc90b8e89738d408a34af769ad63deb18e4",
+        "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r1-2026-10-09_bridge_nonblockers.md": "449dfa2d26bf150d4954add9788ee0af447d7e2baa3056949ff2268e57738da3",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r2-2026-10-11_2026-10-11.md": "b7cdfbe85827acff26e782f661ac1a342c3f5e25c248f75e335189196de91565",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r2-2026-10-11_2026-10-11_implementation_evidence.json": "b468d0addcfc6318f34785bc1a7ebdf5cd8977a9e2fe129063f414672cefe570",
+        "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r2-2026-10-11.json": "3a68b49c3f68c70e67dba1a21299fb96106c43e4521d36cdedb7ce089239f2db",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/local_review_history_recovery.py": "5ae90560a89352af405f24edd4616645fd4d45c4221a9a020d01327bff0ca912",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "mu/tests/tools/test_local_review_history_recovery.py": "329729d33caceac24f97219c97ea5446e6e97a2c35a873058b20b882139961a7",
+        "mu/tests/tools/test_recovery_gate.py": "f891b33c7bcd28ec3791450b6aa8b5162d918ff02c4811c09bca9f339d5d4dc0",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r3-2026-10-11_2026-10-11.md": "d29437e24dfbdb1c03c62d5053350a42168dff7a84998a87338b53b2ff05e883",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r3-2026-10-11_2026-10-11_implementation_evidence.json": "690e56b75a8754e9215d612229a8f71f1e520336196be31a53273a65419f37e6",
+        "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r3-2026-10-11.json": "382f12f74c1b2b4dd421f1d8134c6f8570f9a412daaddf300edabecb27a84d48",
+        "mu/tests/tools/test_commit_executor_local_review.py": "adab2668bf7b9c2a6b08484f648018b02dd5483f5ac1434d86a7a6b6e26b1025",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r4-2026-10-12_2026-10-12.md": "7419347a78883eda39082ab90a7ee714215064bedb38fe57143d23a8c74a0b1e",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r4-2026-10-12_2026-10-12_implementation_evidence.json": "d5dc60ca940b2bbf022965d7072fa20097604901c554e203d4c01d488aebef61",
+        "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r4-2026-10-12.json": "ceeba99b0f63400efe7134dca01f06d1ebf363b2bff0ecde8c812eb247c427e2",
+        "mu/tests/docs/test_growth_caps.py": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md": "e1efec260a309c3f74e8f2cc8b1ed3daaf4c907ba4e7149fc6104344b02ee343"
+      },
+      "raw_index_sha256_before": "21bc8d82c8d53f3deb2e257ada1291f2c10cb6c229c454d33c0a8930a1592e25",
+      "config_sha256": "cf27a7b91b049f2b855baa6ab5617bb6d91c5eefc41c354238912914f1c97323",
+      "exit_code": 0,
+      "finished_utc": "2026-10-12T05:20:59.605237+00:00",
+      "elapsed_seconds": 162.97841854102444,
+      "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [  2%]\n........................................................................ [  4%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 12%]\n........................................................................ [ 14%]\n........................................................................ [ 17%]\n........................................................................ [ 19%]\n........................................................................ [ 22%]\n........................................................................ [ 24%]\n........................................................................ [ 26%]\n........................................................................ [ 29%]\n........................................................................ [ 31%]\n........................................................................ [ 34%]\n........................................................................ [ 36%]\n........................................................................ [ 39%]\n........................................................................ [ 41%]\n........................................................................ [ 44%]\n........................................................................ [ 46%]\n........................................................................ [ 49%]\n........................................................................ [ 51%]\n........................................................................ [ 53%]\n........................................................................ [ 56%]\n........................................................................ [ 58%]\n........................................................................ [ 61%]\n........................................................................ [ 63%]\n........................................................................ [ 66%]\n........................................................................ [ 68%]\n........................................................................ [ 71%]\n........................................................................ [ 73%]\n........................................................................ [ 76%]\n........................................................................ [ 78%]\n........................................................................ [ 80%]\n........................................................................ [ 83%]\n........................................................................ [ 85%]\n........................................................................ [ 88%]\n........................................................................ [ 90%]\n........................................................................ [ 93%]\n........................................................................ [ 95%]\n........................................................................ [ 98%]\n.......................................................                  [100%]\n2935 passed in 153.01s (0:02:33)\n",
+      "stderr": "",
+      "source_hashes_after": {
+        "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09_implementation_evidence.json": "88f56342296570dc7e024c3b33c1c31f0839b3acbe8bfb144d3680d1c370d497",
+        "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09.md": "7b21d2f22e054e2f90d16220c9dc2498c9f02e895aaa9eb367b2f6905f3cede2",
+        "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09.md": "129a9cb76cfecd1efd5a7972107b3567c1419f963c90532b3d2f3752d48a5745",
+        "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09_implementation_evidence.json": "ac26a18399e146bf22a00e854796aed18a8611f7b0eaccd02c944c9697a9572b",
+        "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09.md": "ecffc2ce35fd0a0fad01e9a33af0acde81da9a5a6b1be523c9eb8170cffa6682",
+        "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09_implementation_evidence.json": "d558c86ffef26887f30f7c4bcc92319972b7b6eccbfa1b0166b38542dc76e08c",
+        "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09.md": "a160038d2a67219737f1259ce0a52d518dc99bed033d5bb7fc703453b0192478",
+        "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09_implementation_evidence.json": "8ba800c21b317246efa2a4a1ee57914c0e888a9bd62cc98c6b8ddac0294d0343",
+        "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09_implementation_evidence.json": "629bcb0b13c29469e9e664b505a0042fed50e9295f4d6ebb5a7274f849ffb206",
+        "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09.md": "de6ce705355789302912125757278692d9a97bec4aee9cf151199115da03ef9b",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r6-2026-10-09.json": "bb955750fa42152f4c0b30001697e247c6127ae1ccc2b439bd9ac38e7cda92e1",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r5-2026-10-09.json": "f62a601d39f7cbc299853491025ca87e6a8c6271ec3c53d4a3677f81a69871c5",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r2-2026-10-09.json": "29e666f8ab4a79485d012db2f8f3b15e2ab4086df21031a5267ad22cfe829d96",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r3-2026-10-09.json": "f3c22540e49c387f8e1331626ba4d2436ce36b02ea3b66b58054b4b8101abea8",
+        "reports/l4_wave_indicators/workingrcx-local-review-terminal-r4-2026-10-09.json": "4f77315f4daa4333088bfcd63c1b390cd0688b4d679bb3fc5340891fc74f2571",
+        "reports/deferred/non_blocking/workingrcx-local-review-terminal-r5-2026-10-09_bridge_nonblockers.md": "3588224e4f98b5e69d083536690301b02bd7be5bc79a6551e2dd8bd6d0963334",
+        "reports/deferred/non_blocking/workingrcx-local-review-terminal-r6-2026-10-09_bridge_nonblockers.md": "b35de1fdbcc4d9ad4439470fabd938e7e95f9bd5cc8e0aeed15010a8cb6050b6",
+        "reports/deferred/non_blocking/workingrcx-local-review-terminal-r4-2026-10-09_bridge_nonblockers.md": "c24c27bcc9bace2ee1dee6124e322e242f48e85b74bfe65cd4858bd18aebe201",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tools/executors/launch_wave.py": "a43c3069fb662688f74559c39e348bb354d460a5fad6333dca3f6aa74172107f",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09.md": "43a4060c08207521be66dab1362b81ecf6cd50b78e8df38ca9c96c9eecdef931",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09_implementation_evidence.json": "d34d5a86c10bf946e0221abeaf2dcfc90b8e89738d408a34af769ad63deb18e4",
+        "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r1-2026-10-09_bridge_nonblockers.md": "449dfa2d26bf150d4954add9788ee0af447d7e2baa3056949ff2268e57738da3",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r2-2026-10-11_2026-10-11.md": "b7cdfbe85827acff26e782f661ac1a342c3f5e25c248f75e335189196de91565",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r2-2026-10-11_2026-10-11_implementation_evidence.json": "b468d0addcfc6318f34785bc1a7ebdf5cd8977a9e2fe129063f414672cefe570",
+        "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r2-2026-10-11.json": "3a68b49c3f68c70e67dba1a21299fb96106c43e4521d36cdedb7ce089239f2db",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/local_review_history_recovery.py": "5ae90560a89352af405f24edd4616645fd4d45c4221a9a020d01327bff0ca912",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "mu/tests/tools/test_local_review_history_recovery.py": "329729d33caceac24f97219c97ea5446e6e97a2c35a873058b20b882139961a7",
+        "mu/tests/tools/test_recovery_gate.py": "f891b33c7bcd28ec3791450b6aa8b5162d918ff02c4811c09bca9f339d5d4dc0",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r3-2026-10-11_2026-10-11.md": "d29437e24dfbdb1c03c62d5053350a42168dff7a84998a87338b53b2ff05e883",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r3-2026-10-11_2026-10-11_implementation_evidence.json": "690e56b75a8754e9215d612229a8f71f1e520336196be31a53273a65419f37e6",
+        "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r3-2026-10-11.json": "382f12f74c1b2b4dd421f1d8134c6f8570f9a412daaddf300edabecb27a84d48",
+        "mu/tests/tools/test_commit_executor_local_review.py": "adab2668bf7b9c2a6b08484f648018b02dd5483f5ac1434d86a7a6b6e26b1025",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r4-2026-10-12_2026-10-12.md": "7419347a78883eda39082ab90a7ee714215064bedb38fe57143d23a8c74a0b1e",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r4-2026-10-12_2026-10-12_implementation_evidence.json": "d5dc60ca940b2bbf022965d7072fa20097604901c554e203d4c01d488aebef61",
+        "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r4-2026-10-12.json": "ceeba99b0f63400efe7134dca01f06d1ebf363b2bff0ecde8c812eb247c427e2",
+        "mu/tests/docs/test_growth_caps.py": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+        "reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md": "e1efec260a309c3f74e8f2cc8b1ed3daaf4c907ba4e7149fc6104344b02ee343"
+      },
+      "raw_index_sha256_after": "21bc8d82c8d53f3deb2e257ada1291f2c10cb6c229c454d33c0a8930a1592e25",
+      "source_hashes_stable": true,
+      "raw_index_stable": true,
+      "pytest_summary": "2935 passed in 153.01s (0:02:33)",
+      "external_full_record": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/declared-gate.json",
+        "sha256": "4c56ddf837df5e1314dcf754c284304c277d5af080eb834f280b89312f453c9d",
+        "size": 20879
+      }
+    }
+  ],
+  "actual_history_verification": {
+    "command": [
+      "python3",
+      "mu/tools/executors/local_review_history_recovery.py",
+      "plan",
+      "--repo-root",
+      "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+      "--attempt",
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5",
+      "--provenance",
+      "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-legacy-history-r1-admission/legacy-provenance-binding.json",
+      "--provenance-sha256",
+      "6e4a9b4178f9ce61c29f28fa7a2f368bb1ba09274658c5074a882861e8d27cf9",
+      "--repository",
+      "jabramsja/rcx-pi-core",
+      "--pr",
+      "1332",
+      "--head-branch",
+      "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+      "--base-branch",
+      "dev",
+      "--head",
+      "f36b982b8b45774cf68fc621acf0d9727d72e6d5",
+      "--base",
+      "35f7c225a25025aec893230c072754cf7d7c76fc"
+    ],
+    "command_authority": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/legacy-history-r4-root-actual-plan.json",
+      "sha256": "03f8fded1b6269b61ac8f0b028232728cbd951605f963eb0faaeddde9251d9ff",
+      "size": 8584,
+      "mode": 420
+    },
+    "environment_overrides": {
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "started_utc": "2026-10-12T05:21:37.053041+00:00",
+    "finished_utc": "2026-10-12T05:21:37.366568+00:00",
+    "elapsed_seconds": 0.31278774997917935,
+    "exit_code": 0,
+    "approval": false,
+    "stdout": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/actual-history-plan.stdout",
+      "sha256": "5c0f83e29a6cb444f987cac4fe9178ee5ea35fb3c26be039cd7401a0a7a599df",
+      "size": 5261
+    },
+    "stderr": "",
+    "full_record": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/actual-history-plan.json",
+      "sha256": "dad56a7ac29ded229c790b4e2862ccfed2af55249686bb4170456830a715de2d",
+      "size": 12728
+    },
+    "provenance": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-legacy-history-r1-admission/legacy-provenance-binding.json",
+      "sha256": "6e4a9b4178f9ce61c29f28fa7a2f368bb1ba09274658c5074a882861e8d27cf9",
+      "size": 1708,
+      "mode": 420
+    },
+    "original_artifacts": {
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5/pr.diff": {
+        "sha256": "f9ccd79a96a3ae013f910fe9853345c4329ea4a30a1be8b1c89c3f2ce4ca7a93",
+        "size": 1020558,
+        "mode": 420
+      },
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5/prompt.md": {
+        "sha256": "ffe70e514896ebf0654bb5e123d6f59cf81bed84b54edbc30cc7e5e222e19fad",
+        "size": 2892,
+        "mode": 420
+      },
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5/raw.jsonl": {
+        "sha256": "caf8042462b1a52b748582d0c1c1f91502bfc809266c88835926be92bcc5a5e0",
+        "size": 596988,
+        "mode": 420
+      },
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a92850a15e6f4411992770ace160cdaf/pr.diff": {
+        "sha256": "f9ccd79a96a3ae013f910fe9853345c4329ea4a30a1be8b1c89c3f2ce4ca7a93",
+        "size": 1020558,
+        "mode": 420
+      },
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a92850a15e6f4411992770ace160cdaf/prompt.md": {
+        "sha256": "825235d620045f865ff07ed3b38aca7ea25f21aa0735d59ab9b526eb417e05ea",
+        "size": 2892,
+        "mode": 420
+      },
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a92850a15e6f4411992770ace160cdaf/raw.jsonl": {
+        "sha256": "14985d2cf1d9c80041f549f42818a882a229b75561a891f4f8f37d797ef354ce",
+        "size": 1577935,
+        "mode": 420
+      },
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a92850a15e6f4411992770ace160cdaf/receipt.json": {
+        "sha256": "57bc2129a98e471de4ea162fb8e5b60695cc1627b03fefcb60afa5208289d70e",
+        "size": 17273,
+        "mode": 384
+      }
+    },
+    "artifacts_and_modes_unchanged": true,
+    "head_branch_refs_raw_index_unchanged": true,
+    "refs_count": 543,
+    "a928_binding": {
+      "validator": "commit_executor._validate_local_review_historical_binding",
+      "result": "PASS",
+      "status": "ERROR",
+      "decision": "REQUEST_CHANGES",
+      "receipt": {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/.agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a92850a15e6f4411992770ace160cdaf/receipt.json",
+        "sha256": "57bc2129a98e471de4ea162fb8e5b60695cc1627b03fefcb60afa5208289d70e",
+        "size": 17273,
+        "mode": 384
+      }
+    },
+    "original_interruption_cause": "unknown",
+    "missing_original_receipt_or_result_inferred": false,
+    "live_publication_performed": false
+  },
+  "preservation_verification": {
+    "protected_count": 43,
+    "old_authority_count": 79,
+    "all_admission_hashes_match": true,
+    "full_hash_inventory": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/final-verification.json",
+      "sha256": "dce7602cb3bd5ce6a8a49ff46410d699c06d98891589a69fba7939b3bc19ab4d",
+      "size": 30685
+    },
+    "carried_paths": {
+      "count": 21,
+      "present": true,
+      "immutable_carried_count": 18,
+      "admitted_changes": {
+        "TASKS.md": {
+          "before_sha256": "c6ac8a286d05636dbe7a264dce31e5f9ff1eb26b1bdc3029c6752864b55ce035",
+          "after_sha256": "57a2e2ce280feadc097451d7848076c0f2490eb38632640b9428c9a669b28086"
+        },
+        "CHANGELOG.md": {
+          "before_sha256": "0b5d9682f53eea4d12d205464935b80faf38df588c0e7c11945087d78df98260",
+          "after_sha256": "2886dd39a3fc1418cee1c94eaf53241acda21c71bf53121c1c54a7ebdc45e1ba"
+        },
+        "mu/tests/docs/test_growth_caps.py": {
+          "before_sha256": "f2d3161eb471aee86f93f57298105ddc08023debd026d230e51e41c75fca68f3",
+          "after_sha256": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d"
+        }
+      }
+    },
+    "r1_checkpoint": {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/.agent_bus-local-review-legacy-history-r1-20261009/executors/phase_b_state.json",
+      "sha256": "5d1134a77f7f01168898f7bdc15c2b88cefea86d15e063a59a40532557e34bd2",
+      "size": 63570,
+      "state": "IN_FLIGHT",
+      "result": null,
+      "unchanged": true
+    },
+    "git": {
+      "head": "e75ce9f7db3fd66cb240026e75f7066d68b9f6fc",
+      "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+      "origin_dev": "35f7c225a25025aec893230c072754cf7d7c76fc",
+      "raw_index_sha256": "21bc8d82c8d53f3deb2e257ada1291f2c10cb6c229c454d33c0a8930a1592e25",
+      "index_entries_sha256": "94dd78296798d85495d6c7845434a4b3441383610a3a657a2ba1d06a19fde7a9",
+      "refs_sha256": "c3f4e7b60b881a2bb90c757a248b78081946a5d01c1094b3187d808fd5e6dd0e",
+      "refs_count": 543,
+      "head_branch_base_refs_and_raw_index_unchanged": true,
+      "index_lock_absent": true
+    },
+    "test_preservation": {
+      "source": {
+        "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/mu/tests/tools/test_commit_executor_local_review.py",
+        "sha256": "adab2668bf7b9c2a6b08484f648018b02dd5483f5ac1434d86a7a6b6e26b1025",
+        "size": 242313
+      },
+      "test_definitions": 114,
+      "module_byte_exact": true,
+      "positive_control": "test_current_wave_exact_growth_cap_postimage_requires_native_index_authority",
+      "prior_wave_control": "test_prior_wave_growth_cap_rejection_preserves_candidate_and_demotes_retry"
+    }
+  },
+  "historical_evidence": {
+    "r4_preservation_manifest": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r4-terminal-preserved/preservation.json",
+      "sha256": "bc60b49fc62ba8c3754131ead959e9ca3e38be34afd9bf76bd931d912f8d2ada",
+      "size": 73626
+    },
+    "r4_snapshot": "f726eb23a4717b93f10b59cc9f9e4d7c7390935d1dfa9304669497305c442246",
+    "recorded_independent_restore": {
+      "files": 241,
+      "raw_index_objects": 3263
+    },
+    "records": {
+      "legacy-history-r4-native-packet-contract-prestop-diagnostic.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/legacy-history-r4-native-packet-contract-prestop-diagnostic.json",
+        "sha256": "3fb5f094bc4fc920d3213d0c5c6b6e4111626bd0d8a54ecd4d3d9ab2b14a94bc",
+        "size": 1077
+      },
+      "legacy-history-r4-packet-contract-in-memory-controls.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/legacy-history-r4-packet-contract-in-memory-controls.json",
+        "sha256": "d0974c18513680aef9b95cd45dccf6ac2ddf35320c7e58b8d52b458301528de9",
+        "size": 1028
+      },
+      "local-review-legacy-history-r4-terminal-observation.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r4-terminal-observation.json",
+        "sha256": "6eb80aac52283dce00a05a6ee0603172eb2ac81b309e9a9b36b6ae946c4944a1",
+        "size": 1593
+      },
+      "legacy-history-r4-root-actual-plan.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/legacy-history-r4-root-actual-plan.json",
+        "sha256": "03f8fded1b6269b61ac8f0b028232728cbd951605f963eb0faaeddde9251d9ff",
+        "size": 8584
+      },
+      "folder-wave-launch-preparation-20261011.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/folder-wave-launch-preparation-20261011.json",
+        "sha256": "338104130926c8cfc09c48510bac32a5de61c19213b578ff0e7c64cd3037da48",
+        "size": 16517
+      }
+    },
+    "r4_actual_packet_predicate": false,
+    "r4_cause": "The implementer-added freeform Phase B implementation evidence H2 is outside the exact launcher grammar. The supported indicator machine heading is not itself a guard defect. Earlier in-memory controls were diagnostic projections only and never repaired the live packet.",
+    "r4_terminal": "Operator interruption after final native pytest PASS at 04:57:17Z; terminal observation records all eight old owners absent, launcher exit -15, unchanged parent HEAD, and no R4 commit. Earlier R4 gate, staged-cap authority and Phase B GO remain phase-specific historical evidence.",
+    "r3_separate_correction": "Root incorrectly inferred a disallowed target and interrupted an admitted R3 regression. No delegate scope violation or executor defect was established; prior R3 approval did not validate the subsequently added regression.",
+    "old_authority_replayed_or_reset": false
+  },
+  "tracker_sync": {
+    "primary_baseline_sha256": "649ed45be720e96dc1c5cca3edf3c5a8d8fce9de8d0a31c4636ec824248b3a15",
+    "canonical_id_count": 268,
+    "ordered_owner_count": 44,
+    "ids_and_order_preserved": true,
+    "worktree_historical_tracker_line_count": 727,
+    "primary_historical_tracker_line_count": 705,
+    "all_tracker_lines_byte_exact": true,
+    "canonical_id_regex": "\\[([A-Z][A-Z0-9_-]+)\\]",
+    "ordered_owner_regex": "^\\d+\\. \\*\\*\\[([^\\]]+)\\]",
+    "primary_missing_historical_checkpoints_added": 3,
+    "primary_missing_historical_row38_observations_added": 4,
+    "r5_canonical_note_sha256": "ebdb464a733e540758e297c0e455b60e6df1052243968079995853f18ff582ce",
+    "primary_written_by_implementer": false,
+    "final_tasks": {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/TASKS.md",
+      "sha256": "57a2e2ce280feadc097451d7848076c0f2490eb38632640b9428c9a669b28086",
+      "size": 2215665
+    },
+    "primary_final_observation": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/TASKS-primary-observed-final.md",
+      "sha256": "c82c94abf41e41605662741c6ba9bf25d7ef9f6285b6aff22fac06cd00edaf92",
+      "size": 2066929
+    },
+    "primary_final_equals_admission": false,
+    "primary_updates_are_phase_specific_observations": true,
+    "canonical_ids_sha256": "73368cf00a0f75893d0e8de8a2f71d36d78530939ea1b8c21c5c8ec587110834",
+    "ordered_owners_sha256": "f5c60804c67049d42217d3163c49a73052eb7c45f9b78faf81a3623586960cc1",
+    "primary_admission_artifact": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/TASKS-primary-observed-start.md",
+      "sha256": "649ed45be720e96dc1c5cca3edf3c5a8d8fce9de8d0a31c4636ec824248b3a15",
+      "size": 2066144
+    },
+    "primary_current_phase_observation": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/TASKS-primary-observed-final.md",
+      "sha256": "c82c94abf41e41605662741c6ba9bf25d7ef9f6285b6aff22fac06cd00edaf92",
+      "size": 2066929
+    },
+    "primary_phase_changes": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/PRIMARY-phase-specific-changes.json",
+      "sha256": "ef3412939d2694d4e496f1c81bb92c52f334e3fde599d32187dbaca308f7050c",
+      "size": 3317
+    },
+    "primary_changed_line_ranges": [
+      {
+        "operation": "replace",
+        "admission_lines": [
+          14,
+          14
+        ],
+        "observed_lines": [
+          14,
+          14
+        ]
+      },
+      {
+        "operation": "replace",
+        "admission_lines": [
+          37,
+          37
+        ],
+        "observed_lines": [
+          37,
+          37
+        ]
+      }
+    ],
+    "interpretation": "The outer operator updated only the separate PRIMARY current checkpoint and to-do during this implementer phase. Its IDs, owner order and historical tracker notes still match. The locked admission baseline is retained; no immutable PRIMARY-byte or PRIMARY-sync claim is made."
+  },
+  "issues_and_limits": [
+    {
+      "class": "RESOLVED_DIAGNOSTIC_ERROR",
+      "detail": {
+        "exit_code": 1,
+        "error": "AttributeError: 'WaveConfig' object has no attribute 'base_branch'",
+        "effects": "External snapshots only; no repo mutation. Retry uses explicit locked-plan base dev."
+      }
+    },
+    {
+      "class": "OUTER_AUTHORITY_PENDING",
+      "detail": "The index has R4 cap bytes. Fresh native staging, actual packet and indexed-cap reviewer checks, supervision and commit are still required. No implementer staging or approval was performed."
+    },
+    {
+      "class": "QUOTA_OBSERVATION_LIMIT",
+      "detail": "No callable quota observation capability available; percentage not inferred."
+    },
+    {
+      "class": "PRESERVED_OUTER_LIMITS",
+      "detail": "Startup binary/cache-canary and docs-registry limitations remain outer-owned. No model, role, hook, settings or backup changes were made."
+    }
+  ],
+  "execution_boundary": {
+    "executor_or_dispatcher_launch": false,
+    "startup_preflight_or_attestation": false,
+    "read_only_protocol_render": {
+      "command": "PYTHONDONTWRITEBYTECODE=1 bash /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/mu/tools/session/rcx_session_protocol.sh",
+      "exit_code": 0,
+      "effects": "Read-only protocol and role/mode display; no apply."
+    },
+    "self_staging": false,
+    "commit_push_pr_merge": false,
+    "live_recovery_apply": false,
+    "source_retirement": false,
+    "validation_scope": "Only the declared full gate and required native packet/cap, historical-plan, binding and preservation checks; no pre-push or broad audit governance commands."
+  },
+  "invariants": {
+    "numeric_caps_before_after": {
+      "CAP_TEST_FILES": [
+        175,
+        175
+      ],
+      "CAP_TOOL_SCRIPTS": [
+        64,
+        64
+      ]
+    },
+    "production_source_delta": "none",
+    "test_definition_delta": "none; 114 local-review tests unchanged",
+    "runtime_mu_seed_host_semantics_delta": "none",
+    "debt_delta": "none; ratchets not rerun inside this implementer",
+    "historical_approval_or_budget_reuse": false
+  },
+  "remaining_outer_gates": [
+    "Native staging, then independent actual locked-packet predicate and indexed-cap postimage classification with both results bound to the current candidate.",
+    "Fresh native review and supervision; repeat both actual checks before native commit. Every reviewer emits one final native envelope.",
+    "Explicit history recovery only from reviewed COMMITTED native code, original immutable evidence and successful public verification; recovery never grants approval.",
+    "Corrected-head CI, authenticated current-request complete-PR review and aggregate clearance, ordered-parent protected PR1332 merge and verified PRIMARY synchronization.",
+    "After actual landing/sync, verify PR1331 disposition and continue the prepared useful folder wave, separate deduplicated retention, final coverage/native disposition and fresh physical/registration/useful-work obligations under existing row38/row40.",
+    "Protect paused PR1325 and the main repository; preserve original and same-content holds, old checkpoints/budgets, startup/docs limitations and founder quota-stop policy. No archive purge or backup changes."
+  ],
+  "external_diagnostics": {
+    "volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+    "directory": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b",
+    "artifacts": {
+      "initial-observation.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/initial-observation.json",
+        "sha256": "80ef99413b740715514c68a4a54948266500d13ac664d8d4fb5c918fe293458e",
+        "size": 14538
+      },
+      "cap-materialization.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/cap-materialization.json",
+        "sha256": "33a1da503beb5a19c94d8ed92a13fa4a62cdc7b2c52d2941e3695e8c8b811ac1",
+        "size": 991
+      },
+      "growth-cap-native-r5-expected.py": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/growth-cap-native-r5-expected.py",
+        "sha256": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+        "size": 19866
+      },
+      "declared-gate.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/declared-gate.json",
+        "sha256": "4c56ddf837df5e1314dcf754c284304c277d5af080eb834f280b89312f453c9d",
+        "size": 20879
+      },
+      "declared-gate.stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/declared-gate.stdout",
+        "sha256": "4881ef86a81489eab7aa2480c7a091e648f030cd01bb83c942e975e8e0d71bf9",
+        "size": 3356
+      },
+      "declared-gate.stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/declared-gate.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0
+      },
+      "actual-history-plan.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/actual-history-plan.json",
+        "sha256": "dad56a7ac29ded229c790b4e2862ccfed2af55249686bb4170456830a715de2d",
+        "size": 12728
+      },
+      "actual-history-plan.stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/actual-history-plan.stdout",
+        "sha256": "5c0f83e29a6cb444f987cac4fe9178ee5ea35fb3c26be039cd7401a0a7a599df",
+        "size": 5261
+      },
+      "actual-history-plan.stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/actual-history-plan.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0
+      },
+      "tracker-reconciliation.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/tracker-reconciliation.json",
+        "sha256": "6b7a4fdbb3a4d537e3b83200f92eec2135f6de451ed452a7cf8d0b05a2bdc66d",
+        "size": 695
+      },
+      "final-verification.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/final-verification.json",
+        "sha256": "dce7602cb3bd5ce6a8a49ff46410d699c06d98891589a69fba7939b3bc19ab4d",
+        "size": 30685
+      },
+      "TASKS-primary-observed-start.md": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/TASKS-primary-observed-start.md",
+        "sha256": "649ed45be720e96dc1c5cca3edf3c5a8d8fce9de8d0a31c4636ec824248b3a15",
+        "size": 2066144
+      },
+      "TASKS-primary-observed-final.md": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/TASKS-primary-observed-final.md",
+        "sha256": "c82c94abf41e41605662741c6ba9bf25d7ef9f6285b6aff22fac06cd00edaf92",
+        "size": 2066929
+      },
+      "PRIMARY-phase-specific-changes.json": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/PRIMARY-phase-specific-changes.json",
+        "sha256": "ef3412939d2694d4e496f1c81bb92c52f334e3fde599d32187dbaca308f7050c",
+        "size": 3317
+      },
+      "TASKS-worktree-before.md": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/TASKS-worktree-before.md",
+        "sha256": "c6ac8a286d05636dbe7a264dce31e5f9ff1eb26b1bdc3029c6752864b55ce035",
+        "size": 2197559
+      },
+      "TASKS-implementation.diff": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/TASKS-implementation.diff",
+        "sha256": "c579589f82586c5b4606bcc8536e42f2d22148ac32adb2e93801d2fc50f8b81f",
+        "size": 35622
+      },
+      "CHANGELOG-before.md": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/CHANGELOG-before.md",
+        "sha256": "0b5d9682f53eea4d12d205464935b80faf38df588c0e7c11945087d78df98260",
+        "size": 233503
+      },
+      "CHANGELOG-implementation.diff": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/CHANGELOG-implementation.diff",
+        "sha256": "741daceb15333c4295adac8d9709303ef8bbe3a3e29542bc67b3d0e31e0f8c6e",
+        "size": 2765
+      },
+      "raw-index-before": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/raw-index-before",
+        "sha256": "21bc8d82c8d53f3deb2e257ada1291f2c10cb6c229c454d33c0a8930a1592e25",
+        "size": 431913
+      },
+      "index-entries-before.bin": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/index-entries-before.bin",
+        "sha256": "94dd78296798d85495d6c7845434a4b3441383610a3a657a2ba1d06a19fde7a9",
+        "size": 377358
+      },
+      "refs-before.txt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/refs-before.txt",
+        "sha256": "c3f4e7b60b881a2bb90c757a248b78081946a5d01c1094b3187d808fd5e6dd0e",
+        "size": 59676
+      },
+      "refs-after-history.txt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r5-phase-b/refs-after-history.txt",
+        "sha256": "c3f4e7b60b881a2bb90c757a248b78081946a5d01c1094b3187d808fd5e6dd0e",
+        "size": 59676
+      }
+    }
+  },
+  "final_file_sha256": {
+    "mu/tests/docs/test_growth_caps.py": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+    "TASKS.md": "57a2e2ce280feadc097451d7848076c0f2490eb38632640b9428c9a669b28086",
+    "CHANGELOG.md": "2886dd39a3fc1418cee1c94eaf53241acda21c71bf53121c1c54a7ebdc45e1ba"
+  }
+}

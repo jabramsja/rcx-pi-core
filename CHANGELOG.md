@@ -4,7 +4,147 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-12
+
+### Preserve exact native packet authority (R5 Phase B; uncommitted)
+
+- Carry the independently preserved R4 implementation with all production
+  source and tests frozen. Materialize the entire native HEAD/index-derived
+  R5 cap postimage; only the two R4 provenance suffixes change and numerical
+  caps remain 175/64. All 114 local-review test definitions stay byte-exact.
+- The actual locked R5 packet passes the existing launcher predicate against
+  the frozen config. Its seven launcher headings and body are untouched;
+  implementation prose and diagnostics belong in the R5 implementation JSON
+  and hash-bound external evidence on the UUID-resolved WD recovery volume.
+- Preserve the R4 packet's failing predicate and operator stop after final
+  native pytest passed at 04:57:17Z. The unsupported implementation-evidence
+  heading caused that hold; the supported indicator machine section needs no
+  guard change. Retain the separate R3 operator-error correction and all old
+  verdicts, receipts, budgets and the R1 IN_FLIGHT checkpoint.
+- Reconcile PRIMARY TASKS admission baseline `649ed45b…`, retaining all
+  268 canonical IDs, 44 ordered owners and every historical tracker line.
+  Only R5's newly collected indicator is active; R2/R3/R4 remain history.
+- The full declared five-selector/four-worker gate passes 2,935 tests in
+  153.01s, exit 0, with stable source hashes and raw index. The exact pinned
+  public a705 history plan passes with approval=false; original bytes/modes,
+  all 543 refs, HEAD/branch/index and the a928 ERROR/REQUEST_CHANGES binding
+  remain unchanged. All 43 protected paths and 79 old authority records match
+  admission. Exact argv, environment, output, timings and current hashes are
+  in the R5 implementation JSON, with large diagnostics bound externally.
+- The cap worktree matches R5; the unchanged actual index retains R4 bytes.
+  Outer native staging and independent repeats of the SAME actual packet
+  predicate and indexed-cap classifier after staging and before commit remain
+  required. No current review, commit, live recovery or landing is claimed.
+- Fresh native supervision/commit, explicit recovery from reviewed committed
+  code, corrected-head CI and authenticated complete-PR review/aggregate
+  clearance precede protected PR1332 landing and verified PRIMARY sync.
+  PR1331 disposition, prepared useful folder work, separate deduplicated
+  retention, final coverage/native disposition and physical/registration/useful
+  work remain open. Paused PR1325 and the main repository remain protected.
+
+### Reconcile carried growth-cap provenance (R4 Phase B; uncommitted)
+
+- Materialize the entire exact R4 postimage from the existing native HEAD/index
+  computation. Only the two inherited R2 provenance suffixes change; numerical
+  caps remain 175/64. Production executors and strict authority guards are frozen.
+- The preserved prior-wave rejection/preservation/demotion regression passes
+  unchanged. Add a real-Git positive control requiring exact index and worktree
+  agreement before current-wave settlement, with no further cap increment.
+  All 112 pre-existing local-review tests and the preserved regression retain
+  their exact definitions, assertions and parameter cases; no fixture fix needed.
+- Scoped private-attribute integrity passes. The full declared five-selector,
+  four-worker gate passes 2,935 tests in 166.22s with stable source hashes.
+  The pinned actual a705 read-only plan succeeds with approval=false; the
+  separate a928 ERROR/REQUEST_CHANGES binding and default orphan hold remain.
+  Exact argv, output, timing, source hashes and external diagnostic bindings
+  are in the R4 implementation evidence.
+- Reconcile PRIMARY TASKS admission baseline `5833b7b3…`, retaining all 268 IDs,
+  44 ordered owners and historical tracker notes. Preserve the correction that
+  root interrupted an admitted R3 regression after an incorrect scope inference;
+  no delegate scope violation or executor defect was established. Only R4's
+  indicator is active; R2/R3 indicators remain immutable historical artifacts.
+- This implementer corrected the worktree only. The actual index still carries
+  R2 bytes and native classification remains invalid pending outer staging.
+  Fresh verification of both actual surfaces, independent review and native
+  commit precede explicit recovery from reviewed committed code, corrected-head
+  CI/full-PR review, protected PR1332 landing and verified PRIMARY sync. PR1331
+  disposition, folder work, separate retention, final disposition and physical
+  obligations remain open. All 39 protected files and 60 old authority records
+  remain unchanged; no live recovery, staging, commit or landing is claimed here.
+
+## 2026-10-11
+
+
+### Bound legacy interruption commentary and full-review workers (R3 Phase B; uncommitted)
+
+- Hold unknown or refusal-bearing commentary unless the complete message sequence
+  exactly matches the neutral interruption or the preserved original a705 progress
+  evidence. Preserve Git/remote-base identity, independent provenance, original
+  artifacts, default orphan/same-content holds and all fresh-review requirements.
+- Use four workers for the exact full local-review module, including its history
+  module mixture. Keep its caller deadline and all existing fleet/ordinary/node
+  policies. Public fixtures cover exact argv, foreign-target rejection, real child
+  failures/deadlines, provider isolation and temporary-directory cleanup.
+- Validation: 179 focused controls and scoped private-attribute integrity pass.
+  The unchanged full declared four-selector gate passes 2,927 tests in 143.24s.
+  The initial full run exposed a missing reusable fixture import and asynchronous
+  pager writes; fixture-only corrections retain all existing assertions/cases.
+  Final actual a705 read-only planning and a928 historical binding pass; default
+  orphan admission remains held. Exact commands, output,
+  timing and hashes are in the R3 implementation evidence. No earlier R2 result
+  validates these changes: its later refusal finding and exhausted three-attempt
+  recovery remain terminal history, with no durable final per-case third result.
+- Reconcile PRIMARY baseline `21b24e23…`, retaining 268 IDs, 44 ordered owners and
+  prior negative notes. Native approval/commit, live recovery, CI/full-PR review,
+  protected landing and PRIMARY sync precede folder, separate retention, final
+  disposition and physical cleanup. All protected governance remains unchanged.
+
+
+### Finish preserved legacy review-history recovery (R2 Phase B; unmerged)
+
+- Reproduce the actual a705 read-only plan hold and bind recovery to the exact
+  origin repository, fetch mapping and direct remote base. Stale local `dev`
+  no longer selects recovery authority. Preserve full historical diff/identity
+  proof; reject missing, altered or ambiguous remote evidence without fetching
+  or moving refs. Revalidate that authority on apply, verify and admission.
+- Extend public real-Git fixtures for stale/absent local bases and incorrect
+  remote identity, mapping and refs. Preserve default orphan/same-content holds,
+  append-only negative recovery provenance and fresh CI/review/merge requirements.
+- Declared gate: 1,281 passed in 237.13s with stable source hashes. The scoped
+  private-attribute checker and pinned actual-history read-only plan pass; live
+  default orphan admission still holds. Exact results are in the R2 evidence.
+  Inherited R1
+  packet/evidence/advisory remain unchanged historical input; its interrupted
+  third gate and unknown actor outcome are not current validation or approval.
+- Reconcile PRIMARY TASKS checkpoint `114c54c6…`, preserving 268 task IDs,
+  44 ordered owners, restored R2/R3/R4 notes and all previous negative findings.
+  R6 remains local, PR1332 unmerged and live recovery unpublished. Native
+  approval/commit/landing and verified PRIMARY sync precede the open folder,
+  retention, final disposition and physical cleanup obligations. Row40 retains
+  future deterministic recovery of interrupted implementers with unknown outcome.
+
 ## 2026-10-09
+
+### Recover preserved interrupted legacy review history explicitly (historical R1 Phase B; unfinished, unmerged)
+
+- Add a read-only native recovery plan and explicit append-only apply/verify
+  operation. Pin the preservation binding, independently restored bytes/modes,
+  complete original Git PR diff, repository/PR/branches and native job/turn.
+  Recovery records current provenance and unknown interruption cause separately
+  from original reviewer receipts; it never supplies approval or resets a budget.
+- Retain default orphan, corruption, refusal, ambiguity and concurrent-owner
+  holds. Original and same-content descendants remain stopped; corrected content
+  requires fresh authenticated review, CI and the protected merge path. Recheck
+  recovered history on resumes and at protected merge admission.
+- R6 is committed locally at `e75ce9f7db3fd66cb240026e75f7066d68b9f6fc`,
+  held before push/landing. Preserve the exact a705 files, complete a928 negative
+  receipt, all R2-R6 repairs/governance and restored R2/R3/R4 tracker notes.
+  Reconcile PRIMARY checkpoint `ec5cc2b7…` with 268 IDs and 44 ordered owners.
+  Live recovery, current-wave commit and landing remain outer-owned; retain
+  folder, separate retention, final disposition/cleanup and paused PR1325 work.
+- Exact validation runs, failures if any, source hashes and the read-only actual
+  history plan are recorded in this wave's implementation evidence. The R6
+  entry below records its earlier Phase B state, before its local commit.
 
 ### Bind tracker recovery to the current supervisor failure (R6 Phase B; unmerged)
 

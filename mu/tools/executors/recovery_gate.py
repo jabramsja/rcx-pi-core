@@ -8901,8 +8901,11 @@ def _run_pytest_targeted_validator(
     # The canonical fleet module exceeded both the 300s recovery and 900s
     # commit serial gates on 2026-09-27. Its declared four-worker suite passed
     # in 281.30s. Match commit's bounded workers and full-module budget here;
-    # leave unrelated targets and node selectors on their caller's policy.
+    # The full local-review module also uses four workers, including its mixed
+    # history-recovery invocation, while retaining the finite caller deadline.
+    # Exact module membership excludes foreign paths and node selectors.
     full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in targets
+    parallel = full_fleet or "mu/tests/tools/test_commit_executor_local_review.py" in targets
     effective_timeout = max(timeout, 900 + 240 * (len(targets) - 1)) if full_fleet else timeout
     command = [
         sys.executable,
@@ -8912,7 +8915,7 @@ def _run_pytest_targeted_validator(
         "--tb=short",
         "-p",
         "no:cacheprovider",
-        *(["-n", "4", "--dist", "worksteal"] if full_fleet else []),
+        *(["-n", "4", "--dist", "worksteal"] if parallel else []),
     ]
     with tempfile.TemporaryDirectory(prefix="rcx-recovery-tmp-") as tmp_root, tempfile.TemporaryDirectory(prefix="rcx-recovery-cache-") as cache_root:
         # Pytest clears basetemp on first tmp_path use. Give it a child so

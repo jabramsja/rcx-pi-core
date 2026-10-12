@@ -14,7 +14,9 @@ import hashlib
 import json
 import re
 from pathlib import Path
+import shutil
 import subprocess
+from time import perf_counter
 from types import SimpleNamespace
 
 import pytest
@@ -171,7 +173,7 @@ def thread(author=BOT, *, outdated=False):
 
 
 class Carrier:
-    def __init__(self, root, monkeypatch):
+    def __init__(self, root, monkeypatch, *, repository=None):
         self.root = root
         self.bus = root / BUS
         self.bus.mkdir()
@@ -179,6 +181,9 @@ class Carrier:
         self.config_path.parent.mkdir(parents=True)
         self.config = {
             "github_review_quota_fallback": {"enabled": True},
+            # External pager delivery can outlive a held continuation and race
+            # immutable-evidence assertions. This fixture models no pager I/O.
+            "pipeline_agent_pager": {"enabled": False},
             "role_agents": {"implementer": "codex", "reviewer": "codex"},
             "bridge_agent_defaults": {"codex": {"model": "gpt-6-astra", "reasoning_effort": "max"}},
             "bridge_turn_timeouts": {"phase_b": 900},
@@ -192,29 +197,41 @@ class Carrier:
         self.bridge_path = self.bus / "bridge_config.json"
         self.bridge_path.write_text(json.dumps(self.bridge))
         (root / ".gitignore").write_text(".agent_bus*/\n.scratch/\n")
-        (root / "earlier.py").write_text("value = 0\n")
-        (root / "latest.py").write_text("value = 0\n")
         merge_script = root / "mu/tools/hooks/merge_pr.sh"
         merge_script.parent.mkdir(parents=True)
         merge_script.write_text("# Fixture sentinel; must never execute.\n")
-        git(root, "init", "-b", "dev")
-        git(root, "config", "user.name", "Fixture")
-        git(root, "config", "user.email", "fixture@example.invalid")
-        git(root, "config", "commit.gpgsign", "false")
-        git(root, "config", "core.hooksPath", str(root / ".git/fixture-hooks"))
-        git(root, "remote", "add", "origin", "https://github.com/fixture/repo.git")
-        git(root, "add", ".")
-        git(root, "commit", "-m", "base")
-        self.base = git(root, "rev-parse", "HEAD")
-        git(root, "checkout", "-b", "fixture/quota")
-        (root / "earlier.py").write_text("value = 1\n")
-        git(root, "add", "earlier.py")
-        git(root, "commit", "-m", "earlier PR change")
-        (root / "latest.py").write_text("value = 2\n")
-        git(root, "add", "latest.py")
-        git(root, "commit", "-m", "latest PR change")
-        self.head = git(root, "rev-parse", "HEAD")
-        self.merge_evidence = self.commit_evidence([self.base, self.head])
+        if repository is None:
+            (root / "earlier.py").write_text("value = 0\n")
+            (root / "latest.py").write_text("value = 0\n")
+            git(root, "init", "-b", "dev")
+            git(root, "config", "user.name", "Fixture")
+            git(root, "config", "user.email", "fixture@example.invalid")
+            git(root, "config", "commit.gpgsign", "false")
+            git(root, "config", "core.hooksPath", ".git/fixture-hooks")
+            git(root, "remote", "add", "origin", "https://github.com/fixture/repo.git")
+            git(root, "add", ".")
+            git(root, "commit", "-m", "base")
+            self.base = git(root, "rev-parse", "HEAD")
+            git(root, "checkout", "-b", "fixture/quota")
+            (root / "earlier.py").write_text("value = 1\n")
+            git(root, "add", "earlier.py")
+            git(root, "commit", "-m", "earlier PR change")
+            (root / "latest.py").write_text("value = 2\n")
+            git(root, "add", "latest.py")
+            git(root, "commit", "-m", "latest PR change")
+            self.head = git(root, "rev-parse", "HEAD")
+            self.merge_evidence = self.commit_evidence([self.base, self.head])
+        else:
+            # Copy every Git file, including objects, without hardlinks or
+            # alternates. Each case owns its refs, index, config and worktree;
+            # only the identical initial history is built once per module.
+            shutil.copytree(repository.root / ".git", root / ".git")
+            for name in ("earlier.py", "latest.py"):
+                shutil.copy2(repository.root / name, root / name)
+            self.base, self.head = repository.base, repository.head
+            self.merge_evidence = copy.deepcopy(repository.merge_evidence)
+            # Copied index stat data belongs to the template's worktree.
+            git(root, "update-index", "--refresh")
         self.pr = {
             "number": 1331, "url": "https://github.com/fixture/repo/pull/1331",
             "state": "OPEN", "headRefOid": self.head, "headRefName": "fixture/quota",
@@ -380,9 +397,93 @@ class Carrier:
             assert len(self.reviews) == reviews
 
 
+@pytest.fixture(scope="module")
+def local_review_timing_origin():
+    return perf_counter()
+
+
+@pytest.fixture(autouse=True)
+def trace_local_review_case(request, local_review_timing_origin):
+    """Keep per-case timing in native output even if the outer deadline kills pytest.
+
+    The terminal reporter bypasses passing-test capture. Emit a start as well
+    as a finish so an interrupted run identifies the active case and its age;
+    timing in a session-end summary alone would be lost on an outer timeout.
+    Workers have no terminal reporter; their controller retains normal xdist
+    reporting. No test outcome, timeout or subprocess behavior is replaced.
+    """
+    reporter = request.config.pluginmanager.getplugin("terminalreporter")
+    if reporter is None:
+        yield
+        return
+    started = perf_counter()
+    reporter.write_line(
+        f"[local-review timing] start elapsed={started - local_review_timing_origin:.3f}s "
+        f"{request.node.nodeid}", flush=True,
+    )
+    try:
+        yield
+    finally:
+        finished = perf_counter()
+        reporter.write_line(
+            f"[local-review timing] finish elapsed={finished - local_review_timing_origin:.3f}s "
+            f"duration={finished - started:.3f}s {request.node.nodeid}", flush=True,
+        )
+
+
+@pytest.fixture(scope="module")
+def carrier_repository(tmp_path_factory):
+    """Build real commits once without retaining any provider monkeypatches."""
+    with pytest.MonkeyPatch.context() as patch:
+        lane = Carrier(tmp_path_factory.mktemp("local-review-history"), patch)
+    return SimpleNamespace(root=lane.root, base=lane.base, head=lane.head,
+                           merge_evidence=lane.merge_evidence)
+
+
 @pytest.fixture
-def carrier(tmp_path, monkeypatch):
-    return Carrier(tmp_path, monkeypatch)
+def carrier(tmp_path, monkeypatch, carrier_repository):
+    return Carrier(tmp_path, monkeypatch, repository=carrier_repository)
+
+
+def test_carrier_repository_copies_are_isolated(tmp_path, carrier_repository):
+    def inventory(root):
+        return {str(p.relative_to(root)): p.read_bytes()
+                for p in root.rglob("*") if p.is_file()}
+
+    template_before = inventory(carrier_repository.root)
+    lanes = []
+    for name in ("first", "second"):
+        root = tmp_path / name
+        root.mkdir()
+        with pytest.MonkeyPatch.context() as patch:
+            lane = Carrier(root, patch, repository=carrier_repository)
+        lanes.append(lane)
+        assert git(root, "status", "--porcelain") == ""
+        assert git(root, "symbolic-ref", "--short", "HEAD") == "fixture/quota"
+        assert git(root, "rev-list", "--count", f"{lane.base}..{lane.head}") == "2"
+        assert git(root, "show", "-s", "--format=%P", lane.merge_evidence["oid"]).split() == [lane.base, lane.head]
+        assert git(root, "config", "core.hooksPath") == ".git/fixture-hooks"
+        assert not (root / ".git/objects/info/alternates").exists()
+        for source in (carrier_repository.root / ".git").rglob("*"):
+            if source.is_file():
+                target = root / source.relative_to(carrier_repository.root)
+                assert not target.is_symlink() and not source.samefile(target)
+
+    first, second = lanes
+    second_before = inventory(second.root)
+    git(first.root, "config", "user.name", "Changed fixture")
+    git(first.root, "update-ref", "refs/heads/dev", first.head)
+    (first.root / "earlier.py").write_text("isolated = True\n")
+    git(first.root, "add", "earlier.py")
+    first.merge_evidence["parents"]["nodes"][0]["oid"] = first.head
+
+    assert inventory(second.root) == second_before
+    assert inventory(carrier_repository.root) == template_before
+    assert second.merge_evidence == carrier_repository.merge_evidence
+    assert first.merge_evidence != second.merge_evidence
+    assert git(second.root, "status", "--porcelain") == ""
+    assert git(second.root, "rev-parse", "dev") == second.base
+    assert git(second.root, "config", "user.name") == "Fixture"
 
 
 @pytest.mark.parametrize("wave,digest", [
@@ -2870,6 +2971,166 @@ def test_commit_candidate_admits_only_validated_native_growth_cap(generated_gove
     assert git(case.root, "rev-parse", "HEAD") == head
 
 
+def test_current_wave_exact_growth_cap_postimage_requires_native_index_authority(
+    generated_governance_candidate,
+):
+    """Reconcile only provenance, then admit the exact staged successor bytes."""
+    case = generated_governance_candidate
+    wave = f"{case.wave}-successor"
+    capture = commit._capture_growth_cap_retry_authority  # ANTICHEAT_OK: read-only native HEAD/index recomputation in disposable Git.
+    classify = commit._growth_cap_snapshot_candidate_state  # ANTICHEAT_OK: real exact-byte classifier, never mocked.
+    inherited = case.cap.read_bytes()
+    index = case.root / ".git/index"
+    raw_index = index.read_bytes()
+    staged = git(case.root, "ls-files", "--stage", "-z")
+    head = git(case.root, "rev-parse", "HEAD")
+    refs = git(case.root, "show-ref")
+    preserved = {
+        path: path.read_bytes()
+        for path in (
+            case.root / "allowed.py", case.root / case.new_test,
+            case.root / case.handoff["tracked_packet"], case.spec_path, case.route_path,
+        )
+    }
+
+    before, error = capture(case.root, wave_id=wave, base_branch="dev")
+    assert error is None, error
+    assert classify(before) == "invalid"
+    expected = before["expected_bytes"]
+    assert expected != inherited
+    assert expected == inherited.replace(case.wave.encode(), wave.encode())
+    assert re.search(rb"^CAP_TEST_FILES = (\d+)", expected, re.M).group(1) == b"1"
+    assert index.read_bytes() == raw_index
+
+    case.cap.write_bytes(expected)
+    worktree_only, error = capture(case.root, wave_id=wave, base_branch="dev")
+    assert error is None, error
+    assert worktree_only["expected_bytes"] == expected
+    assert classify(worktree_only) == "invalid"
+    assert index.read_bytes() == raw_index
+    assert git(case.root, "ls-files", "--stage", "-z") == staged
+
+    # Staging is confined to this disposable repository. A corrected worktree
+    # alone must never be reported as final indexed authority.
+    git(case.root, "add", "--", case.growth)
+    current, error = capture(case.root, wave_id=wave, base_branch="dev")
+    assert error is None, error
+    assert current["expected_bytes"] == expected
+    assert current["authority_digest"] == before["authority_digest"]
+    assert current["index_target"] == current["expected_target"]
+    assert current["worktree_bytes"] == expected
+    assert classify(current) == "postimage"
+    staged = git(case.root, "ls-files", "--stage", "-z")
+    raw_index = index.read_bytes()
+
+    admitted = commit.maybe_autobump_growth_cap_for_founder_override(
+        case.root, wave_id=wave, base_branch="dev",
+        founder_override_token=wave, log=lambda _: None,
+    )
+    assert admitted["reason"] == "retry_settled", admitted
+    assert admitted["bumped"] is False and admitted["retry_settled"] is True
+    assert admitted["bump_amount"] == 0
+    assert admitted["commit_generated_governance_paths"] == [case.growth]
+    assert case.cap.read_bytes() == expected
+    assert index.read_bytes() == raw_index
+    assert git(case.root, "ls-files", "--stage", "-z") == staged
+    assert git(case.root, "rev-parse", "HEAD") == head
+    assert git(case.root, "show-ref") == refs
+    assert {path: path.read_bytes() for path in preserved} == preserved
+    assert not case.receipt_path.exists()
+
+
+def test_prior_wave_growth_cap_rejection_preserves_candidate_and_demotes_retry(
+    generated_governance_candidate,
+):
+    """A new wave cannot inherit an earlier wave's uncommitted cap authority."""
+    case = generated_governance_candidate
+    retry_wave = f"{case.wave}-successor"
+    retry_packet = f"reports/control_plane/{retry_wave}.md"
+    packet = case.root / retry_packet
+    packet.write_text(
+        f"# Successor candidate\n\nStatus: {commit.COMMIT_RETRY_PENDING_STATUS}\n"
+        f"Wave ID: {retry_wave}\nFOUNDER_OVERRIDE:{retry_wave}\n"
+    )
+    tasks = case.root / "TASKS.md"
+    tasks.write_text(
+        "1. **[FOUNDER-ORDERED-REDTEAM-GENERATED-RETRY] "
+        f"{commit.COMMIT_RETRY_PENDING_STATUS} / LOCAL EVIDENCE.** "
+        f"Wave ID: `{retry_wave}`. Packet: `{retry_packet}`.\n"
+    )
+    git(case.root, "add", "--", retry_packet, "TASKS.md")
+    handoff = {**case.handoff, "wave_id": retry_wave, "tracked_packet": retry_packet}
+    preserved = {
+        path: path.read_bytes()
+        for path in (
+            case.cap, case.root / "allowed.py", case.root / case.new_test,
+            case.root / case.handoff["tracked_packet"], case.spec_path, case.route_path,
+            packet, tasks,
+        )
+    }
+    staged = git(case.root, "ls-files", "--stage", "-z")
+    head = git(case.root, "rev-parse", "HEAD")
+    refs = git(case.root, "show-ref")
+
+    # Positive control: these untouched bytes remain valid for their original wave.
+    same_wave = commit.maybe_autobump_growth_cap_for_founder_override(
+        case.root, wave_id=case.wave, base_branch="dev",
+        founder_override_token=case.wave, log=lambda _: None,
+    )
+    assert same_wave["reason"] == "retry_settled", same_wave
+    assert same_wave["bumped"] is False and same_wave["bump_amount"] == 0
+
+    restored = commit._restore_pending_handoff_state_for_commit_ready(  # ANTICHEAT_OK: real packet/tracker restoration before the native settlement boundary.
+        case.root, handoff,
+    )
+    assert set(restored["changed"]) == {retry_packet, "TASKS.md"}
+    assert restored["errors"] == []
+    assert commit.COMMIT_RETRY_RESTORED_STATUS in packet.read_text()
+    assert commit.COMMIT_RETRY_RESTORED_STATUS in tasks.read_text()
+    restored_bytes = {path: path.read_bytes() for path in preserved}
+    raw_index = (case.root / ".git/index").read_bytes()
+
+    rejected = commit.maybe_autobump_growth_cap_for_founder_override(
+        case.root, wave_id=retry_wave, base_branch="dev",
+        founder_override_token=retry_wave, log=lambda _: None,
+    )
+
+    diagnostic = (
+        "growth-cap retry authority rejected candidate: target must be the exact "
+        "HEAD preimage or exact recomputed postimage in both index and worktree"
+    )
+    assert rejected["reason"] == "retry_authority_error", rejected
+    assert rejected["retry_authority_error"] == diagnostic
+    assert rejected["bumped"] is False and rejected["retry_settled"] is False
+    assert rejected["bump_amount"] == 0 and rejected["new_cap"] is None
+    assert rejected["commit_generated_governance_paths"] == []
+    assert {path: path.read_bytes() for path in restored_bytes} == restored_bytes
+    assert (case.root / ".git/index").read_bytes() == raw_index
+
+    paths, provenance, error = commit._commit_generated_governance_paths_from_step5e_outcome(  # ANTICHEAT_OK: consume the real rejection through the native fatal-settlement boundary.
+        rejected,
+    )
+    assert (paths, provenance, error) == ([], "retry_authority_error", diagnostic)
+    result = {
+        "status": "error", "step": "settle_commit_generated_governance",
+        "errors": [error], "steps_completed": ["restore_commit_retry_state"],
+    }
+    commit._maybe_demote_completed_handoff_state_for_commit_retry(  # ANTICHEAT_OK: real failure demotion without launching a commit pipeline or fabricating settlement success.
+        repo_root=case.root, handoff=handoff, result=result,
+    )
+
+    demotion = result["commit_retry_state_demotion"]
+    assert set(demotion["changed"]) == {retry_packet, "TASKS.md"}
+    assert demotion["errors"] == []
+    assert result["errors"] == [diagnostic]
+    assert result["steps_completed"] == ["restore_commit_retry_state"]
+    assert {path: path.read_bytes() for path in preserved} == preserved
+    assert git(case.root, "ls-files", "--stage", "-z") == staged
+    assert git(case.root, "rev-parse", "HEAD") == head
+    assert git(case.root, "show-ref") == refs
+    assert not case.receipt_path.exists()
+
+
 @pytest.mark.parametrize("state", ["untracked", "staged", "committed", "index-only"])
 def test_generated_candidate_still_rejects_arbitrary_handoff_paths(generated_governance_candidate, state):
     case = generated_governance_candidate
@@ -4314,3 +4575,27 @@ def test_historical_correction_with_unavailable_base_holds_without_fetch(
 
     monkeypatch.setattr(commit, "_run", unavailable)
     _assert_retained_history_hold(carrier, path.parent)
+
+
+def test_explicit_legacy_recovery_never_fabricates_native_terminal_receipt(
+    carrier, monkeypatch, historical_local_review_producer, tmp_path_factory,
+):
+    import sys
+    from mu.tests.tools.test_local_review_history_recovery import History, inventory
+    from recovery_gate import local_review_terminal_payload
+
+    history = History(carrier, monkeypatch, historical_local_review_producer,
+                      tmp_path_factory.mktemp("legacy-preservation") / "snapshot",
+                      support=sys.modules[__name__])
+    original = inventory(history.attempt)
+    before = history.assert_hold()
+    assert "metadata disappeared" in " ".join(before["errors"])
+    proof = history.apply()
+    after = history.assert_hold()
+    assert "original or unchanged PR content" in " ".join(after["errors"])
+    assert local_review_terminal_payload(before) is None
+    assert local_review_terminal_payload(after) is None
+    assert "receipt" not in proof and "local_pr_review" not in after
+    assert not (history.attempt / "receipt.json").exists()
+    assert not (history.attempt / "attempt.json").exists()
+    assert inventory(history.attempt) == original

@@ -12,7 +12,7 @@ from contextlib import contextmanager, redirect_stdout, redirect_stderr
 import pytest
 
 from mu.tests.tools.module_loader import load_module
-from mu.tests.tools.test_commit_executor_local_review import carrier, local_terminal_attempt
+from mu.tests.tools.test_commit_executor_local_review import carrier, carrier_repository, local_terminal_attempt
 
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
 _OBSERVABILITY_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "observability"
@@ -9183,6 +9183,188 @@ class TestHybridDelegateRuntime:
 
 
 class TestHybridValidatorContract:
+    @pytest.mark.parametrize("target", [
+        "elsewhere/test_commit_executor_local_review.py",
+        "/tmp/mu/tests/tools/test_commit_executor_local_review.py",
+        "../mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_commit_executor_local_review.py;echo injected",
+        "mu/tests/tools/test_commit_executor_local_review.py --maxfail=0",
+    ])
+    def test_local_review_validator_rejects_foreign_or_command_targets(self, tmp_path, monkeypatch, target):
+        init_hybrid_delegate_tree(tmp_path)
+        (tmp_path / "mu/tools/executors/executor_config.json").write_text(
+            json.dumps({"hybrid_recovery_enabled": True}))
+        calls = []
+
+        def forbidden(*args, **kwargs):
+            calls.append(args)
+            raise AssertionError("Rejected target must not launch a process or implementer")
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", forbidden)
+        monkeypatch.setattr(rg_mod, "_load_phase_b_implementer_module", forbidden)
+        result = rg_mod._run_delegate_implementer_action(  # ANTICHEAT_OK: production payload/validator admission, no implementer launch
+            tmp_path, result={"status": "failed", "step": "final_pytest_gate"},
+            wave_id="local-review-target", step="final_pytest_gate",
+            response=make_delegate_response(validation_spec=[{"validator": "pytest_targeted", "targets": [target]}]),
+            explanation="invalid target control",
+        )
+        assert result["ok"] is False and result["result_update"] is None
+        assert "target" in result["detail"]
+        assert calls == []
+
+    @pytest.mark.parametrize("targets, timeout, workers, deadline", [
+        (["mu/tests/tools/test_commit_executor_local_review.py"], 300, True, 300),
+        (["mu/tests/tools/test_commit_executor_local_review.py"], 60, True, 60),
+        (["mu/tests/tools/test_commit_executor_local_review.py",
+          "mu/tests/tools/test_local_review_history_recovery.py"], 300, True, 300),
+        (["mu/tests/tools/test_local_review_history_recovery.py",
+          "mu/tests/tools/test_commit_executor_local_review.py"], 300, True, 300),
+        (["mu/tests/tools/test_local_review_history_recovery.py"], 300, False, 300),
+        (["mu/tests/tools/test_commit_executor_local_review.py::test_selection"], 60, False, 60),
+        (["mu/tests/tools/test_commit_executor_local_review.py::test_selection",
+          "mu/tests/tools/test_local_review_history_recovery.py"], 300, False, 300),
+        (["mu/tests/tools/test_commit_executor_local_review.py",
+          "mu/tests/tools/test_workingrcx_fleet_apply.py"], 300, True, 1140),
+    ])
+    def test_local_review_validator_exact_selection(self, tmp_path, monkeypatch, targets, timeout, workers, deadline):
+        observed = []
+
+        def run(command, **kwargs):
+            observed.append((command, kwargs))
+            env = kwargs["env"]
+            assert Path(env["TMPDIR"]).is_dir()
+            assert Path(env["XDG_CACHE_HOME"]).is_dir()
+            return subprocess.CompletedProcess(command, 0, "selected stdout", "selected stderr")
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", run)
+        result = rg_mod._run_hybrid_validation_spec(  # ANTICHEAT_OK: production validator entry, intercept only child process argv/env/deadline
+            tmp_path, validation_spec=[{"validator": "pytest_targeted", "targets": targets}], timeout=timeout,
+        )
+        assert len(observed) == 1
+        command, kwargs = observed[0]
+        env = kwargs["env"]
+        assert command == [sys.executable, "-m", "pytest", "-x", "--tb=short", "-p", "no:cacheprovider",
+                           *(["-n", "4", "--dist", "worksteal"] if workers else []),
+                           "--basetemp", str(Path(env["TMPDIR"]) / "pytest"), *targets]
+        assert kwargs == {"cwd": tmp_path, "capture_output": True, "text": True,
+                          "timeout": deadline, "env": env, "check": False}
+        assert env == {**os.environ, "PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1",
+                       "TMPDIR": env["TMPDIR"], "TMP": env["TMPDIR"], "TEMP": env["TMPDIR"],
+                       "XDG_CACHE_HOME": env["XDG_CACHE_HOME"]}
+        assert not Path(env["TMPDIR"]).is_relative_to(tmp_path)
+        assert Path(env["TMPDIR"]) != Path(env["XDG_CACHE_HOME"])
+        assert not Path(env["TMPDIR"]).exists() and not Path(env["XDG_CACHE_HOME"]).exists()
+        assert result == {"validator": "pytest_targeted", "command": command, "targets": targets,
+                          "stdout": "selected stdout", "stderr": "selected stderr", "exit_code": 0, "passed": True}
+
+    @pytest.mark.parametrize("outcome", ["failure", "empty", "timeout", "interrupt"])
+    def test_local_review_validator_preserves_failures_and_cleans_temporary_roots(self, tmp_path, monkeypatch, outcome):
+        targets = ["mu/tests/tools/test_commit_executor_local_review.py",
+                   "mu/tests/tools/test_local_review_history_recovery.py"]
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            assert command[7:11] == ["-n", "4", "--dist", "worksteal"]
+            assert command[-2:] == targets and kwargs["timeout"] == 300
+            if outcome == "timeout":
+                raise subprocess.TimeoutExpired(command, 300, output=b"partial progress", stderr=b"diagnostic")
+            if outcome == "interrupt":
+                raise KeyboardInterrupt("validator interrupted")
+            return subprocess.CompletedProcess(command, 1 if outcome == "failure" else 5, "child stdout", "child stderr")
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", run)
+        spec = [{"validator": "pytest_targeted", "targets": targets}]
+        if outcome in {"timeout", "interrupt"}:
+            with pytest.raises(subprocess.TimeoutExpired if outcome == "timeout" else KeyboardInterrupt) as error:
+                rg_mod._run_hybrid_validation_spec(tmp_path, validation_spec=spec, timeout=300)  # ANTICHEAT_OK: real selection and exception propagation
+            if outcome == "timeout":
+                assert error.value.timeout == 300 and error.value.cmd == calls[0][0]
+                assert error.value.stdout == b"partial progress" and error.value.stderr == b"diagnostic"
+        else:
+            result = rg_mod._run_hybrid_validation_spec(tmp_path, validation_spec=spec, timeout=300)  # ANTICHEAT_OK: real selection preserves unsuccessful subprocess outcomes
+            assert result["passed"] is False
+            assert result["exit_code"] == (1 if outcome == "failure" else 5)
+            assert result["stdout"] == "child stdout" and result["stderr"] == "child stderr"
+        assert len(calls) == 1
+        env = calls[0][1]["env"]
+        assert not Path(env["TMPDIR"]).exists() and not Path(env["XDG_CACHE_HOME"]).exists()
+
+    @pytest.mark.parametrize("outcome, code", [("pass", 0), ("failure", 2), ("empty", 5)])
+    def test_local_review_validator_real_mixed_selection_isolated(self, retained_native_scratch, monkeypatch, outcome, code):
+        root = retained_native_scratch.root
+        # Real Git, inherited provider isolation and actual xdist/pytest process.
+        (root / "conftest.py").write_bytes((_REPO_ROOT / "conftest.py").read_bytes())
+        targets = ["mu/tests/tools/test_commit_executor_local_review.py",
+                   "mu/tests/tools/test_local_review_history_recovery.py"]
+        for i, target in enumerate(targets):
+            (root / target).write_text("" if outcome == "empty" else (
+                "import os, subprocess, tempfile\nfrom pathlib import Path\n"
+                "guard = Path(os.environ['PATH'].split(os.pathsep)[0]) / 'codex'\n"
+                "original_guard = guard.read_bytes()\n"
+                "evidence = Path(tempfile.mkdtemp()) / 'initialization-evidence'\n"
+                "evidence.write_text('preserved')\n"
+                "def test_selection(tmp_path):\n"
+                "    assert os.environ['PYTEST_XDIST_WORKER_COUNT'] == '4'\n"
+                "    assert tmp_path.resolve().is_relative_to((Path(os.environ['TMPDIR']) / 'pytest').resolve())\n"
+                "    assert guard.read_bytes() == original_guard\n"
+                "    assert evidence.read_text() == 'preserved'\n"
+                "    result = subprocess.run([str(guard)], capture_output=True, text=True, timeout=5)\n"
+                "    assert result.returncode == 86\n"
+                "    assert 'RCX_TEST_PROVIDER_ISOLATION_CLI_BLOCKED' in result.stderr\n"
+                f"    assert {not (outcome == 'failure' and i == 1)!r}, 'local-review mixed failure'\n"
+            ))
+        for args in (["add", "."], ["commit", "-m", "validator fixture"]):
+            subprocess.run(["git", *args], cwd=root, capture_output=True, check=True)
+        before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        monkeypatch.setenv("PYTEST_ADDOPTS", "--basetemp=.scratch/unadmitted-pytest")
+        real_run, observed = subprocess.run, []
+
+        def observe(command, **kwargs):
+            observed.append((command, kwargs))
+            return real_run(command, **kwargs)
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", observe)
+        result = rg_mod._run_hybrid_validation_spec(  # ANTICHEAT_OK: unchanged production validator and real subprocess, full local-review/history mixture
+            root, validation_spec=[{"validator": "pytest_targeted", "targets": targets}], timeout=300,
+        )
+        assert result["passed"] is (outcome == "pass"), result
+        assert result["exit_code"] == code, result
+        if outcome == "pass":
+            assert "2 passed" in result["stdout"]
+        elif outcome == "failure":
+            assert "local-review mixed failure" in result["stdout"]
+        assert {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
+        assert not (root / ".scratch/unadmitted-pytest").exists()
+        assert len(observed) == 1 and observed[0][1]["timeout"] == 300
+        env = observed[0][1]["env"]
+        assert not Path(env["TMPDIR"]).exists() and not Path(env["XDG_CACHE_HOME"]).exists()
+
+    def test_local_review_validator_real_deadline_cleans_temporary_roots(self, tmp_path, monkeypatch):
+        target = "mu/tests/tools/test_commit_executor_local_review.py"
+        (tmp_path / target).parent.mkdir(parents=True)
+        (tmp_path / target).write_text("def test_selection():\n    assert True\n")
+        real_run, observed = subprocess.run, []
+
+        def observe(command, **kwargs):
+            observed.append((command, kwargs))
+            return real_run(command, **kwargs)
+
+        monkeypatch.setattr(rg_mod.subprocess, "run", observe)
+        # A deliberately tiny caller deadline exercises a real child timeout;
+        # this is not a measurement of suite speed or a stalled case claim.
+        with pytest.raises(subprocess.TimeoutExpired) as error:
+            rg_mod._run_hybrid_validation_spec(  # ANTICHEAT_OK: actual subprocess expiration through native validation entry
+                tmp_path, validation_spec=[{"validator": "pytest_targeted", "targets": [target]}], timeout=0.001,
+            )
+        assert len(observed) == 1
+        command, kwargs = observed[0]
+        assert command[7:11] == ["-n", "4", "--dist", "worksteal"]
+        assert error.value.timeout == kwargs["timeout"] == 0.001
+        assert error.value.cmd == command
+        assert not Path(kwargs["env"]["TMPDIR"]).exists()
+        assert not Path(kwargs["env"]["XDG_CACHE_HOME"]).exists()
+
     @pytest.mark.parametrize("shared_basetemp, full_fleet", [
         (True, False), (False, False), (False, True),
     ], ids=["collision", "native", "full-fleet-workers"])

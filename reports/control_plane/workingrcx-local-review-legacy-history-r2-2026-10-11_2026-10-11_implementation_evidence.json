@@ -1,0 +1,754 @@
+{
+  "actual_plan_git_preservation": {
+    "after": {
+      "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+      "head": "e75ce9f7db3fd66cb240026e75f7066d68b9f6fc",
+      "index_sha256": "1cc2782ee41fc519d1d9d2d7dba0f5ae1774bd84ba716a1e20b2f1f2ea184d0b",
+      "refs": {
+        "count": 543,
+        "external_record": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r2-validation/unchanged-refs.txt",
+        "scope_refs": [
+          "146ca4955dca1c56111fc482876290ee1c0b12e2 refs/heads/dev",
+          "e75ce9f7db3fd66cb240026e75f7066d68b9f6fc refs/heads/jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "35f7c225a25025aec893230c072754cf7d7c76fc refs/remotes/origin/dev"
+        ],
+        "sha256": "522e170370cb132e6805ae108936fc213221fc34f3c83c3b093fdc764a773ae5"
+      }
+    },
+    "before": {
+      "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+      "head": "e75ce9f7db3fd66cb240026e75f7066d68b9f6fc",
+      "index_sha256": "1cc2782ee41fc519d1d9d2d7dba0f5ae1774bd84ba716a1e20b2f1f2ea184d0b",
+      "refs": {
+        "count": 543,
+        "external_record": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r2-validation/unchanged-refs.txt",
+        "scope_refs": [
+          "146ca4955dca1c56111fc482876290ee1c0b12e2 refs/heads/dev",
+          "e75ce9f7db3fd66cb240026e75f7066d68b9f6fc refs/heads/jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "35f7c225a25025aec893230c072754cf7d7c76fc refs/remotes/origin/dev"
+        ],
+        "sha256": "522e170370cb132e6805ae108936fc213221fc34f3c83c3b093fdc764a773ae5"
+      }
+    },
+    "unchanged": true
+  },
+  "baseline": {
+    "candidate_observed": {
+      "CHANGELOG.md": "df81b8b8c420b23ed80d0edc4a4648aaaa3696dbe5dca7665424214514935761",
+      "TASKS.md": "15213ccbafa4b2f9fbc9d6a95c1cae4b7d1cb4fc928aee0937513d2df32d3a4c",
+      "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+      "mu/tests/tools/test_local_review_history_recovery.py": "3e3dae56e2f49fc236d73f9aadf2a7df8bef643e7a95634085d4261128bf9a84",
+      "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+      "mu/tools/executors/local_review_history_recovery.py": "a3463d2b3830cdf2616120e6c50b7d0f86889ffd54535b7e41925e9d9411b0f2",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09.md": "43a4060c08207521be66dab1362b81ecf6cd50b78e8df38ca9c96c9eecdef931",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09_implementation_evidence.json": "d34d5a86c10bf946e0221abeaf2dcfc90b8e89738d408a34af769ad63deb18e4",
+      "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r1-2026-10-09_bridge_nonblockers.md": "449dfa2d26bf150d4954add9788ee0af447d7e2baa3056949ff2268e57738da3"
+    },
+    "candidate_preserved_expected": {
+      "CHANGELOG.md": "df81b8b8c420b23ed80d0edc4a4648aaaa3696dbe5dca7665424214514935761",
+      "TASKS.md": "3e2130a563c8d0892df133cce8163612dd2869d7c529f774b967df6fe6a15fbb",
+      "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+      "mu/tests/tools/test_local_review_history_recovery.py": "3e3dae56e2f49fc236d73f9aadf2a7df8bef643e7a95634085d4261128bf9a84",
+      "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+      "mu/tools/executors/local_review_history_recovery.py": "a3463d2b3830cdf2616120e6c50b7d0f86889ffd54535b7e41925e9d9411b0f2",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09.md": "43a4060c08207521be66dab1362b81ecf6cd50b78e8df38ca9c96c9eecdef931",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09_implementation_evidence.json": "d34d5a86c10bf946e0221abeaf2dcfc90b8e89738d408a34af769ad63deb18e4",
+      "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r1-2026-10-09_bridge_nonblockers.md": "449dfa2d26bf150d4954add9788ee0af447d7e2baa3056949ff2268e57738da3"
+    },
+    "historical_inventories": {
+      ".agent_bus-local-review-legacy-history-r1-20261009": {
+        "bridge.db": {
+          "mode": 420,
+          "sha256": "65d2a66cc46958267e70d73b4013033a678636d77833fb185fd94fe410c119d7",
+          "size": 40960
+        },
+        "bridge.lock": {
+          "mode": 420,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "bridge_config.json": {
+          "mode": 420,
+          "sha256": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+          "size": 1321
+        },
+        "executors/phase_b_state.json": {
+          "mode": 420,
+          "sha256": "5d1134a77f7f01168898f7bdc15c2b88cefea86d15e063a59a40532557e34bd2",
+          "size": 63570
+        },
+        "meta/candidate_authority/workingrcx-local-review-legacy-history-r1-2026-10-09.spec.json": {
+          "mode": 384,
+          "sha256": "a44de06c819a467a3825c9d0e813e4029f8c868873f98b5b3b3271b83e20030e",
+          "size": 1529
+        },
+        "meta/post_merge_routing.json": {
+          "mode": 420,
+          "sha256": "942af0304951368b8acf5417f906ea79b620cc7165bde9a3cb959f1a14cd42fe",
+          "size": 20039
+        },
+        "observability/pipeline_agent_delivery_receipts.jsonl": {
+          "mode": 384,
+          "sha256": "e29418828bea771d58c5e3c1becacf5b44cdc0d573b0b230bd354ed98dde0cd7",
+          "size": 1905
+        },
+        "observability/pipeline_agent_events.jsonl": {
+          "mode": 384,
+          "sha256": "cc5ec9f499d56b5f1b342580f15ca9d9ff471dd465c0f18355d98cb515ad1237",
+          "size": 3915
+        },
+        "observability/pipeline_agent_pager.lock": {
+          "mode": 420,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        "observability/pipeline_agent_pager_state.json": {
+          "mode": 384,
+          "sha256": "2f6ee7967ca44bb8cb4f36e26dc543825bec4ba31c71570544e8e45f0c46405f",
+          "size": 5199
+        },
+        "prompts/phase-a-r1-c8c26ad3/phase-a-r1-c8c26ad3--r1-reader-04a07afa.txt": {
+          "mode": 420,
+          "sha256": "4e4a97b23e766aef2af43193d8251060d6e14fec1443d320512a0bf0a851fce7",
+          "size": 2040
+        },
+        "prompts/phase-a-r1-c8c26ad3/phase-a-r1-c8c26ad3--r1-reviewer-fdc03fdb.txt": {
+          "mode": 420,
+          "sha256": "89276d99f312172fc56177e00087f4a686bdf188be142a62d2330fa47778ce45",
+          "size": 8836
+        },
+        "raw/phase-a-r1-c8c26ad3/phase-a-r1-c8c26ad3--r1-reader-04a07afa.txt": {
+          "mode": 420,
+          "sha256": "95e4165b5bd4593257eb136a152832fd5da89d254513b7da758b3ed7b06aad86",
+          "size": 575
+        },
+        "raw/phase-a-r1-c8c26ad3/phase-a-r1-c8c26ad3--r1-reviewer-fdc03fdb.txt": {
+          "mode": 420,
+          "sha256": "692f0472a0c24798d420c20db836ebdf6b64966f105a9a3e33d434553de01997",
+          "size": 132979
+        },
+        "rendered/phase-a-r1-c8c26ad3.md": {
+          "mode": 420,
+          "sha256": "7c573980c02888e1b97510e649cdcf0100a6316b3a90c9ad5a5c98c468ee0df2",
+          "size": 4261
+        },
+        "validations/phase-a-r1-c8c26ad3/phase-a-r1-c8c26ad3--r1-reader-04a07afa/validation-1.txt": {
+          "mode": 420,
+          "sha256": "571f1482f8fdcf0387b32f519fa3ff8f57e94f003f0c9d032d6abab24e118f43",
+          "size": 104
+        },
+        "validations/phase-a-r1-c8c26ad3/phase-a-r1-c8c26ad3--r1-reader-04a07afa/validation-2.txt": {
+          "mode": 420,
+          "sha256": "746bf63c5bd15ce9d58790a0ee27c3b1e26e1a9df4953eb05ec2bf2f5ac44ad4",
+          "size": 42
+        }
+      },
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews": {
+        "local-pr-review-a705c468d1154ffa8364ac2b595f39d5/pr.diff": {
+          "mode": 420,
+          "sha256": "f9ccd79a96a3ae013f910fe9853345c4329ea4a30a1be8b1c89c3f2ce4ca7a93",
+          "size": 1020558
+        },
+        "local-pr-review-a705c468d1154ffa8364ac2b595f39d5/prompt.md": {
+          "mode": 420,
+          "sha256": "ffe70e514896ebf0654bb5e123d6f59cf81bed84b54edbc30cc7e5e222e19fad",
+          "size": 2892
+        },
+        "local-pr-review-a705c468d1154ffa8364ac2b595f39d5/raw.jsonl": {
+          "mode": 420,
+          "sha256": "caf8042462b1a52b748582d0c1c1f91502bfc809266c88835926be92bcc5a5e0",
+          "size": 596988
+        },
+        "local-pr-review-a92850a15e6f4411992770ace160cdaf/pr.diff": {
+          "mode": 420,
+          "sha256": "f9ccd79a96a3ae013f910fe9853345c4329ea4a30a1be8b1c89c3f2ce4ca7a93",
+          "size": 1020558
+        },
+        "local-pr-review-a92850a15e6f4411992770ace160cdaf/prompt.md": {
+          "mode": 420,
+          "sha256": "825235d620045f865ff07ed3b38aca7ea25f21aa0735d59ab9b526eb417e05ea",
+          "size": 2892
+        },
+        "local-pr-review-a92850a15e6f4411992770ace160cdaf/raw.jsonl": {
+          "mode": 420,
+          "sha256": "14985d2cf1d9c80041f549f42818a882a229b75561a891f4f8f37d797ef354ce",
+          "size": 1577935
+        },
+        "local-pr-review-a92850a15e6f4411992770ace160cdaf/receipt.json": {
+          "mode": 384,
+          "sha256": "57bc2129a98e471de4ea162fb8e5b60695cc1627b03fefcb60afa5208289d70e",
+          "size": 17273
+        }
+      }
+    },
+    "index_sha256": "1cc2782ee41fc519d1d9d2d7dba0f5ae1774bd84ba716a1e20b2f1f2ea184d0b",
+    "primary_tasks_sha256": "114c54c622a00e0d0096d348693689b8e5496b84d181342415ec9007ba53575c",
+    "protected_expected": {
+      "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+      "mu/tests/tools/test_recovery_gate.py": "cfbea84c7c05e617fe2ca2b5be22d76ea1863e239b50c401b1062a445e525f80",
+      "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+      "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+      "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+      "mu/tools/executors/launch_wave.py": "a43c3069fb662688f74559c39e348bb354d460a5fad6333dca3f6aa74172107f",
+      "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+      "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09.md": "43a4060c08207521be66dab1362b81ecf6cd50b78e8df38ca9c96c9eecdef931",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09_implementation_evidence.json": "d34d5a86c10bf946e0221abeaf2dcfc90b8e89738d408a34af769ad63deb18e4",
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09.md": "7b21d2f22e054e2f90d16220c9dc2498c9f02e895aaa9eb367b2f6905f3cede2",
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09_implementation_evidence.json": "88f56342296570dc7e024c3b33c1c31f0839b3acbe8bfb144d3680d1c370d497",
+      "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09.md": "ecffc2ce35fd0a0fad01e9a33af0acde81da9a5a6b1be523c9eb8170cffa6682",
+      "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09_implementation_evidence.json": "8ba800c21b317246efa2a4a1ee57914c0e888a9bd62cc98c6b8ddac0294d0343",
+      "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09.md": "de6ce705355789302912125757278692d9a97bec4aee9cf151199115da03ef9b",
+      "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09_implementation_evidence.json": "629bcb0b13c29469e9e664b505a0042fed50e9295f4d6ebb5a7274f849ffb206",
+      "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09.md": "a160038d2a67219737f1259ce0a52d518dc99bed033d5bb7fc703453b0192478",
+      "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09_implementation_evidence.json": "ac26a18399e146bf22a00e854796aed18a8611f7b0eaccd02c944c9697a9572b",
+      "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09.md": "129a9cb76cfecd1efd5a7972107b3567c1419f963c90532b3d2f3752d48a5745",
+      "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09_implementation_evidence.json": "d558c86ffef26887f30f7c4bcc92319972b7b6eccbfa1b0166b38542dc76e08c",
+      "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r1-2026-10-09_bridge_nonblockers.md": "449dfa2d26bf150d4954add9788ee0af447d7e2baa3056949ff2268e57738da3",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r4-2026-10-09_bridge_nonblockers.md": "c24c27bcc9bace2ee1dee6124e322e242f48e85b74bfe65cd4858bd18aebe201",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r5-2026-10-09_bridge_nonblockers.md": "3588224e4f98b5e69d083536690301b02bd7be5bc79a6551e2dd8bd6d0963334",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r6-2026-10-09_bridge_nonblockers.md": "b35de1fdbcc4d9ad4439470fabd938e7e95f9bd5cc8e0aeed15010a8cb6050b6",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r2-2026-10-09.json": "29e666f8ab4a79485d012db2f8f3b15e2ab4086df21031a5267ad22cfe829d96",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r3-2026-10-09.json": "f3c22540e49c387f8e1331626ba4d2436ce36b02ea3b66b58054b4b8101abea8",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r4-2026-10-09.json": "4f77315f4daa4333088bfcd63c1b390cd0688b4d679bb3fc5340891fc74f2571",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r5-2026-10-09.json": "f62a601d39f7cbc299853491025ca87e6a8c6271ec3c53d4a3677f81a69871c5",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r6-2026-10-09.json": "bb955750fa42152f4c0b30001697e247c6127ae1ccc2b439bd9ac38e7cda92e1"
+    },
+    "protected_observed": {
+      "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+      "mu/tests/tools/test_recovery_gate.py": "cfbea84c7c05e617fe2ca2b5be22d76ea1863e239b50c401b1062a445e525f80",
+      "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+      "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+      "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+      "mu/tools/executors/launch_wave.py": "a43c3069fb662688f74559c39e348bb354d460a5fad6333dca3f6aa74172107f",
+      "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+      "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09.md": "43a4060c08207521be66dab1362b81ecf6cd50b78e8df38ca9c96c9eecdef931",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09_implementation_evidence.json": "d34d5a86c10bf946e0221abeaf2dcfc90b8e89738d408a34af769ad63deb18e4",
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09.md": "7b21d2f22e054e2f90d16220c9dc2498c9f02e895aaa9eb367b2f6905f3cede2",
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09_implementation_evidence.json": "88f56342296570dc7e024c3b33c1c31f0839b3acbe8bfb144d3680d1c370d497",
+      "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09.md": "ecffc2ce35fd0a0fad01e9a33af0acde81da9a5a6b1be523c9eb8170cffa6682",
+      "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09_implementation_evidence.json": "8ba800c21b317246efa2a4a1ee57914c0e888a9bd62cc98c6b8ddac0294d0343",
+      "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09.md": "de6ce705355789302912125757278692d9a97bec4aee9cf151199115da03ef9b",
+      "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09_implementation_evidence.json": "629bcb0b13c29469e9e664b505a0042fed50e9295f4d6ebb5a7274f849ffb206",
+      "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09.md": "a160038d2a67219737f1259ce0a52d518dc99bed033d5bb7fc703453b0192478",
+      "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09_implementation_evidence.json": "ac26a18399e146bf22a00e854796aed18a8611f7b0eaccd02c944c9697a9572b",
+      "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09.md": "129a9cb76cfecd1efd5a7972107b3567c1419f963c90532b3d2f3752d48a5745",
+      "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09_implementation_evidence.json": "d558c86ffef26887f30f7c4bcc92319972b7b6eccbfa1b0166b38542dc76e08c",
+      "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r1-2026-10-09_bridge_nonblockers.md": "449dfa2d26bf150d4954add9788ee0af447d7e2baa3056949ff2268e57738da3",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r4-2026-10-09_bridge_nonblockers.md": "c24c27bcc9bace2ee1dee6124e322e242f48e85b74bfe65cd4858bd18aebe201",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r5-2026-10-09_bridge_nonblockers.md": "3588224e4f98b5e69d083536690301b02bd7be5bc79a6551e2dd8bd6d0963334",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r6-2026-10-09_bridge_nonblockers.md": "b35de1fdbcc4d9ad4439470fabd938e7e95f9bd5cc8e0aeed15010a8cb6050b6",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r2-2026-10-09.json": "29e666f8ab4a79485d012db2f8f3b15e2ab4086df21031a5267ad22cfe829d96",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r3-2026-10-09.json": "f3c22540e49c387f8e1331626ba4d2436ce36b02ea3b66b58054b4b8101abea8",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r4-2026-10-09.json": "4f77315f4daa4333088bfcd63c1b390cd0688b4d679bb3fc5340891fc74f2571",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r5-2026-10-09.json": "f62a601d39f7cbc299853491025ca87e6a8c6271ec3c53d4a3677f81a69871c5",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r6-2026-10-09.json": "bb955750fa42152f4c0b30001697e247c6127ae1ccc2b439bd9ac38e7cda92e1"
+    },
+    "refs": {
+      "count": 543,
+      "external_record": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r2-validation/unchanged-refs.txt",
+      "scope_refs": [
+        "146ca4955dca1c56111fc482876290ee1c0b12e2 refs/heads/dev",
+        "e75ce9f7db3fd66cb240026e75f7066d68b9f6fc refs/heads/jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "35f7c225a25025aec893230c072754cf7d7c76fc refs/remotes/origin/dev"
+      ],
+      "sha256": "522e170370cb132e6805ae108936fc213221fc34f3c83c3b093fdc764a773ae5"
+    },
+    "source_hashes": {
+      "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+      "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+      "mu/tests/tools/test_local_review_history_recovery.py": "3e3dae56e2f49fc236d73f9aadf2a7df8bef643e7a95634085d4261128bf9a84",
+      "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+      "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+      "mu/tools/executors/local_review_history_recovery.py": "a3463d2b3830cdf2616120e6c50b7d0f86889ffd54535b7e41925e9d9411b0f2",
+      "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+    }
+  },
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "mu/tools/executors/local_review_history_recovery.py",
+        "plan",
+        "--repo-root",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+        "--attempt",
+        ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5",
+        "--provenance",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-legacy-history-r1-admission/legacy-provenance-binding.json",
+        "--provenance-sha256",
+        "6e4a9b4178f9ce61c29f28fa7a2f368bb1ba09274658c5074a882861e8d27cf9",
+        "--repository",
+        "jabramsja/rcx-pi-core",
+        "--pr",
+        "1332",
+        "--head-branch",
+        "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "--base-branch",
+        "dev",
+        "--head",
+        "f36b982b8b45774cf68fc621acf0d9727d72e6d5",
+        "--base",
+        "35f7c225a25025aec893230c072754cf7d7c76fc"
+      ],
+      "command": "python3 mu/tools/executors/local_review_history_recovery.py plan --repo-root /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008 --attempt .agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5 --provenance '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-legacy-history-r1-admission/legacy-provenance-binding.json' --provenance-sha256 6e4a9b4178f9ce61c29f28fa7a2f368bb1ba09274658c5074a882861e8d27cf9 --repository jabramsja/rcx-pi-core --pr 1332 --head-branch jabramsja/workingrcx-local-review-quota-r3-2026-10-05 --base-branch dev --head f36b982b8b45774cf68fc621acf0d9727d72e6d5 --base 35f7c225a25025aec893230c072754cf7d7c76fc",
+      "elapsed_seconds": 0.14999612496467307,
+      "environment": {
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "exit_code": 1,
+      "finished_utc": "2026-10-12T00:40:49.394465+00:00",
+      "label": "before-fix actual public plan",
+      "shell_command": "PYTHONDONTWRITEBYTECODE=1 python3 mu/tools/executors/local_review_history_recovery.py plan --repo-root /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008 --attempt .agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5 --provenance '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-legacy-history-r1-admission/legacy-provenance-binding.json' --provenance-sha256 6e4a9b4178f9ce61c29f28fa7a2f368bb1ba09274658c5074a882861e8d27cf9 --repository jabramsja/rcx-pi-core --pr 1332 --head-branch jabramsja/workingrcx-local-review-quota-r3-2026-10-05 --base-branch dev --head f36b982b8b45774cf68fc621acf0d9727d72e6d5 --base 35f7c225a25025aec893230c072754cf7d7c76fc",
+      "source_hashes_after": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "3e3dae56e2f49fc236d73f9aadf2a7df8bef643e7a95634085d4261128bf9a84",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "a3463d2b3830cdf2616120e6c50b7d0f86889ffd54535b7e41925e9d9411b0f2",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "source_hashes_before": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "3e3dae56e2f49fc236d73f9aadf2a7df8bef643e7a95634085d4261128bf9a84",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "a3463d2b3830cdf2616120e6c50b7d0f86889ffd54535b7e41925e9d9411b0f2",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "stable_source_hashes": true,
+      "started_utc": "2026-10-12T00:40:49.244469+00:00",
+      "stderr": "",
+      "stdout": "{\"approval\": false, \"error\": \"Current branch/base differs from recovery scope\", \"retry_allowed\": false, \"status\": \"held\"}\n"
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "4",
+        "--dist",
+        "worksteal",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/tools/test_local_review_history_recovery.py::test_public_cli_plan_apply_verify_is_read_only_then_append_only",
+        "mu/tests/tools/test_commit_executor_local_review.py::test_explicit_legacy_recovery_never_fabricates_native_terminal_receipt",
+        "mu/tests/tools/test_local_review_history_recovery.py::test_public_recovery_uses_verified_remote_base_without_moving_local_refs[stale]",
+        "mu/tests/tools/test_local_review_history_recovery.py::test_public_recovery_rejects_missing_wrong_or_ambiguous_remote_base[wrong-ref]",
+        "--tb=short"
+      ],
+      "command": "python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_local_review_history_recovery.py::test_public_cli_plan_apply_verify_is_read_only_then_append_only mu/tests/tools/test_commit_executor_local_review.py::test_explicit_legacy_recovery_never_fabricates_native_terminal_receipt 'mu/tests/tools/test_local_review_history_recovery.py::test_public_recovery_uses_verified_remote_base_without_moving_local_refs[stale]' 'mu/tests/tools/test_local_review_history_recovery.py::test_public_recovery_rejects_missing_wrong_or_ambiguous_remote_base[wrong-ref]' --tb=short",
+      "elapsed_seconds": 12.163587874965742,
+      "environment": {
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1"
+      },
+      "exit_code": 1,
+      "finished_utc": "2026-10-12T00:42:40.819181+00:00",
+      "label": "before-fix bounded public fixtures",
+      "shell_command": "HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_local_review_history_recovery.py::test_public_cli_plan_apply_verify_is_read_only_then_append_only mu/tests/tools/test_commit_executor_local_review.py::test_explicit_legacy_recovery_never_fabricates_native_terminal_receipt 'mu/tests/tools/test_local_review_history_recovery.py::test_public_recovery_uses_verified_remote_base_without_moving_local_refs[stale]' 'mu/tests/tools/test_local_review_history_recovery.py::test_public_recovery_rejects_missing_wrong_or_ambiguous_remote_base[wrong-ref]' --tb=short",
+      "source_hashes_after": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "a3463d2b3830cdf2616120e6c50b7d0f86889ffd54535b7e41925e9d9411b0f2",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "source_hashes_before": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "a3463d2b3830cdf2616120e6c50b7d0f86889ffd54535b7e41925e9d9411b0f2",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "stable_source_hashes": true,
+      "started_utc": "2026-10-12T00:42:28.655459+00:00",
+      "stderr": "",
+      "stdout": "bringing up nodes...\nbringing up nodes...\n\nFF..                                                                     [100%]\n=================================== FAILURES ===================================\n_ test_public_recovery_uses_verified_remote_base_without_moving_local_refs[stale] _\n[gw2] darwin -- Python 3.13.13 /opt/homebrew/opt/python@3.13/bin/python3.13\nmu/tests/tools/test_local_review_history_recovery.py:536: in test_public_recovery_uses_verified_remote_base_without_moving_local_refs\n    assert response.returncode == 0, response.stdout + response.stderr\nE   AssertionError: {\"approval\": false, \"error\": \"Current branch/base differs from recovery scope\", \"retry_allowed\": false, \"status\": \"held\"}\nE     \nE   assert 1 == 0\nE    +  where 1 = CompletedProcess(args=['/opt/homebrew/opt/python@3.13/bin/python3.13', '/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXSt...e, \"error\": \"Current branch/base differs from recovery scope\", \"retry_allowed\": false, \"status\": \"held\"}\\n', stderr='').returncode\n_ test_public_recovery_rejects_missing_wrong_or_ambiguous_remote_base[wrong-ref] _\n[gw3] darwin -- Python 3.13.13 /opt/homebrew/opt/python@3.13/bin/python3.13\nmu/tests/tools/test_local_review_history_recovery.py:595: in test_public_recovery_rejects_missing_wrong_or_ambiguous_remote_base\n    assert response.returncode == 1, response.stdout + response.stderr\nE   AssertionError: {\nE       \"plan\": {\nE         \"approval\": false,\nE         \"current\": {\nE           \"diff_sha256\": \"6e13980b49380e59f78ace9570c27cd7bae85495f79270446f630b736a679bb4\",\nE           \"head_sha\": \"715e0c8f5be2779d5611f867220193700bde7869\"\nE         },\nE         \"expected\": {\nE           \"base_branch\": \"dev\",\nE           \"base_sha\": \"b3891628d3d14d060836d2e08d42ca3a3b8f02e8\",\nE           \"head_branch\": \"fixture/quota\",\nE           \"head_sha\": \"715e0c8f5be2779d5611f867220193700bde7869\",\nE           \"pr_number\": 1331,\nE           \"repository\": \"fixture/repo\"\nE         },\nE         \"inputs\": {\nE           \"artifacts\": [\nE             {\nE               \"mode\": 420,\nE               \"path\": \"/private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/pytest-of-jeffabrams/pytest-292/popen-gw3/test_public_recovery_rejects_m0/repo/.agent_bus-local-review-test/meta/local_pr_reviews/local-pr-review-7402c412d02e400e9f1288eb4d5901a5/pr.diff\",\nE               \"sha256\": \"6e13980b49380e59f78ace9570c27cd7bae85495f79270446f630b736a679bb4\",\nE               \"size\": 398\nE             },\nE             {\nE               \"mode\": 420,\nE               \"path\": \"/private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/pytest-of-jeffabrams/pytest-292/popen-gw3/test_public_recovery_rejects_m0/repo/.agent_bus-local-review-test/meta/local_pr_reviews/local-pr-review-7402c412d02e400e9f1288eb4d5901a5/prompt.md\",\nE               \"sha256\": \"0351dacc8c186f5c462708ed8cde65858fd3eff436df187406db15e72f00251e\",\nE               \"size\": 2855\nE             },\nE             {\nE               \"mode\": 420,\nE               \"path\": \"/private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/pytest-of-jeffabrams/pytest-292/popen-gw3/test_public_recovery_rejects_m0/repo/.agent_bus-local-review-test/meta/local_pr_reviews/local-pr-review-7402c412d02e400e9f1288eb4d5901a5/raw.jsonl\",\nE               \"sha256\": \"feecf82a1fb702f7667aae563f6796dcfcb264a6ea62f1235acd9566809ce5e0\",\nE               \"size\": 250\nE             }\nE           ],\nE           \"attempt\": \".agent_bus-local-review-test/meta/local_pr_reviews/local-pr-review-7402c412d02e400e9f1288eb4d5901a5\",\nE           \"identity\": {\nE             \"base_branch\": \"dev\",\nE             \"base_sha\": \"b3891628d3d14d060836d2e08d42ca3a3b8f02e8\",\nE             \"diff_command\": [\nE               \"git\",\nE               \"diff\",\nE               \"--no-ext-diff\",\nE               \"--no-textconv\",\nE               \"--no-color\",\nE               \"--binary\",\nE               \"--full-index\",\nE               \"b3891628d3d14d060836d2e08d42ca3a3b8f02e8..715e0c8f5be2779d5611f867220193700bde7869\",\nE               \"--\"\nE             ],\nE             \"diff_sha256\": \"6e13980b49380e59f78ace9570c27cd7bae85495f79270446f630b736a679bb4\",\nE             \"head_branch\": \"fixture/quota\",\nE             \"head_sha\": \"715e0c8f5be2779d5611f867220193700bde7869\",\nE             \"merge_base_sha\": \"b3891628d3d14d060836d2e08d42ca3a3b8f02e8\",\nE             \"pr_number\": 1331,\nE             \"repo_root\": \"/private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/pytest-of-jeffabrams/pytest-292/popen-gw3/test_public_recovery_rejects_m0/repo\",\nE             \"repository\": \"fixture/repo\",\nE             \"url\": \"https://github.com/fixture/repo/pull/1331\"\nE           },\nE           \"job_id\": \"local-pr-review-7402c412d02e400e9f1288eb4d5901a5\",\nE           \"provenance\": {\nE             \"binding\": {\nE               \"mode\": 420,\nE               \"path\": \"/private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/pytest-of-jeffabrams/pytest-292/popen-gw3/test_public_recovery_rejects_m0/independent-preservation/binding.json\",\nE               \"sha256\": \"fc68ae6e5fc394d41e69ebd88ea396fccbdcff6c058fb2f2a1e566c5e3fa9da7\",\nE               \"size\": 1647\nE             },\nE             \"manifest\": {\nE               \"mode\": 420,\nE               \"path\": \"/private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/pytest-of-jeffabrams/pytest-292/popen-gw3/test_public_recovery_rejects_m0/independent-preservation/preservation.json\",\nE               \"sha256\": \"7b4cb7acc064067c28d2ee5ed306f3dc89a5855d9309adbe9523f05105872fe1\",\nE               \"size\": 1477\nE             },\nE             \"restored_root\": \"/private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/pytest-of-jeffabrams/pytest-292/popen-gw3/test_public_recovery_rejects_m0/independent-preservation/restored\",\nE             \"snapshot\": \"8888888888888888888888888888888888888888888888888888888888888888\"\nE           },\nE           \"turn_id\": \"local-pr-review-7402c412d02e400e9f1288eb4d5901a5--reviewer\",\nE           \"unfinished\": {\nE             \"event_count\": 3,\nE             \"interruption_cause\": \"unknown\",\nE             \"last_reviewer_commentary\": \"I haven't yet completed the source and evidence review.\",\nE             \"thread_id\": \"01234567-89ab-cdef-0123-456789abcdef\"\nE           }\nE         },\nE         \"kind\": \"recovered_legacy_review_interruption\",\nE         \"policy\": \"original_and_same_content_hold; corrected_content_requires_fresh_review\",\nE         \"version\": 1\nE       },\nE       \"plan_sha256\": \"2e59c1b0cd077339a7e787c73a9fd9559d11d425a87dd0ba021a20e659eadc80\"\nE     }\nE     \nE   assert 0 == 1\nE    +  where 0 = CompletedProcess(args=['/opt/homebrew/opt/python@3.13/bin/python3.13', '/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXSt...ersion\": 1\\n  },\\n  \"plan_sha256\": \"2e59c1b0cd077339a7e787c73a9fd9559d11d425a87dd0ba021a20e659eadc80\"\\n}\\n', stderr='').returncode\n=========================== short test summary info ============================\nFAILED mu/tests/tools/test_local_review_history_recovery.py::test_public_recovery_uses_verified_remote_base_without_moving_local_refs[stale]\nFAILED mu/tests/tools/test_local_review_history_recovery.py::test_public_recovery_rejects_missing_wrong_or_ambiguous_remote_base[wrong-ref]\n2 failed, 2 passed in 3.67s\n"
+    },
+    {
+      "argv": [
+        "python3",
+        "mu/tools/checks/linters/check_private_attr_access.py",
+        ".",
+        "mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_local_review_history_recovery.py"
+      ],
+      "command": "python3 mu/tools/checks/linters/check_private_attr_access.py . mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_local_review_history_recovery.py",
+      "elapsed_seconds": 0.062156790983863175,
+      "environment": {
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-12T00:43:54.564854+00:00",
+      "label": "scoped private-attribute integrity",
+      "shell_command": "PYTHONDONTWRITEBYTECODE=1 python3 mu/tools/checks/linters/check_private_attr_access.py . mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_local_review_history_recovery.py",
+      "source_hashes_after": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "source_hashes_before": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "stable_source_hashes": true,
+      "started_utc": "2026-10-12T00:43:54.502598+00:00",
+      "stderr": "",
+      "stdout": ""
+    },
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "4",
+        "--dist",
+        "worksteal",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_local_review_history_recovery.py",
+        "mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate",
+        "--tb=short"
+      ],
+      "command": "python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_local_review_history_recovery.py mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate --tb=short",
+      "elapsed_seconds": 237.40963041601935,
+      "environment": {
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1"
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-12T00:47:51.978393+00:00",
+      "label": "full declared gate",
+      "shell_command": "HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 RCX_CI=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_local_review_history_recovery.py mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate --tb=short",
+      "source_hashes_after": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "source_hashes_before": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "stable_source_hashes": true,
+      "started_utc": "2026-10-12T00:43:54.567621+00:00",
+      "stderr": "",
+      "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [  5%]\n........................................................................ [ 11%]\n........................................................................ [ 16%]\n........................................................................ [ 22%]\n........................................................................ [ 28%]\n........................................................................ [ 33%]\n........................................................................ [ 39%]\n........................................................................ [ 44%]\n........................................................................ [ 50%]\n........................................................................ [ 56%]\n........................................................................ [ 61%]\n........................................................................ [ 67%]\n........................................................................ [ 73%]\n........................................................................ [ 78%]\n........................................................................ [ 84%]\n........................................................................ [ 89%]\n........................................................................ [ 95%]\n.........................................................                [100%]\n1281 passed in 237.13s (0:03:57)\n"
+    },
+    {
+      "argv": [
+        "python3",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/RCX-Recovery-Access/rcx-recovery",
+        "where"
+      ],
+      "command": "python3 /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/RCX-Recovery-Access/rcx-recovery where",
+      "elapsed_seconds": 0.33475958299823105,
+      "environment": {
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-12T00:48:37.029284+00:00",
+      "label": "canonical UUID-based recovery access",
+      "shell_command": "PYTHONDONTWRITEBYTECODE=1 python3 /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/RCX-Recovery-Access/rcx-recovery where",
+      "source_hashes_after": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "source_hashes_before": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "stable_source_hashes": true,
+      "started_utc": "2026-10-12T00:48:36.694370+00:00",
+      "stderr": "",
+      "stdout": "/Volumes/RCX Recovery/WorkingRCX-Recovery/repository\n"
+    },
+    {
+      "argv": [
+        "python3",
+        "mu/tools/executors/local_review_history_recovery.py",
+        "plan",
+        "--repo-root",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+        "--attempt",
+        ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5",
+        "--provenance",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-legacy-history-r1-admission/legacy-provenance-binding.json",
+        "--provenance-sha256",
+        "6e4a9b4178f9ce61c29f28fa7a2f368bb1ba09274658c5074a882861e8d27cf9",
+        "--repository",
+        "jabramsja/rcx-pi-core",
+        "--pr",
+        "1332",
+        "--head-branch",
+        "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "--base-branch",
+        "dev",
+        "--head",
+        "f36b982b8b45774cf68fc621acf0d9727d72e6d5",
+        "--base",
+        "35f7c225a25025aec893230c072754cf7d7c76fc"
+      ],
+      "command": "python3 mu/tools/executors/local_review_history_recovery.py plan --repo-root /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008 --attempt .agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5 --provenance '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-legacy-history-r1-admission/legacy-provenance-binding.json' --provenance-sha256 6e4a9b4178f9ce61c29f28fa7a2f368bb1ba09274658c5074a882861e8d27cf9 --repository jabramsja/rcx-pi-core --pr 1332 --head-branch jabramsja/workingrcx-local-review-quota-r3-2026-10-05 --base-branch dev --head f36b982b8b45774cf68fc621acf0d9727d72e6d5 --base 35f7c225a25025aec893230c072754cf7d7c76fc",
+      "elapsed_seconds": 0.33698895800625905,
+      "environment": {
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-12T00:48:37.401232+00:00",
+      "label": "after-fix actual public plan",
+      "shell_command": "PYTHONDONTWRITEBYTECODE=1 python3 mu/tools/executors/local_review_history_recovery.py plan --repo-root /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008 --attempt .agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5 --provenance '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-legacy-history-r1-admission/legacy-provenance-binding.json' --provenance-sha256 6e4a9b4178f9ce61c29f28fa7a2f368bb1ba09274658c5074a882861e8d27cf9 --repository jabramsja/rcx-pi-core --pr 1332 --head-branch jabramsja/workingrcx-local-review-quota-r3-2026-10-05 --base-branch dev --head f36b982b8b45774cf68fc621acf0d9727d72e6d5 --base 35f7c225a25025aec893230c072754cf7d7c76fc",
+      "source_hashes_after": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "source_hashes_before": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "stable_source_hashes": true,
+      "started_utc": "2026-10-12T00:48:37.064246+00:00",
+      "stderr": "",
+      "stdout": "{\n  \"plan\": {\n    \"approval\": false,\n    \"current\": {\n      \"diff_sha256\": \"4df2bbb442f7471ad272537b1c0f7fd993a7bcfee64d42047ccde66d7e2497f1\",\n      \"head_sha\": \"e75ce9f7db3fd66cb240026e75f7066d68b9f6fc\"\n    },\n    \"expected\": {\n      \"base_branch\": \"dev\",\n      \"base_sha\": \"35f7c225a25025aec893230c072754cf7d7c76fc\",\n      \"head_branch\": \"jabramsja/workingrcx-local-review-quota-r3-2026-10-05\",\n      \"head_sha\": \"f36b982b8b45774cf68fc621acf0d9727d72e6d5\",\n      \"pr_number\": 1332,\n      \"repository\": \"jabramsja/rcx-pi-core\"\n    },\n    \"inputs\": {\n      \"artifacts\": [\n        {\n          \"mode\": 420,\n          \"path\": \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/.agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5/pr.diff\",\n          \"sha256\": \"f9ccd79a96a3ae013f910fe9853345c4329ea4a30a1be8b1c89c3f2ce4ca7a93\",\n          \"size\": 1020558\n        },\n        {\n          \"mode\": 420,\n          \"path\": \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/.agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5/prompt.md\",\n          \"sha256\": \"ffe70e514896ebf0654bb5e123d6f59cf81bed84b54edbc30cc7e5e222e19fad\",\n          \"size\": 2892\n        },\n        {\n          \"mode\": 420,\n          \"path\": \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/.agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5/raw.jsonl\",\n          \"sha256\": \"caf8042462b1a52b748582d0c1c1f91502bfc809266c88835926be92bcc5a5e0\",\n          \"size\": 596988\n        }\n      ],\n      \"attempt\": \".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5\",\n      \"base_authority\": {\n        \"base_sha\": \"35f7c225a25025aec893230c072754cf7d7c76fc\",\n        \"fetch_refspec\": \"+refs/heads/*:refs/remotes/origin/*\",\n        \"ref\": \"refs/remotes/origin/dev\",\n        \"remote\": \"origin\",\n        \"repository\": \"jabramsja/rcx-pi-core\",\n        \"resolved_url\": \"https://github.com/jabramsja/rcx-pi-core.git\",\n        \"url\": \"https://github.com/jabramsja/rcx-pi-core.git\"\n      },\n      \"identity\": {\n        \"base_branch\": \"dev\",\n        \"base_sha\": \"35f7c225a25025aec893230c072754cf7d7c76fc\",\n        \"diff_command\": [\n          \"git\",\n          \"diff\",\n          \"--no-ext-diff\",\n          \"--no-textconv\",\n          \"--no-color\",\n          \"--binary\",\n          \"--full-index\",\n          \"35f7c225a25025aec893230c072754cf7d7c76fc..f36b982b8b45774cf68fc621acf0d9727d72e6d5\",\n          \"--\"\n        ],\n        \"diff_sha256\": \"f9ccd79a96a3ae013f910fe9853345c4329ea4a30a1be8b1c89c3f2ce4ca7a93\",\n        \"head_branch\": \"jabramsja/workingrcx-local-review-quota-r3-2026-10-05\",\n        \"head_sha\": \"f36b982b8b45774cf68fc621acf0d9727d72e6d5\",\n        \"merge_base_sha\": \"35f7c225a25025aec893230c072754cf7d7c76fc\",\n        \"pr_number\": 1332,\n        \"repo_root\": \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008\",\n        \"repository\": \"jabramsja/rcx-pi-core\",\n        \"url\": \"https://github.com/jabramsja/rcx-pi-core/pull/1332\"\n      },\n      \"job_id\": \"local-pr-review-a705c468d1154ffa8364ac2b595f39d5\",\n      \"provenance\": {\n        \"binding\": {\n          \"mode\": 420,\n          \"path\": \"/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-legacy-history-r1-admission/legacy-provenance-binding.json\",\n          \"sha256\": \"6e4a9b4178f9ce61c29f28fa7a2f368bb1ba09274658c5074a882861e8d27cf9\",\n          \"size\": 1708\n        },\n        \"manifest\": {\n          \"mode\": 420,\n          \"path\": \"/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-rejected-review-preserved/preservation.json\",\n          \"sha256\": \"6f2fc7615730256eb970cde137e2585820c4236b2a4601e6c096ec16736edffe\",\n          \"size\": 40165\n        },\n        \"restored_root\": \"/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/targeted-gate-budget-r2-rejected-review-preserved/restored\",\n        \"snapshot\": \"882fd5476d8f8e61b0825edd63a84a0d4c14fe42b416b66443e85028382609b6\"\n      },\n      \"turn_id\": \"local-pr-review-a705c468d1154ffa8364ac2b595f39d5--reviewer\",\n      \"unfinished\": {\n        \"event_count\": 61,\n        \"interruption_cause\": \"unknown\",\n        \"last_reviewer_commentary\": \"The merge path binds approval to the full PR diff and preserves a durable record of each merge request. I\\u2019m checking whether reloads and late review evidence preserve those guarantees. The added tests cover many negative cases; I haven\\u2019t yet completed the source and evidence review.\\n\",\n        \"thread_id\": \"01a120a7-008d-7eb2-b8ca-bda69fade70d\"\n      }\n    },\n    \"kind\": \"recovered_legacy_review_interruption\",\n    \"policy\": \"original_and_same_content_hold; corrected_content_requires_fresh_review\",\n    \"version\": 1\n  },\n  \"plan_sha256\": \"bdcfa56b2aa5648c51e22f4789b30c21136239b96f92a38c9b8bc41f67f20a33\"\n}\n"
+    },
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "import hashlib, json, sys\nfrom pathlib import Path\nroot=Path.cwd()\nsys.path.insert(0,str(root/'mu/tools/executors'))\nimport commit_executor as commit\noriginal_run=commit._run\ndef local_reads_only(command, **kwargs):\n    assert command[0]=='git' and command[1] in {'rev-parse','remote','merge-base','diff','cat-file','symbolic-ref'}, command\n    return original_run(command,**kwargs)\ncommit._run=local_reads_only\ndirectory=root/'.agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews'\ncomplete=directory/'local-pr-review-a92850a15e6f4411992770ace160cdaf'\nreceipt_path=complete/'receipt.json'\nsha=hashlib.sha256(receipt_path.read_bytes()).hexdigest()\nassert sha=='57bc2129a98e471de4ea162fb8e5b60695cc1627b03fefcb60afa5208289d70e'\nreceipt=json.loads(receipt_path.read_text())\ncommit._validate_local_review_historical_binding(root,complete,receipt)\nassert receipt['status']=='ERROR' and receipt['envelope']['decision']=='REQUEST_CHANGES'\nhold=commit._prior_local_review_stop(root,{'pr_number':'1332','steps_completed':[]},target_branch='jabramsja/workingrcx-local-review-quota-r3-2026-10-05',base_branch='dev')\nassert hold['status']=='held' and hold['failure_class']=='local_review_evidence_hold' and hold['retry_allowed'] is False\nassert 'metadata disappeared' in ' '.join(hold['errors'])\nassert 'local-pr-review-a705c468d1154ffa8364ac2b595f39d5' in ' '.join(hold['errors'])\nassert not (root/'.agent_bus/meta/local_pr_review_admissions/legacy_interruptions').exists()\nprint(json.dumps({'complete_attempt':complete.name,'receipt_sha256':sha,'status':receipt['status'],'decision':receipt['envelope']['decision'],'historical_binding':'PASS','default_admission':hold,'live_recovery_published':False},indent=2))\n"
+      ],
+      "command": "python3 -c 'import hashlib, json, sys\nfrom pathlib import Path\nroot=Path.cwd()\nsys.path.insert(0,str(root/'\"'\"'mu/tools/executors'\"'\"'))\nimport commit_executor as commit\noriginal_run=commit._run\ndef local_reads_only(command, **kwargs):\n    assert command[0]=='\"'\"'git'\"'\"' and command[1] in {'\"'\"'rev-parse'\"'\"','\"'\"'remote'\"'\"','\"'\"'merge-base'\"'\"','\"'\"'diff'\"'\"','\"'\"'cat-file'\"'\"','\"'\"'symbolic-ref'\"'\"'}, command\n    return original_run(command,**kwargs)\ncommit._run=local_reads_only\ndirectory=root/'\"'\"'.agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews'\"'\"'\ncomplete=directory/'\"'\"'local-pr-review-a92850a15e6f4411992770ace160cdaf'\"'\"'\nreceipt_path=complete/'\"'\"'receipt.json'\"'\"'\nsha=hashlib.sha256(receipt_path.read_bytes()).hexdigest()\nassert sha=='\"'\"'57bc2129a98e471de4ea162fb8e5b60695cc1627b03fefcb60afa5208289d70e'\"'\"'\nreceipt=json.loads(receipt_path.read_text())\ncommit._validate_local_review_historical_binding(root,complete,receipt)\nassert receipt['\"'\"'status'\"'\"']=='\"'\"'ERROR'\"'\"' and receipt['\"'\"'envelope'\"'\"']['\"'\"'decision'\"'\"']=='\"'\"'REQUEST_CHANGES'\"'\"'\nhold=commit._prior_local_review_stop(root,{'\"'\"'pr_number'\"'\"':'\"'\"'1332'\"'\"','\"'\"'steps_completed'\"'\"':[]},target_branch='\"'\"'jabramsja/workingrcx-local-review-quota-r3-2026-10-05'\"'\"',base_branch='\"'\"'dev'\"'\"')\nassert hold['\"'\"'status'\"'\"']=='\"'\"'held'\"'\"' and hold['\"'\"'failure_class'\"'\"']=='\"'\"'local_review_evidence_hold'\"'\"' and hold['\"'\"'retry_allowed'\"'\"'] is False\nassert '\"'\"'metadata disappeared'\"'\"' in '\"'\"' '\"'\"'.join(hold['\"'\"'errors'\"'\"'])\nassert '\"'\"'local-pr-review-a705c468d1154ffa8364ac2b595f39d5'\"'\"' in '\"'\"' '\"'\"'.join(hold['\"'\"'errors'\"'\"'])\nassert not (root/'\"'\"'.agent_bus/meta/local_pr_review_admissions/legacy_interruptions'\"'\"').exists()\nprint(json.dumps({'\"'\"'complete_attempt'\"'\"':complete.name,'\"'\"'receipt_sha256'\"'\"':sha,'\"'\"'status'\"'\"':receipt['\"'\"'status'\"'\"'],'\"'\"'decision'\"'\"':receipt['\"'\"'envelope'\"'\"']['\"'\"'decision'\"'\"'],'\"'\"'historical_binding'\"'\"':'\"'\"'PASS'\"'\"','\"'\"'default_admission'\"'\"':hold,'\"'\"'live_recovery_published'\"'\"':False},indent=2))\n'",
+      "elapsed_seconds": 0.06232716701924801,
+      "environment": {
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "exit_code": 0,
+      "finished_utc": "2026-10-12T00:48:59.524291+00:00",
+      "label": "actual historical binding and default orphan admission",
+      "shell_command": "PYTHONDONTWRITEBYTECODE=1 python3 -c 'import hashlib, json, sys\nfrom pathlib import Path\nroot=Path.cwd()\nsys.path.insert(0,str(root/'\"'\"'mu/tools/executors'\"'\"'))\nimport commit_executor as commit\noriginal_run=commit._run\ndef local_reads_only(command, **kwargs):\n    assert command[0]=='\"'\"'git'\"'\"' and command[1] in {'\"'\"'rev-parse'\"'\"','\"'\"'remote'\"'\"','\"'\"'merge-base'\"'\"','\"'\"'diff'\"'\"','\"'\"'cat-file'\"'\"','\"'\"'symbolic-ref'\"'\"'}, command\n    return original_run(command,**kwargs)\ncommit._run=local_reads_only\ndirectory=root/'\"'\"'.agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews'\"'\"'\ncomplete=directory/'\"'\"'local-pr-review-a92850a15e6f4411992770ace160cdaf'\"'\"'\nreceipt_path=complete/'\"'\"'receipt.json'\"'\"'\nsha=hashlib.sha256(receipt_path.read_bytes()).hexdigest()\nassert sha=='\"'\"'57bc2129a98e471de4ea162fb8e5b60695cc1627b03fefcb60afa5208289d70e'\"'\"'\nreceipt=json.loads(receipt_path.read_text())\ncommit._validate_local_review_historical_binding(root,complete,receipt)\nassert receipt['\"'\"'status'\"'\"']=='\"'\"'ERROR'\"'\"' and receipt['\"'\"'envelope'\"'\"']['\"'\"'decision'\"'\"']=='\"'\"'REQUEST_CHANGES'\"'\"'\nhold=commit._prior_local_review_stop(root,{'\"'\"'pr_number'\"'\"':'\"'\"'1332'\"'\"','\"'\"'steps_completed'\"'\"':[]},target_branch='\"'\"'jabramsja/workingrcx-local-review-quota-r3-2026-10-05'\"'\"',base_branch='\"'\"'dev'\"'\"')\nassert hold['\"'\"'status'\"'\"']=='\"'\"'held'\"'\"' and hold['\"'\"'failure_class'\"'\"']=='\"'\"'local_review_evidence_hold'\"'\"' and hold['\"'\"'retry_allowed'\"'\"'] is False\nassert '\"'\"'metadata disappeared'\"'\"' in '\"'\"' '\"'\"'.join(hold['\"'\"'errors'\"'\"'])\nassert '\"'\"'local-pr-review-a705c468d1154ffa8364ac2b595f39d5'\"'\"' in '\"'\"' '\"'\"'.join(hold['\"'\"'errors'\"'\"'])\nassert not (root/'\"'\"'.agent_bus/meta/local_pr_review_admissions/legacy_interruptions'\"'\"').exists()\nprint(json.dumps({'\"'\"'complete_attempt'\"'\"':complete.name,'\"'\"'receipt_sha256'\"'\"':sha,'\"'\"'status'\"'\"':receipt['\"'\"'status'\"'\"'],'\"'\"'decision'\"'\"':receipt['\"'\"'envelope'\"'\"']['\"'\"'decision'\"'\"'],'\"'\"'historical_binding'\"'\"':'\"'\"'PASS'\"'\"','\"'\"'default_admission'\"'\"':hold,'\"'\"'live_recovery_published'\"'\"':False},indent=2))\n'",
+      "source_hashes_after": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "source_hashes_before": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+        "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+        "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+      },
+      "stable_source_hashes": true,
+      "started_utc": "2026-10-12T00:48:59.461857+00:00",
+      "stderr": "",
+      "stdout": "{\n  \"complete_attempt\": \"local-pr-review-a92850a15e6f4411992770ace160cdaf\",\n  \"receipt_sha256\": \"57bc2129a98e471de4ea162fb8e5b60695cc1627b03fefcb60afa5208289d70e\",\n  \"status\": \"ERROR\",\n  \"decision\": \"REQUEST_CHANGES\",\n  \"historical_binding\": \"PASS\",\n  \"default_admission\": {\n    \"status\": \"held\",\n    \"step\": \"ensure_review_clear_and_merge\",\n    \"failure_class\": \"local_review_evidence_hold\",\n    \"retry_allowed\": false,\n    \"errors\": [\n      \"Native local-review evidence needs repair: Native local-review metadata disappeared: /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/.agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a705c468d1154ffa8364ac2b595f39d5\"\n    ],\n    \"steps_completed\": [],\n    \"pr_number\": \"1332\"\n  },\n  \"live_recovery_published\": false\n}\n"
+    }
+  ],
+  "completed_utc": "2026-10-12T00:51:38.765963+00:00",
+  "created_utc": "2026-10-12T00:40:49.216879+00:00",
+  "final_declared_gate": {
+    "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_local_review_history_recovery.py mu/tests/tools/test_commit_executor_receipt.py::TestCommitExecutorPytestGate --tb=short",
+    "exit_code": 0,
+    "result": "1281 passed in 237.13s",
+    "stable_source_hashes": true,
+    "wall_seconds": 237.40963041601935
+  },
+  "implementation_files_changed_this_phase": [
+    "mu/tools/executors/local_review_history_recovery.py",
+    "mu/tests/tools/test_local_review_history_recovery.py",
+    "TASKS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r2-2026-10-11_2026-10-11_implementation_evidence.json",
+    "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r2-2026-10-11_bridge_nonblockers.md"
+  ],
+  "inherited_extensions_preserved": [
+    "mu/tools/executors/commit_executor.py",
+    "mu/tests/tools/test_commit_executor_local_review.py"
+  ],
+  "invariant_tuple": {
+    "debt_delta": 0,
+    "host_semantics_delta": 0,
+    "proof_limit": "Control-surface local recovery/admission behavior only; no runtime/L4 completion, independent review approval or live landing claim.",
+    "runtime_substrate_delta": 0
+  },
+  "issues_encountered": [
+    "Before repair, actual public plan held on stale local dev146ca495; two bounded fixtures reproduced stale-local false rejection and wrong-remote false acceptance. Both pass in the final full declared gate.",
+    "The inherited support=sys.modules[__name__] fixture correction passed the bounded control and the full declared gate without modifying any existing test.",
+    "Supplied resumption-preflight.log exits1 for local Codex binary/cache canaries; repository checks passed. No startup rerun, binary/cache/hooks/model/policy edit or alternate-provider workaround performed.",
+    "The nine-file preservation checkpoint predates outer R2 tracker-note admission: eight initial file hashes match the baseline; TASKS has the outer R2 canonical note. Historical candidate edits and all29protected paths remain preserved.",
+    "Fresh review authority, not historical R1 approval, is required. The actual plan is pinned to current e75 HEAD and must be replanned against the reviewed committed R2 HEAD before live apply."
+  ],
+  "locked_packet": "reports/control_plane/workingrcx-local-review-legacy-history-r2-2026-10-11_2026-10-11.md",
+  "outer_owned_pending": [
+    "Native generation of indicator/growth caps, packet refresh and staging with actual indexed branch authority.",
+    "Independent native review and exact native approval/commit.",
+    "New pinned committed-head plan, reviewed live recovery apply and verify, supported postcommit continuation.",
+    "Corrected-head seven-check CI, authenticated current-request independent complete-PR review and aggregate clearance, protected merge, independently verified PRIMARY sync.",
+    "Existing row38 folder wave, separate retention, final coverage/native disposition, then physical cleanup; protect pausedPR1325 and snapshots.",
+    "Existing row40 deterministic interrupted-implementer recovery with unknown outcome and remaining lifecycle/validation/evidence obligations."
+  ],
+  "phase": "B implementation; no live recovery publication",
+  "preservation": {
+    "R1_checkpoint_sha256": "5d1134a77f7f01168898f7bdc15c2b88cefea86d15e063a59a40532557e34bd2",
+    "R1_checkpoint_status": "IN_FLIGHT; no sealed actor outcome fabricated",
+    "all_historical_inventories_unchanged": true,
+    "all_protected_match": true,
+    "all_refs_unchanged": true,
+    "existing_local_review_test_bytes_unchanged": true,
+    "historical_inventory_file_counts": {
+      ".agent_bus-local-review-legacy-history-r1-20261009": 17,
+      ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews": 7
+    },
+    "index_sha256_after": "1cc2782ee41fc519d1d9d2d7dba0f5ae1774bd84ba716a1e20b2f1f2ea184d0b",
+    "index_unchanged": true,
+    "inherited_commit_extension_unchanged_since_admission": true,
+    "live_recovery_published": false,
+    "protected_count": 29,
+    "protected_sha256_after": {
+      "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+      "mu/tests/tools/test_recovery_gate.py": "cfbea84c7c05e617fe2ca2b5be22d76ea1863e239b50c401b1062a445e525f80",
+      "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+      "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+      "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+      "mu/tools/executors/launch_wave.py": "a43c3069fb662688f74559c39e348bb354d460a5fad6333dca3f6aa74172107f",
+      "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+      "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09.md": "43a4060c08207521be66dab1362b81ecf6cd50b78e8df38ca9c96c9eecdef931",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09_implementation_evidence.json": "d34d5a86c10bf946e0221abeaf2dcfc90b8e89738d408a34af769ad63deb18e4",
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09.md": "7b21d2f22e054e2f90d16220c9dc2498c9f02e895aaa9eb367b2f6905f3cede2",
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09_implementation_evidence.json": "88f56342296570dc7e024c3b33c1c31f0839b3acbe8bfb144d3680d1c370d497",
+      "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09.md": "ecffc2ce35fd0a0fad01e9a33af0acde81da9a5a6b1be523c9eb8170cffa6682",
+      "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09_implementation_evidence.json": "8ba800c21b317246efa2a4a1ee57914c0e888a9bd62cc98c6b8ddac0294d0343",
+      "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09.md": "de6ce705355789302912125757278692d9a97bec4aee9cf151199115da03ef9b",
+      "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09_implementation_evidence.json": "629bcb0b13c29469e9e664b505a0042fed50e9295f4d6ebb5a7274f849ffb206",
+      "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09.md": "a160038d2a67219737f1259ce0a52d518dc99bed033d5bb7fc703453b0192478",
+      "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09_implementation_evidence.json": "ac26a18399e146bf22a00e854796aed18a8611f7b0eaccd02c944c9697a9572b",
+      "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09.md": "129a9cb76cfecd1efd5a7972107b3567c1419f963c90532b3d2f3752d48a5745",
+      "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09_implementation_evidence.json": "d558c86ffef26887f30f7c4bcc92319972b7b6eccbfa1b0166b38542dc76e08c",
+      "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r1-2026-10-09_bridge_nonblockers.md": "449dfa2d26bf150d4954add9788ee0af447d7e2baa3056949ff2268e57738da3",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r4-2026-10-09_bridge_nonblockers.md": "c24c27bcc9bace2ee1dee6124e322e242f48e85b74bfe65cd4858bd18aebe201",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r5-2026-10-09_bridge_nonblockers.md": "3588224e4f98b5e69d083536690301b02bd7be5bc79a6551e2dd8bd6d0963334",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r6-2026-10-09_bridge_nonblockers.md": "b35de1fdbcc4d9ad4439470fabd938e7e95f9bd5cc8e0aeed15010a8cb6050b6",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r2-2026-10-09.json": "29e666f8ab4a79485d012db2f8f3b15e2ab4086df21031a5267ad22cfe829d96",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r3-2026-10-09.json": "f3c22540e49c387f8e1331626ba4d2436ce36b02ea3b66b58054b4b8101abea8",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r4-2026-10-09.json": "4f77315f4daa4333088bfcd63c1b390cd0688b4d679bb3fc5340891fc74f2571",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r5-2026-10-09.json": "f62a601d39f7cbc299853491025ca87e6a8c6271ec3c53d4a3677f81a69871c5",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r6-2026-10-09.json": "bb955750fa42152f4c0b30001697e247c6127ae1ccc2b439bd9ac38e7cda92e1"
+    }
+  },
+  "source_test_sha256": {
+    "mu/tests/tools/test_commit_executor_local_review.py": "c7a8bbb34350104cd3edae6d93cf65655c15fea6c5ee24916a51dfc3880a07e8",
+    "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+    "mu/tests/tools/test_local_review_history_recovery.py": "0ab25aa93712e3a1ae73891600ac781dfd55950a5bcede54f26f40f70a23cd35",
+    "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+    "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+    "mu/tools/executors/local_review_history_recovery.py": "3fa7faeaa20ff1da5f0a9c346d26dcb11357c61494eceda9f620a4066850611a",
+    "mu/tools/executors/recovery_gate.py": "23fb753b32b10c578a0235553ed7d8f447fcb782ecd29d0f529a9e153ae44b7a"
+  },
+  "status": "Phase B local implementation and declared gate passed; independent native review, commit and live recovery pending",
+  "task_id": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+  "tracker_sync": {
+    "canonical_note_prefix": "- Tracker sync note (2026-10-11, workingrcx-local-review-legacy-history-r2-2026-10-11):",
+    "canonical_task_ids": 268,
+    "current_tasks_sha256": "2f0efdebced2457496eeb0938a1789996095aea8bfc56f97f21e0573b1674365",
+    "historical_notes": [
+      {
+        "sha256": "295d057b8a2243844d5e041d9162a79ded6f54297fe1d9746019820e4b7efcba",
+        "unchanged_from_R6_commit": true,
+        "wave": "workingrcx-local-review-terminal-r2-2026-10-09"
+      },
+      {
+        "sha256": "2d811afcf7efd7dc3c972a17bdf34ed59f541eb280d29c35130b08f18386960b",
+        "unchanged_from_R6_commit": true,
+        "wave": "workingrcx-local-review-terminal-r3-2026-10-09"
+      },
+      {
+        "sha256": "f71617fb6ee74944e3fead12437d63322159ddacd27dc6b791bf7361e8a45227",
+        "unchanged_from_R6_commit": true,
+        "wave": "workingrcx-local-review-terminal-r4-2026-10-09"
+      },
+      {
+        "sha256": "16aa501af61772e5cdb95dec7db5beeff26277086d76a7648185adf4aa7426eb",
+        "unchanged_from_R6_commit": true,
+        "wave": "workingrcx-local-review-terminal-r5-2026-10-09"
+      },
+      {
+        "sha256": "4a675d19335d39837c8a8d866f8fb4ca7ff9c3285502999e04a751126a2f47ec",
+        "unchanged_from_R6_commit": true,
+        "wave": "workingrcx-local-review-terminal-r6-2026-10-09"
+      }
+    ],
+    "ordered_queue_owners": 44,
+    "primary_checkpoint_sha256": "114c54c622a00e0d0096d348693689b8e5496b84d181342415ec9007ba53575c",
+    "primary_not_modified": true,
+    "same_ids_and_owner_order": true
+  },
+  "version": 1,
+  "wave_id": "workingrcx-local-review-legacy-history-r2-2026-10-11"
+}

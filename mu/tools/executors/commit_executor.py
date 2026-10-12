@@ -10060,6 +10060,11 @@ def _run_protected_merge(
     it; its only power on re-entry is observation of that same PR. The lock
     serializes admission and completion, including two simultaneous observers.
     """
+    local_stop = _prior_local_review_stop(
+        repo_root, result, target_branch=target_branch, base_branch=base_branch,
+    )
+    if local_stop is not None:
+        return local_stop
     try:
         if continuation_path.is_symlink() or not continuation_path.is_file():
             raise ValueError("Protected merge requires a regular native continuation")
@@ -11669,6 +11674,15 @@ def _local_review_attempt_proofs(repo_root: Path):
     other worktrees or arbitrary filesystem roots.
     """
     owned = set()
+    # Explicit recovered interruptions are separate negative history, never a
+    # fabricated v1/v2 receipt. Validate the entire canonical publication before
+    # excluding its still-intact original directory from orphan discovery.
+    from local_review_history_recovery import recovered_histories
+    for proof in recovered_histories(repo_root):
+        inputs = proof["history"]["document"]["plan"]["inputs"]
+        attempt = _local_review_owned_path(repo_root, Path(inputs["attempt"]))
+        owned.add(attempt)
+        yield attempt, proof
     for owner_path in _local_review_directory_entries(repo_root, _local_review_admission_dir(repo_root)):
         if not owner_path.match("local-pr-review-*.json"):
             continue
@@ -11863,6 +11877,9 @@ def _prior_local_review_stop(
     normal admission and fresh review; every old receipt remains historical.
     An attempt persisted before provider entry also fences process interruption.
     """
+    # Recompute this flag from immutable evidence on every entry. Continuation
+    # state and caller-supplied result fields cannot grant recovery authority.
+    result.pop("recovered_local_review_history", None)
     try:
         attempts = list(_local_review_attempt_proofs(repo_root))
         if not attempts:
@@ -11870,6 +11887,27 @@ def _prior_local_review_stop(
         head = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
         repository = "/".join(_parse_origin_owner_repo(repo_root))
         for attempt, proof in attempts:
+            if proof.get("source") == "local_review_history_recovery":
+                inputs = proof["history"]["document"]["plan"]["inputs"]
+                identity = inputs["identity"]
+                if (identity["repo_root"] != str(repo_root.resolve())
+                        or identity["repository"] != repository
+                        or identity["head_branch"] != target_branch
+                        or identity["base_branch"] != base_branch
+                        or (result.get("pr_number") and int(result["pr_number"]) != identity["pr_number"])
+                        or _run(["git", "symbolic-ref", "--short", "HEAD"], cwd=repo_root).stdout.strip() != target_branch):
+                    raise ValueError("Recovered legacy history scope does not match this admission")
+                from local_review_history_recovery import recovered_candidate
+                current = recovered_candidate(repo_root, inputs)
+                if current["head_sha"] != head:
+                    raise ValueError("Recovered candidate HEAD changed during admission")
+                if head == identity["head_sha"] or current["diff_sha256"] == identity["diff_sha256"]:
+                    raise ValueError("Recovered interrupted review has no approval; original or unchanged PR content remains held")
+                result.setdefault("recovered_local_review_history", []).append({
+                    "record_path": proof["record_path"], "record_sha256": proof["record_sha256"],
+                    "identity": identity,
+                })
+                continue
             receipt = proof["receipt"]
             identity = receipt["identity"]
             _validate_local_review_historical_binding(repo_root, attempt, receipt)
@@ -18042,18 +18080,17 @@ def _run_post_commit_pipeline_impl(
     saved = _read_continuation_record(continuation_path)
     if continuation_path.exists() and saved is None:
         return _protected_merge_hold(result, "Unreadable native continuation; request outcome is unknown")
+    local_stop = _prior_local_review_stop(
+        repo_root, result, target_branch=target_branch, base_branch=base_branch,
+    )
+    if local_stop is not None:
+        return local_stop
     if saved is not None and "protected_merge_intent" in saved:
         return _run_protected_merge(
             handoff=handoff, repo_root=repo_root, result=result,
             target_branch=target_branch, base_branch=base_branch,
             continuation_path=continuation_path, log=log,
         )
-
-    local_stop = _prior_local_review_stop(
-        repo_root, result, target_branch=target_branch, base_branch=base_branch,
-    )
-    if local_stop is not None:
-        return local_stop
 
     # ── Step 11: run_pre_push_script ──────────────────────────────────
     if "run_pre_push_script" not in result["steps_completed"]:
@@ -18401,6 +18438,12 @@ def _run_post_commit_pipeline_impl(
             pr_number=pr_number,
         )
         _assert_expected_pr_head(pr_data, head_sha_before_merge)
+        for recovered in result.get("recovered_local_review_history", []):
+            historical = recovered["identity"]
+            if any(pr_data.get(key) != historical[value] for key, value in (
+                    ("number", "pr_number"), ("url", "url"), ("baseRefName", "base_branch"),
+                    ("baseRefOid", "base_sha"), ("headRefName", "head_branch"))):
+                raise ValueError("Current PR does not match explicitly recovered history scope")
         # Step 14 can merge a newly advanced base into this carrier (including
         # during a mid-poll BEHIND refresh) and push a new HEAD.  Once that HEAD
         # is also proven to be the PR head, make it the exact carrier authority
@@ -18505,7 +18548,7 @@ def _run_post_commit_pipeline_impl(
     # A later comment may change review eligibility, but cannot switch off
     # finding retention. Historical quota notices grant no local-review
     # authority; admission still requires the authenticated current request.
-    retain_quota_findings = quota_fallback or any(
+    retain_quota_findings = bool(result.get("recovered_local_review_history")) or quota_fallback or any(
         _is_connector_review_author(comment.get("author", {}).get("login", ""))
         and _is_explicit_code_review_quota_notice(str(comment.get("body") or ""))
         for comment in _iter_pr_issue_comments(pr_data)
@@ -18579,6 +18622,15 @@ def _run_post_commit_pipeline_impl(
     cloud_review_identity = None
     if retain_quota_findings and local_review is None:
         try:
+            if result.get("recovered_local_review_history"):
+                request = _latest_bot_review_request_comment(pr_data) or {}
+                saved_request = _read_continuation_record(continuation_path) or {}
+                if (not _has_recorded_current_head_bot_request(continuation_path, head_sha_before_merge)
+                        or type(request.get("databaseId")) is not int
+                        or request["databaseId"] <= 0
+                        or request["databaseId"] != saved_request.get("bot_review_request_comment_id")
+                        or request.get("author", {}).get("__typename") != "User"):
+                    raise ValueError("Recovered history requires an authenticated current-head review request")
             _require_quota_history_cloud_clearance(pr_data, head_sha_before_merge, continuation_path)
             cloud_review_identity, _ = _local_quota_review_identity(
                 repo_root, pr_data, repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
