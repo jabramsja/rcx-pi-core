@@ -26,7 +26,9 @@ from mu.tests.tools.test_phase_b_executor import (
     phase_b_terminal_cli,
 )
 from mu.tests.tools.test_worktree_lifecycle import native_base, native_lane
-from mu.tests.tools.test_commit_executor_local_review import carrier, local_terminal_attempt
+from mu.tests.tools.test_commit_executor_local_review import (
+    carrier, carrier_repository, local_terminal_attempt,
+)
 
 # Load executor_common first (dependency)
 common_mod = load_module(

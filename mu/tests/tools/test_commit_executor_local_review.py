@@ -4580,13 +4580,18 @@ def test_historical_correction_with_unavailable_base_holds_without_fetch(
 def test_explicit_legacy_recovery_never_fabricates_native_terminal_receipt(
     carrier, monkeypatch, historical_local_review_producer, tmp_path_factory,
 ):
-    import sys
     from mu.tests.tools.test_local_review_history_recovery import History, inventory
     from recovery_gate import local_review_terminal_payload
 
+    # Native tests/ collection can outlive its tools.* module-cache entry after
+    # another tooling test clears shadowing aliases. Keep the helpers bound to
+    # this collected fixture's globals, including its isolated commit module.
+    support = SimpleNamespace(commit=commit, git=git,
+                              _native_continuation=_native_continuation,
+                              _resume_native=_resume_native)
     history = History(carrier, monkeypatch, historical_local_review_producer,
                       tmp_path_factory.mktemp("legacy-preservation") / "snapshot",
-                      support=sys.modules[__name__])
+                      support=support)
     original = inventory(history.attempt)
     before = history.assert_hold()
     assert "metadata disappeared" in " ".join(before["errors"])
@@ -4599,3 +4604,17 @@ def test_explicit_legacy_recovery_never_fabricates_native_terminal_receipt(
     assert not (history.attempt / "receipt.json").exists()
     assert not (history.attempt / "attempt.json").exists()
     assert inventory(history.attempt) == original
+
+
+def test_explicit_legacy_recovery_survives_collected_module_cache_eviction(
+    carrier, monkeypatch, historical_local_review_producer, tmp_path_factory,
+):
+    import sys
+
+    # Reproduce the broad-suite lifetime: pytest still owns the collected
+    # function and fixtures after a tools.* import-cache cleanup.
+    monkeypatch.delitem(sys.modules, __name__, raising=False)
+    test_explicit_legacy_recovery_never_fabricates_native_terminal_receipt(
+        carrier, monkeypatch, historical_local_review_producer, tmp_path_factory,
+    )
+    assert __name__ not in sys.modules

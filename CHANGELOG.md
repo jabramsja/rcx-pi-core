@@ -6,7 +6,182 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-12
 
-### Preserve exact native packet authority (R5 Phase B; uncommitted)
+### Explicit original-PR candidate admission (R10 Phase B)
+
+- R10 Phase B local validation PASS2204/150.33s, exit0 (185.489s process wall time). The exact
+  docs-first complete-module cohort collects 2,204 cases and includes all 180
+  original required nodes. Native producer, frozen-config packet, clean 175/64
+  cap no-op and unchanged test-integrity checks pass. Execution receipts and
+  source/index bindings belong in `reports/control_plane/workingrcx-local-review-legacy-history-r10-2026-10-12_2026-10-12_implementation_evidence.json`.
+- The 15 carried paths are individually enumerated: TASKS/CHANGELOG are mutable,
+  while the 13 source/historical files remain byte-exact, including the held R9
+  packet, both preserved fixtures, cache-eviction regression and original
+  negative assertions. Four own governance paths are separately admitted.
+- R10 retains the exact existing PR branch and comparison parent85d0274.
+  Actual rendered/locked producer checks include R5 positive, original R8
+  omission, protected-branch and wrong-owner negatives. Indexed handoff and
+  packet/cap checks must be repeated by native automation after outer staging.
+  No generated cap transition exists; historical R5 provenance is unchanged.
+- R9 REQUEST_CHANGES, corrected-config-required, launcher exit1 and no operator
+  signals remain historical. Verified terminal snapshot1f885b33 restores63files.
+  R8 remains stopped after the producer/consumer routing mismatch; three
+  2204PASS runs, staged-only proofs and two COMMIT_GO receipts did not create a
+  commit. Snapshot857cfd73 preserves wrong-base authority. Bounded restoration
+  retained14candidate/59protected/187authority files and unchanged refs in the
+  same checkout; no absent checkpoint is recreated.
+- Reconcile PRIMARY observations, current checkpoint/to-do and ordered rows38/40
+  while retaining268canonical IDs,44owners and every historical tracker note.
+  Existing row40 retains exact collection/coverage, deliberate-owner-cancellation
+  and branch-target/comparison continuity follow-ups. No source, loader, guard,
+  cancellation fix or separate hardening prerequisite is admitted.
+- Preserve R3 operator-error correction, R4 packet hold, R5 local commit/negative
+  publication/failed pre-push, R6 failed/passing gates/QUESTION and both R7 failed
+  gates/reviews. R7 operator interruption and subsequent automatic native retry
+  are separate; lifecycle ESCALATED is not Phase B review-budget exhaustion.
+  Original a705 remains approval=false and a928 remains negative; no old plan
+  is republished at a new HEAD.
+- Fresh native staging/review/commit/pre-push, corrected-head CI, complete current
+  authenticated PR review, protected PR1332 merge and verified PRIMARY sync
+  remain required. Then verify actual PR1331 remote disposition and the locked
+  latest v3 folder, retention and coverage preparations in order. PRIMARY's v4
+  drafts are observations only. Physical/registration/useful-work and pausedPR1325
+  obligations, quota-stop policy and startup/docs-registry limits remain open.
+
+
+### Admit complete-module validation for preserved fixtures (R8 Phase B)
+
+- Fresh declared Phase B validation passed 2,204 tests in 127.78s, exit 0
+  (128.598s process wall time). Collection verified all 180 required original
+  nodes. Native packet, clean cap no-op and unchanged test-integrity gates pass;
+  source, index, refs and old authority stayed unchanged. Final tracker edits
+  receive the same declared gate; actual final result is bound in the evidence
+  report. Independent native review, commit and landing remain pending.
+- Carry exact R6 fixture bytes, every original negative assertion and the cache
+  eviction regression. The source-bound 9,411-pass/1-skip R6 gate is historical
+  support. Fresh admission uses the complete docs-first six-module cohort,
+  retaining all 180 original nodes within 2,204 cases. Current execution and
+  source/index evidence are recorded in
+  `reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12_implementation_evidence.json`.
+- Keep both failed R7 gates (138 passed/1 collection error in 8.18s and 8.41s),
+  both REQUEST_CHANGES reviews, the bounded operator interruption and launcher
+  exit -15. Native transient-kill recovery then cleared the checkpoint, retried
+  initial Phase A against the advanced packet and hard-failed at 09:28:42Z.
+  Actual post-lock packet validation remains true. Lifecycle completion's three
+  exhausted attempts and ESCALATED active-process-reference outcome are separate;
+  no Phase B review-budget exhaustion is claimed. Pre-stop checkpoint values
+  remain in the stop record; the absent original file is never recreated.
+- Native Step5e requires exact clean HEAD/index/worktree cap bytes at 175/64,
+  with historical R5 provenance and no generated transition. Repeat the actual
+  frozen-config packet predicate and indexed cap-no-op check after outer staging.
+  The packet and native indicator remain builder-owned.
+- Reconcile latest PRIMARY observations, top checkpoint/to-do and both ordered
+  rows38/40, retaining all 268 canonical IDs, 44 owners and historical notes.
+  Row40 keeps the precise collection/coverage and deliberate-owner-cancellation
+  follow-ups, including negative controls, the complete-module command,
+  subprocess/PID identity and interrupted-checkpoint preservation. No source,
+  loader, production guard, cancellation fix or new hardening wave is admitted.
+- Preserve R3 operator-error correction, R4 packet hold, R5 local commit/negative
+  history publication/failed pre-push and R6 failed/passing gates/QUESTION.
+  Original a705 and a928 artifacts stay intact; a705 approval=false is never
+  republished for a new HEAD. Fresh native review/commit, pre-push, corrected-head
+  CI, complete authenticated current-request PR review, protected PR1332 merge
+  and verified PRIMARY sync remain separate requirements. Then verify PR1331
+  remote disposition and latest v2 folder, retention and final coverage inputs
+  in order. Physical/registration/useful-work and pausedPR1325 obligations,
+  quota-stop policy and startup/PRIMARY docs-registry limitations remain protected.
+
+### Admit unchanged native cap no-op (R7 Phase B; focused gate held)
+
+- Bridge round 1 remains blocked. At 09:14:15Z the exact locked focused command
+  again exited 1 with 138 passed and 1 collection error in 8.41s (8.688s process
+  wall time): `test_doc_freshness.py:37` cannot import
+  `tools.docs.shared_doc_config`. Preserve both failed receipts and the separate
+  successful R6 tools/growth receipt. The unchanged test-integrity gate and
+  actual already-staged native packet/cap checks pass; all 52 protected paths,
+  124 old authority records, frozen source hashes, refs and raw index remain
+  exact. Reconcile PRIMARY's 09:12 observation and existing-owner cohort
+  follow-up without running or admitting its proposed alternate command.
+  Completion requires resolution through existing owner/native authority;
+  no source/test change, new cap provenance or substitute gate is admitted.
+- Carry the exact preserved R6 dispatcher and local-review fixture corrections,
+  including every original assertion and the module-cache eviction regression.
+  The bound complete R6 tools/growth run passed 9,411 tests with 1 skip in
+  980.24s, exit 0 at 08:10:57Z; its failed predecessor remains separate evidence.
+- Under standing founder autonomous same-owner scope, root admits the exact
+  committed cap at 175/64. This is no new per-wave founder answer, cap budget
+  or production-policy change. Actual native capture requires identical
+  HEAD/index/worktree cap bytes, returns `preimage` with no new governed files,
+  and has no generated path. R5 provenance remains historical; generated
+  postimage verification applies only to a real generated transition, which
+  would hold this no-op-only scope.
+- Keep R5/R6 packets, evidence and indicators, the original R6 `QUESTION` and
+  unclaimed terminal receipt byte-exact. Native lifecycle `ESCALATED` for active
+  process references is a separate outcome; foreign references were not killed.
+  The R3 operator-error correction and R4 packet hold remain separate history.
+- Reconcile current PRIMARY observations with WT history, retaining all 268
+  canonical IDs, 44 ordered owners and historical tracker notes. The R7 tracker
+  sync note remains the sole L4 field authority; its native packet and indicator
+  remain builder-owned. The unchanged private-attribute/import test-integrity
+  gate passes. The exact focused regression/tracker command is held: 138 passed
+  and 1 collection error in 8.18s, exit 1 (37.731s process wall time).
+  `test_doc_freshness.py` cannot import `tools.docs.shared_doc_config`:
+  `ModuleNotFoundError: No module named tools.docs`. All source hashes, the raw
+  index and refs stayed unchanged. No source/test or alternate-command workaround
+  is admitted; the own R7 implementation evidence retains the complete failure.
+- R5 is locally committed at `85d02749642d704776e21eea332ceeb2e27a30f6`.
+  Its verified a705 negative-history publication remains approval=false and its
+  later failed pre-push remains distinct. Preserve a928 REQUEST_CHANGES; do not
+  republish old plans for a new HEAD or inherit old approval.
+- Outer staging must repeat actual frozen-config packet and indexed cap-no-op
+  checks, followed by fresh native review/commit, pre-push, corrected-head CI,
+  complete authenticated current-request PR review, protected ordered-parent
+  PR1332 landing and verified PRIMARY sync. PR1331 remote disposition precedes
+  the latest v2 WD folder, separate retention and final coverage preparations
+  in that order, each after actual dependencies resolve. Physical/registration/
+  preserved-useful-work obligations, paused PR1325, quota-stop policy and
+  startup/PRIMARY docs-registry limitations remain open or protected.
+
+### Repair shared local-review fixture consumers (R6 Phase B; held)
+
+- Reproduce the dispatcher setup failure before adding its missing
+  `carrier_repository` fixture import. The focused consumer then passes, and
+  the first full native-context tools/growth run has no dispatcher setup errors.
+  All 72 original dispatcher negative cases and their assertions remain.
+- Capture the distinct broad failure with complete output: 1 failed, 9,409
+  passed, 1 skipped in 951.14s. The legacy-recovery test fails at
+  `sys.modules[__name__]` with a missing `tools.test_commit_executor_local_review`
+  cache entry. Retain its fixture helpers directly and add a consumer regression
+  that evicts that entry before running every original recovery assertion.
+  No production code, module loader, checker exemption, skip or policy changes.
+- The repeated full declared native-context tools/growth gate passed 9,411
+  tests with 1 skip in 980.24s (exit 0; 980.746s process wall time), with
+  stable source hashes and raw index. Both full runs retain exact argv/environment
+  pins, complete stdout/stderr, elapsed time, exit and source hashes on the
+  UUID-verified WD store, bound by the own implementation evidence JSON.
+- The actual locked R6 packet passes its frozen-config native predicate.
+  Completion remains HELD: at the required committed parent `85d02749642d704776e21eea332ceeb2e27a30f6`,
+  the actual HEAD/index has no new governed files. Native cap classification is
+  `preimage`, with no R6 generated postimage; the generated-candidate verifier
+  rejects that absence. Leave numerical caps 175/64 and committed R5 cap bytes
+  unchanged. Fresh owner admission must reconcile the locked requirement with
+  this existing-file-only wave; no handwritten provenance or guard changes.
+- Reconcile PRIMARY admission baseline `2105ea76…` and later phase-specific
+  observations while retaining all 268 canonical IDs, 44 ordered owners and
+  historical tracker notes. Preserve the R3 operator-error correction and R4
+  packet hold. R5 is the reviewed local commit `85d0274`, with four COMMIT_GO
+  receipts and verified approval=false history publication, followed by a
+  separate failed pre-push and native escalation. Earlier R5 prose below is its
+  pre-commit observation, not current landing status.
+- All protected production and old authority, original a705 artifacts, a928
+  negative receipt, published negative intent/seal and the exact native R5
+  packet demotion remain intact. Native staging, indexed verification, fresh
+  review/commit, push, current-head CI/full-PR approval, protected PR1332 merge
+  and verified PRIMARY sync remain pending. PR1331 disposition, prepared useful
+  folder work, separate retention, final coverage/native disposition and fresh
+  physical/registration/useful-work obligations remain with existing row38/row40.
+  Paused PR1325, quota-stop policy and startup/docs-registry limitations remain.
+
+### Preserve exact native packet authority (R5 pre-commit Phase B observation)
 
 - Carry the independently preserved R4 implementation with all production
   source and tests frozen. Materialize the entire native HEAD/index-derived

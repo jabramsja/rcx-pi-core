@@ -1,0 +1,1376 @@
+{
+  "wave_id": "workingrcx-local-review-legacy-history-r10-2026-10-12",
+  "task_id": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+  "role": "native Phase B implementer",
+  "observed_utc": "2026-10-12T19:37:55.234071+00:00",
+  "status": "IMPLEMENTED_LOCAL_VALIDATION_PASS",
+  "implementation_complete": true,
+  "outer_governance_complete": false,
+  "summary": "Updated TASKS/CHANGELOG and own implementation evidence for the explicitly enumerated original-PR R10 candidate. The exact complete docs-first declared cohort passed twice; final tracker validation passed2204tests in136.44s, exit0. All180required nodes are covered; source/tests, frozen history, index, refs, branch, comparison and builder packet remain unchanged. Independent outer review/staging/commit/landing are pending.",
+  "files_edited_by_this_implementer": [
+    "TASKS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r10-2026-10-12_2026-10-12_implementation_evidence.json"
+  ],
+  "source_test_edits": [],
+  "candidate_allowlist": [
+    "CHANGELOG.md",
+    "TASKS.md",
+    "mu/tests/tools/test_commit_executor_local_review.py",
+    "mu/tests/tools/test_executor_dispatch.py",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r10-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r10-2026-10-12_2026-10-12_implementation_evidence.json",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12_implementation_evidence.json",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12_implementation_evidence.json",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12_implementation_evidence.json",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r9-2026-10-12_2026-10-12.md",
+    "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r10-2026-10-12_bridge_nonblockers.md",
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r10-2026-10-12.json",
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r6-2026-10-12.json",
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r7-2026-10-12.json",
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r8-2026-10-12.json"
+  ],
+  "carried_candidate": {
+    "CHANGELOG.md": {
+      "sha256": "96ce31e5fa143232e38d07ce8da88c1d6ac05008d639326e99e325076cbd1e39",
+      "mode": 420
+    },
+    "TASKS.md": {
+      "sha256": "a06c1e3e7a0cb1fa26b8d087bf117be1fafcb38291cb0e689a096f37680edf84",
+      "mode": 420
+    },
+    "mu/tests/tools/test_commit_executor_local_review.py": {
+      "sha256": "5c4ffcf83e3167779fb9a7bb4e934b2681fa417b8572f79737d0a0e4f6771035",
+      "mode": 420
+    },
+    "mu/tests/tools/test_executor_dispatch.py": {
+      "sha256": "fc6cbe681161802ad87a2d7fb0d83a735d0139412d1adb344293dff8dbbba90f",
+      "mode": 420
+    },
+    "reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md": {
+      "sha256": "18af283d9c2cc565c35c9b57145cb923c14b40d65a64fce7b0a0f73e99416f66",
+      "mode": 420
+    },
+    "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12.md": {
+      "sha256": "9bc238cfa51c6235b1b88ca611161d5934d79e5efc6d2d99c40378fceec3414e",
+      "mode": 420
+    },
+    "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12_implementation_evidence.json": {
+      "sha256": "fdb66657a7277e35b1cf0a38cfea5f9023cb8b8f5be317bfaa1df2ee77f0d56c",
+      "mode": 420
+    },
+    "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12.md": {
+      "sha256": "8e47d294805c312efcc2f80db066a36a5be724a2b79fb854df06d9209f2e5d57",
+      "mode": 420
+    },
+    "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12_implementation_evidence.json": {
+      "sha256": "3f673e107d8833a598ccb5f48923ce78863c81bf809b71defbf7a8834426004b",
+      "mode": 420
+    },
+    "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12.md": {
+      "sha256": "821526a6ec980fbe48b1d443007fbc53a09e7498cb9b8d5d33abb3be9cb412ae",
+      "mode": 420
+    },
+    "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12_implementation_evidence.json": {
+      "sha256": "a44ed349276b05975ff5f0990651dcfb36b7ee5ad1c801d107e79e100103357f",
+      "mode": 420
+    },
+    "reports/control_plane/workingrcx-local-review-legacy-history-r9-2026-10-12_2026-10-12.md": {
+      "sha256": "ac80807c68526821867ba4ae192a4d956e0f3a6f2e072901217c387030ed5ca2",
+      "mode": 420
+    },
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r6-2026-10-12.json": {
+      "sha256": "b6f7b8fd2d997828dc281f62093210977f7d3273008c2ad167b9808dbfcd340e",
+      "mode": 420
+    },
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r7-2026-10-12.json": {
+      "sha256": "3e4417fd350f84680070e0f627af9c42790d4d74c0ea454d7d0819c1c6bed16b",
+      "mode": 420
+    },
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r8-2026-10-12.json": {
+      "sha256": "276c7e49a12c3dfb0836187044fc9e818e10b423a085892818fd5f34edc412fa",
+      "mode": 420
+    }
+  },
+  "frozen_carried_paths": [
+    "mu/tests/tools/test_commit_executor_local_review.py",
+    "mu/tests/tools/test_executor_dispatch.py",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12_implementation_evidence.json",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12_implementation_evidence.json",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12_implementation_evidence.json",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r9-2026-10-12_2026-10-12.md",
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r6-2026-10-12.json",
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r7-2026-10-12.json",
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r8-2026-10-12.json"
+  ],
+  "native_owned_untouched": [
+    "reports/control_plane/workingrcx-local-review-legacy-history-r10-2026-10-12_2026-10-12.md",
+    "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r10-2026-10-12.json"
+  ],
+  "admission": {
+    "initial_facts": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-admission/initial-facts.json",
+      "sha256": "13ed4dfdd0edd400e7069e4412b438c7e3087b4d306a86d41532e7ffbf3bea48",
+      "bytes": 70461
+    },
+    "frozen_config": {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-local-review-legacy-history-r10-2026-10-12_wave_config.json",
+      "sha256": "81ddcba89b2a7341d67ec60d789259317853805ef8f4e4a525840e5fa82bace2",
+      "bytes": 22951
+    },
+    "comparison_commit": "85d02749642d704776e21eea332ceeb2e27a30f6",
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "terminal_r9_snapshot": "1f885b330a0ea4b08f7c1c0e8244350f5f25e0ffb5f03446e55da0ab1d347cb2",
+    "protected_sha256": {
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09_implementation_evidence.json": "88f56342296570dc7e024c3b33c1c31f0839b3acbe8bfb144d3680d1c370d497",
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09.md": "7b21d2f22e054e2f90d16220c9dc2498c9f02e895aaa9eb367b2f6905f3cede2",
+      "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09.md": "129a9cb76cfecd1efd5a7972107b3567c1419f963c90532b3d2f3752d48a5745",
+      "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09_implementation_evidence.json": "ac26a18399e146bf22a00e854796aed18a8611f7b0eaccd02c944c9697a9572b",
+      "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09.md": "ecffc2ce35fd0a0fad01e9a33af0acde81da9a5a6b1be523c9eb8170cffa6682",
+      "reports/control_plane/workingrcx-local-review-terminal-r6-2026-10-09_2026-10-09_implementation_evidence.json": "d558c86ffef26887f30f7c4bcc92319972b7b6eccbfa1b0166b38542dc76e08c",
+      "reports/control_plane/workingrcx-local-review-terminal-r5-2026-10-09_2026-10-09.md": "a160038d2a67219737f1259ce0a52d518dc99bed033d5bb7fc703453b0192478",
+      "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09_implementation_evidence.json": "8ba800c21b317246efa2a4a1ee57914c0e888a9bd62cc98c6b8ddac0294d0343",
+      "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09_implementation_evidence.json": "629bcb0b13c29469e9e664b505a0042fed50e9295f4d6ebb5a7274f849ffb206",
+      "reports/control_plane/workingrcx-local-review-terminal-r4-2026-10-09_2026-10-09.md": "de6ce705355789302912125757278692d9a97bec4aee9cf151199115da03ef9b",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r6-2026-10-09.json": "bb955750fa42152f4c0b30001697e247c6127ae1ccc2b439bd9ac38e7cda92e1",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r5-2026-10-09.json": "f62a601d39f7cbc299853491025ca87e6a8c6271ec3c53d4a3677f81a69871c5",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r2-2026-10-09.json": "29e666f8ab4a79485d012db2f8f3b15e2ab4086df21031a5267ad22cfe829d96",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r3-2026-10-09.json": "f3c22540e49c387f8e1331626ba4d2436ce36b02ea3b66b58054b4b8101abea8",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r4-2026-10-09.json": "4f77315f4daa4333088bfcd63c1b390cd0688b4d679bb3fc5340891fc74f2571",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r5-2026-10-09_bridge_nonblockers.md": "3588224e4f98b5e69d083536690301b02bd7be5bc79a6551e2dd8bd6d0963334",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r6-2026-10-09_bridge_nonblockers.md": "b35de1fdbcc4d9ad4439470fabd938e7e95f9bd5cc8e0aeed15010a8cb6050b6",
+      "reports/deferred/non_blocking/workingrcx-local-review-terminal-r4-2026-10-09_bridge_nonblockers.md": "c24c27bcc9bace2ee1dee6124e322e242f48e85b74bfe65cd4858bd18aebe201",
+      "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+      "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+      "mu/tools/executors/launch_wave.py": "a43c3069fb662688f74559c39e348bb354d460a5fad6333dca3f6aa74172107f",
+      "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+      "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09.md": "43a4060c08207521be66dab1362b81ecf6cd50b78e8df38ca9c96c9eecdef931",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r1-2026-10-09_2026-10-09_implementation_evidence.json": "d34d5a86c10bf946e0221abeaf2dcfc90b8e89738d408a34af769ad63deb18e4",
+      "reports/deferred/non_blocking/workingrcx-local-review-legacy-history-r1-2026-10-09_bridge_nonblockers.md": "449dfa2d26bf150d4954add9788ee0af447d7e2baa3056949ff2268e57738da3",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r2-2026-10-11_2026-10-11.md": "b7cdfbe85827acff26e782f661ac1a342c3f5e25c248f75e335189196de91565",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r2-2026-10-11_2026-10-11_implementation_evidence.json": "b468d0addcfc6318f34785bc1a7ebdf5cd8977a9e2fe129063f414672cefe570",
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r2-2026-10-11.json": "3a68b49c3f68c70e67dba1a21299fb96106c43e4521d36cdedb7ce089239f2db",
+      "mu/tools/executors/commit_executor.py": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+      "mu/tools/executors/local_review_history_recovery.py": "5ae90560a89352af405f24edd4616645fd4d45c4221a9a020d01327bff0ca912",
+      "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+      "mu/tests/tools/test_recovery_gate.py": "f891b33c7bcd28ec3791450b6aa8b5162d918ff02c4811c09bca9f339d5d4dc0",
+      "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r3-2026-10-11_2026-10-11.md": "d29437e24dfbdb1c03c62d5053350a42168dff7a84998a87338b53b2ff05e883",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r3-2026-10-11_2026-10-11_implementation_evidence.json": "690e56b75a8754e9215d612229a8f71f1e520336196be31a53273a65419f37e6",
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r3-2026-10-11.json": "382f12f74c1b2b4dd421f1d8134c6f8570f9a412daaddf300edabecb27a84d48",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r4-2026-10-12_2026-10-12.md": "7419347a78883eda39082ab90a7ee714215064bedb38fe57143d23a8c74a0b1e",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r4-2026-10-12_2026-10-12_implementation_evidence.json": "d5dc60ca940b2bbf022965d7072fa20097604901c554e203d4c01d488aebef61",
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r4-2026-10-12.json": "ceeba99b0f63400efe7134dca01f06d1ebf363b2bff0ecde8c812eb247c427e2",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md": "18af283d9c2cc565c35c9b57145cb923c14b40d65a64fce7b0a0f73e99416f66",
+      "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+      "mu/tools/hooks/pre-push-fast": "ce77d8aa4bec7e974182bec6d56ade8f90feac070a9fbd8953eee2e8923f619b",
+      "mu/tools/audits/audit_fast.sh": "1e2a82275ff455f15982eb6f4b5d58e2a487b2ccdb8fee161bcb88ceae221d22",
+      "mu/tests/tools/test_executor_dispatch.py": "fc6cbe681161802ad87a2d7fb0d83a735d0139412d1adb344293dff8dbbba90f",
+      "mu/tests/tools/test_commit_executor_local_review.py": "5c4ffcf83e3167779fb9a7bb4e934b2681fa417b8572f79737d0a0e4f6771035",
+      "mu/tests/tools/test_local_review_history_recovery.py": "329729d33caceac24f97219c97ea5446e6e97a2c35a873058b20b882139961a7",
+      "mu/tests/docs/test_growth_caps.py": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+      "pyproject.toml": "9d0a22e08a2793b19f10da839296d08ce2e569f7f4128153549734b756c84fa6",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12.md": "9bc238cfa51c6235b1b88ca611161d5934d79e5efc6d2d99c40378fceec3414e",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12_implementation_evidence.json": "fdb66657a7277e35b1cf0a38cfea5f9023cb8b8f5be317bfaa1df2ee77f0d56c",
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r6-2026-10-12.json": "b6f7b8fd2d997828dc281f62093210977f7d3273008c2ad167b9808dbfcd340e",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12.md": "8e47d294805c312efcc2f80db066a36a5be724a2b79fb854df06d9209f2e5d57",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12_implementation_evidence.json": "3f673e107d8833a598ccb5f48923ce78863c81bf809b71defbf7a8834426004b",
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r7-2026-10-12.json": "3e4417fd350f84680070e0f627af9c42790d4d74c0ea454d7d0819c1c6bed16b",
+      "mu/tools/docs/shared_doc_config.py": "7e136b491dae5f4663e13535bb7966bdd9fc6bc57c038476f2521a97e8423145",
+      "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+      "mu/tests/docs/conftest.py": "4d62f403f8709807293cb6b3d110eff9d56d877228d58064c017d36e03f61a42",
+      "mu/tests/tools/__init__.py": "3cf61e7d0cd96ce46e55c6a9bc3e713a23bc729d64cc577e959db005d1e843f4",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12.md": "821526a6ec980fbe48b1d443007fbc53a09e7498cb9b8d5d33abb3be9cb412ae",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12_implementation_evidence.json": "a44ed349276b05975ff5f0990651dcfb36b7ee5ad1c801d107e79e100103357f",
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r8-2026-10-12.json": "276c7e49a12c3dfb0836187044fc9e818e10b423a085892818fd5f34edc412fa",
+      "reports/control_plane/workingrcx-local-review-legacy-history-r9-2026-10-12_2026-10-12.md": "ac80807c68526821867ba4ae192a4d956e0f3a6f2e072901217c387030ed5ca2"
+    },
+    "old_authority_sha256": {
+      ".agent_bus-local-review-legacy-history-r2-20261011/bridge_config.json": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+      ".agent_bus-local-review-legacy-history-r2-20261011/recovery/recovery_status.json": "02717b785d96a7cb81c310ccf945fdae4e8994973aa4539dc16f99a3e7233fb7",
+      ".agent_bus-local-review-legacy-history-r2-20261011/recovery/recovery_log.json": "0db8b2defaaecb5861b93780071430a1e5933680edbc80d3c455aa19f34793eb",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/post_merge_routing.json": "bf7c61b268258ecfc02b409914702822b1dd86423ca42fdc570967af9c98b8da",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/launch_wave_dispatch_terminal.json": "d5b1e380edb2a2aa48a1bbfcf53f3d327b5d78bd1a2ac24e732aec92097aea53",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/pre_commit_receipt.json": "0596b2796daabe947449a0538e3527c737d107d07fdaf8b1a499230bbd8567fa",
+      ".agent_bus-local-review-legacy-history-r2-20261011/rendered/phase-b-r1-723deaba.md": "6aedcb65343a61b6c138b926899735c0c6870b31c001a149f322cd8081b72602",
+      ".agent_bus-local-review-legacy-history-r2-20261011/rendered/phase-a-r1-d6c6e596.md": "7492f4e05188aedcfb256e3a4470363ee6821f63a1c64ba7f9ebc22a61ccde59",
+      ".agent_bus-local-review-legacy-history-r2-20261011/executors/phase_b_handoff.json": "4a2e5d32e70871ef51db8de35db07285dafd7ade218405312b8a11e64b9f531b",
+      ".agent_bus-local-review-legacy-history-r2-20261011/raw/phase-a-r1-d6c6e596/phase-a-r1-d6c6e596--r1-reader-78df1ba0.txt": "c2daa28f19a02f5c8e94b461daff86c87c7d4fea0d9973253483c55611404859",
+      ".agent_bus-local-review-legacy-history-r2-20261011/raw/phase-a-r1-d6c6e596/phase-a-r1-d6c6e596--r1-reviewer-f2adb44a.txt": "49daff6e1ec7db2998da063f64fffa58d8996e8cf14dbc19be0507bb310e484d",
+      ".agent_bus-local-review-legacy-history-r2-20261011/raw/phase-b-r1-723deaba/phase-b-r1-723deaba--r1-reader-99ed6ab7.txt": "cd3a776672870be70040d8dee15029d1968f8e0374fddde126e4858b48cd7c0e",
+      ".agent_bus-local-review-legacy-history-r2-20261011/raw/phase-b-r1-723deaba/phase-b-r1-723deaba--r1-reviewer-1666a673.txt": "719999434e8372b9088e00517494d5e25db617ca3cbff4c2b99a7a33eb0b9af5",
+      ".agent_bus-local-review-legacy-history-r2-20261011/prompts/phase-a-r1-d6c6e596/phase-a-r1-d6c6e596--r1-reader-78df1ba0.txt": "bb20850449dda5e7aacc56bf2f74a5ec7e7450282778ac2af2cdbf62df039774",
+      ".agent_bus-local-review-legacy-history-r2-20261011/prompts/phase-a-r1-d6c6e596/phase-a-r1-d6c6e596--r1-reviewer-f2adb44a.txt": "fbd1b35ec73faf8270eaa1f33cfd4fb5517da8628ebc23b0beebad61f587c472",
+      ".agent_bus-local-review-legacy-history-r2-20261011/prompts/phase-b-r1-723deaba/phase-b-r1-723deaba--r1-reader-99ed6ab7.txt": "6d5fc24ef902524471a59f377671e110dd80f10fc7b4f30cd10bc6dec0794f32",
+      ".agent_bus-local-review-legacy-history-r2-20261011/prompts/phase-b-r1-723deaba/phase-b-r1-723deaba--r1-reviewer-1666a673.txt": "24c66efce26887aa9ff17a46ef4aedf54dd83895239f3bf6a612be18812017e3",
+      ".agent_bus-local-review-legacy-history-r2-20261011/validations/phase-b-r1-723deaba/phase-b-r1-723deaba--r1-reader-99ed6ab7/validation-1.txt": "7ee13bcb3336f7f4c081dbadf458bb21b5dee01478cedfca141842fa1782378b",
+      ".agent_bus-local-review-legacy-history-r2-20261011/validations/phase-b-r1-723deaba/phase-b-r1-723deaba--r1-reader-99ed6ab7/validation-2.txt": "8017ade16be0b6f476348512ec08874cb3a893e60f168cc8d8b3af9d8f1c1097",
+      ".agent_bus-local-review-legacy-history-r2-20261011/validations/phase-a-r1-d6c6e596/phase-a-r1-d6c6e596--r1-reader-78df1ba0/validation-1.txt": "02f3d919bb6f6b47a2d14aaf1c92c8233d67ff19ea6b522a052f85cb3b644133",
+      ".agent_bus-local-review-legacy-history-r2-20261011/validations/phase-a-r1-d6c6e596/phase-a-r1-d6c6e596--r1-reader-78df1ba0/validation-2.txt": "746bf63c5bd15ce9d58790a0ee27c3b1e26e1a9df4953eb05ec2bf2f5ac44ad4",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/candidate_authority/workingrcx-local-review-legacy-history-r2-2026-10-11.spec.json": "eca3b332edf05f281bffdd2a8fff9d9e9994930f4d0b09f2fe724d3b89275555",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/pre_commit_receipts/receipt_2026-10-12T01-29-43p00-00_a349549c.json": "0596b2796daabe947449a0538e3527c737d107d07fdaf8b1a499230bbd8567fa",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/pre_commit_receipts/receipt_2026-10-12T01-19-21p00-00_ecdbfc18.json": "2193a425698e598e9214ed6eb8bb89a41c79930dc4dc4f7869616309139cd200",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-d43f5aed--r1-meta.txt": "0006a3bafaf193e883b5b2294f92671a7734db480eac8aa4f3cd4015e9a90f7c",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-405c2ad1--r1-meta.txt": "574216d4c4e8ff3c23ee779e70c1f3b1a308f23105eec40e07b335a0b9fc0891",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-c49877a2--r1-meta.txt": "0006a3bafaf193e883b5b2294f92671a7734db480eac8aa4f3cd4015e9a90f7c",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-d43f5aed--r1-meta.txt": "3a3b60d157253e5e07a174261fe35a01bac865164a28e5531c753ab43443809f",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-405c2ad1--r1-meta.txt": "62b212f0b4baaea80d861e0c0d400f8ae919bb3b52e0e1c7c96b7021260dc7ca",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-c49877a2--r1-meta.txt": "a74778474ce70adf72d24392b6387813312d80f20fe200e4a3d7c14ab3e52dfe",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/candidate_authority_receipts/workingrcx-local-review-legacy-history-r2-2026-10-11/phase_b-bridge_pre_review.json": "f5cbaa3f9f6529c38b7408f99a2cd2619aa85886620dceb00ae3c480a8fd25e6",
+      ".agent_bus-local-review-legacy-history-r2-20261011/meta/candidate_authority_receipts/workingrcx-local-review-legacy-history-r2-2026-10-11/commit-pre-supervisor.json": "38144598a499d691d62c2bdf251f3ad956bb867e34467a1cf2319fcde42fe20f",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/post_merge_routing.json": "f1b3e8d8c18b9453619ccfb004f0d4370524c60145dbbea821e421eeb6888ab0",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/pre_commit_receipt.json": "c4539acee9f80163125c79ff765f26238c93b2e9d53c0d7261721c744127a523",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/candidate_authority/workingrcx-local-review-legacy-history-r3-2026-10-11.spec.json": "0af9a613b8a0cd888c2fbd03e77139ae4b9dec40e63abc64455871b3e8222bd6",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/pre_commit_receipts/receipt_2026-10-12T03-49-56p00-00_0483cac9.json": "c4539acee9f80163125c79ff765f26238c93b2e9d53c0d7261721c744127a523",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/pre_commit_receipts/receipt_2026-10-12T03-38-23p00-00_07a349c4.json": "d196e357dfc4b290dda54f9ef3b29b1042f03cb5a6096dfe9abebe2f026d9ef2",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-57b69c8c--r1-meta.txt": "d8fe8a6546c5ec970c3b1badc950422aac3b220a580b5bf28989a2cc1250ed8a",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-fd9a963d--r1-meta.txt": "d8fe8a6546c5ec970c3b1badc950422aac3b220a580b5bf28989a2cc1250ed8a",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-57b69c8c--r1-meta.txt": "a43dd655bbaf131884f468a241deb3ce74e353bb51dd2621c201f6a7a2131652",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-fd9a963d--r1-meta.txt": "ca7f96634e300aad269caa1eca7d31b94d355bfe1969cfe01808fbc7d67f55f9",
+      ".agent_bus-local-review-legacy-history-r3-20261011/meta/candidate_authority_receipts/workingrcx-local-review-legacy-history-r3-2026-10-11/phase_b-bridge_pre_review.json": "ec778edc9210226ab26143e4a8d1cac2dfef343466f3c1d3bd489b9146ec69d3",
+      ".agent_bus-local-review-legacy-history-r3-20261011/executors/phase_b_handoff.json": "2765995a4b8182777bb1b90f8260702dcf84b213fdbb4798e82745c68836945e",
+      ".agent_bus-local-review-legacy-history-r3-20261011/recovery/recovery_status.json": "3fcf63ca3420cac08a0375de1a8cf7e6e4066de97ae0774536e5fd9bfe6e6d0b",
+      ".agent_bus-local-review-legacy-history-r3-20261011/recovery/recovery_log.json": "3546023ef704348e6693463d6ce467939e4b79d4e043d528b39fdcd728267614",
+      ".agent_bus-local-review-legacy-history-r3-20261011/raw/phase-b-r1-615b4611/phase-b-r1-615b4611--r1-reviewer-ff66c810.txt": "db49e8e15283ac3c114bc8269a680ef4290829dbea10ff83bb3efc325e9e225e",
+      ".agent_bus-local-review-legacy-history-r3-20261011/raw/phase-b-r1-615b4611/phase-b-r1-615b4611--r1-reader-61f198ea.txt": "a490abd903f8c7682bcf912c9cc24754c40c2740ee5f4ad1f43a29c96b9380ef",
+      ".agent_bus-local-review-legacy-history-r3-20261011/raw/phase-a-r1-70c52e39/phase-a-r1-70c52e39--r1-reader-a8892c39.txt": "730f41347b1c68011ff7e793c79490f8ad14c92bf6358d9a55fe6e0171a359a2",
+      ".agent_bus-local-review-legacy-history-r3-20261011/raw/phase-a-r1-70c52e39/phase-a-r1-70c52e39--r1-reviewer-76dfdf9a.txt": "c5204780d3b05daf4d64cc9e832c30b678c08a1d46b3ad142f5cf387ce95cd59",
+      ".agent_bus-local-review-legacy-history-r3-20261011/prompts/phase-b-r1-615b4611/phase-b-r1-615b4611--r1-reviewer-ff66c810.txt": "82a3e9b2053a8e9e20e0412cb86edae944c363f9e2434d9d35c5939c6e9a4c88",
+      ".agent_bus-local-review-legacy-history-r3-20261011/prompts/phase-b-r1-615b4611/phase-b-r1-615b4611--r1-reader-61f198ea.txt": "44b104b21357923df046d4d2538ee12612c89da8528a7e76093de8c0797a3d02",
+      ".agent_bus-local-review-legacy-history-r3-20261011/prompts/phase-a-r1-70c52e39/phase-a-r1-70c52e39--r1-reader-a8892c39.txt": "94f3503c83fa8b6d8a1539d7bda6b91d1247364579101de215e4d2154e06317a",
+      ".agent_bus-local-review-legacy-history-r3-20261011/prompts/phase-a-r1-70c52e39/phase-a-r1-70c52e39--r1-reviewer-76dfdf9a.txt": "d89fd4afdb8c2602c9397dfb0094161b0a9e765fb9665e482821dc63d030a5bc",
+      ".agent_bus-local-review-legacy-history-r3-20261011/rendered/phase-b-r1-615b4611.md": "3d445f78ed2bfdb564eab800d55ce9bbf3514c686b25b7ec44b95a17aa7bd5f0",
+      ".agent_bus-local-review-legacy-history-r3-20261011/rendered/phase-a-r1-70c52e39.md": "2d6c737ee3936c29c5c42d19335adb931d037895feca722d7789f1d5afd17d2a",
+      ".agent_bus-local-review-legacy-history-r3-20261011/validations/phase-a-r1-70c52e39/phase-a-r1-70c52e39--r1-reader-a8892c39/validation-1.txt": "2a51334f49b9ce067fb4e34963bc3a548a9d50fbe8d7bc3cb2e2f2bf6afadced",
+      ".agent_bus-local-review-legacy-history-r3-20261011/validations/phase-a-r1-70c52e39/phase-a-r1-70c52e39--r1-reader-a8892c39/validation-2.txt": "ac1ce095d027dca2f0839382fe13b7386c338cc6705af4fb94076708d85c7ce6",
+      ".agent_bus-local-review-legacy-history-r3-20261011/validations/phase-b-r1-615b4611/phase-b-r1-615b4611--r1-reader-61f198ea/validation-1.txt": "640ef731e059cf1f98b32618442876d52349be31129bf203fc6a96fb9eccf018",
+      ".agent_bus-local-review-legacy-history-r3-20261011/validations/phase-b-r1-615b4611/phase-b-r1-615b4611--r1-reader-61f198ea/validation-2.txt": "81e731287f4ef2f05effcb56fb20752f54e70b3c8ccef014262b5c8800b6504d",
+      ".agent_bus-local-review-legacy-history-r3-20261011/bridge_config.json": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+      ".agent_bus-local-review-legacy-history-r4-20261012/meta/post_merge_routing.json": "53ebf3603dc0c422991a467f2170b955c12d3836ea1e3e36f59326b5445201c6",
+      ".agent_bus-local-review-legacy-history-r4-20261012/meta/candidate_authority/workingrcx-local-review-legacy-history-r4-2026-10-12.spec.json": "4c88528c76b14bf651b197b1a0570e9376287bad51c9a81440fca247fe9ac796",
+      ".agent_bus-local-review-legacy-history-r4-20261012/meta/candidate_authority_receipts/workingrcx-local-review-legacy-history-r4-2026-10-12/phase_b-bridge_pre_review.json": "76cbd43ab248b5315a935b6b8e811ea20aa6e37fc4c059601ec990082b1a251b",
+      ".agent_bus-local-review-legacy-history-r4-20261012/prompts/phase-a-r1-5f4c84ec/phase-a-r1-5f4c84ec--r1-reader-b55bee1c.txt": "c62a7566936338c6f5a003ab733c3b3f66a43289fa5570b6e4a7a83593146563",
+      ".agent_bus-local-review-legacy-history-r4-20261012/prompts/phase-a-r1-5f4c84ec/phase-a-r1-5f4c84ec--r1-reviewer-cf442124.txt": "23cb3e41d41b605b6f2e13d6b3b52b38cd3ffd12278a5474fdeecbc3aa42346c",
+      ".agent_bus-local-review-legacy-history-r4-20261012/prompts/phase-b-r1-ca97b425/phase-b-r1-ca97b425--r1-reviewer-0d84c389.txt": "a57f054f86f2bacd567e77b68178b72222451ae0159a09e0292eb5fe45cff972",
+      ".agent_bus-local-review-legacy-history-r4-20261012/prompts/phase-b-r1-ca97b425/phase-b-r1-ca97b425--r1-reader-81506257.txt": "2d256c93c32d9533d3f47cb88b67a7c310eec17da40f3fe8fe0c3daec3aa79fd",
+      ".agent_bus-local-review-legacy-history-r4-20261012/raw/phase-a-r1-5f4c84ec/phase-a-r1-5f4c84ec--r1-reader-b55bee1c.txt": "fd089f68f4c1c8eceea2ac7b20fb1abf646f7ded68f68cf3832ea9f50c98fa7c",
+      ".agent_bus-local-review-legacy-history-r4-20261012/raw/phase-a-r1-5f4c84ec/phase-a-r1-5f4c84ec--r1-reviewer-cf442124.txt": "fbae6041e524423862ba571639d11ca991a60d535a44b16a77e83049cbc6def4",
+      ".agent_bus-local-review-legacy-history-r4-20261012/raw/phase-b-r1-ca97b425/phase-b-r1-ca97b425--r1-reviewer-0d84c389.txt": "8c5f1ea927079c3b6d9a4249d242ee5c164bf173dfbaf1e61417527c1d119f30",
+      ".agent_bus-local-review-legacy-history-r4-20261012/raw/phase-b-r1-ca97b425/phase-b-r1-ca97b425--r1-reader-81506257.txt": "721bef94b217301693f686a3d31050616ede743ac59336d1ae1485a00b04fead",
+      ".agent_bus-local-review-legacy-history-r4-20261012/rendered/phase-b-r1-ca97b425.md": "0ffbc0ec83a5ebf787eee7073d1a70a939d01e9180174c6283b8b68f3bb03696",
+      ".agent_bus-local-review-legacy-history-r4-20261012/rendered/phase-a-r1-5f4c84ec.md": "4d6f945299d551e54077813cffc743d20bc7a4053ea87eaf8d58bd358910f5a6",
+      ".agent_bus-local-review-legacy-history-r4-20261012/validations/phase-b-r1-ca97b425/phase-b-r1-ca97b425--r1-reader-81506257/validation-1.txt": "db849055890dc7a0e9987e5ded17fe6b74a82352ae040ec2bac2a8650056b4a9",
+      ".agent_bus-local-review-legacy-history-r4-20261012/validations/phase-b-r1-ca97b425/phase-b-r1-ca97b425--r1-reader-81506257/validation-2.txt": "8acf0c4ba1f737f40cba4498d1461576c58f3445af22c2086e7348eb485c55e8",
+      ".agent_bus-local-review-legacy-history-r4-20261012/validations/phase-a-r1-5f4c84ec/phase-a-r1-5f4c84ec--r1-reader-b55bee1c/validation-1.txt": "07d897287cb5de361f30aec14298611a51e2acd901432a9fb747767975b3f13f",
+      ".agent_bus-local-review-legacy-history-r4-20261012/validations/phase-a-r1-5f4c84ec/phase-a-r1-5f4c84ec--r1-reader-b55bee1c/validation-2.txt": "81e731287f4ef2f05effcb56fb20752f54e70b3c8ccef014262b5c8800b6504d",
+      ".agent_bus-local-review-legacy-history-r4-20261012/recovery/recovery_status.json": "7695a51519464ad04ec21cc3753529cdee9c56b4ec5509c54df98d2be2f26eb4",
+      ".agent_bus-local-review-legacy-history-r4-20261012/recovery/recovery_log.json": "89bd822fd4a81bf796fd0f6a05feb4c201daa5ae05146903c1d1ebdc65d5ff58",
+      ".agent_bus-local-review-legacy-history-r5-20261012/executors/phase_b_handoff.json": "0c8761853776ee763236ec1427359b7a00022645e8262b5702bd56f6ee5fa8c2",
+      ".agent_bus-local-review-legacy-history-r5-20261012/executors/commit_executor_workingrcx-local-review-legacy-history-r5-2026-10-12.json": "69d3a67797e9481573669881cbddba035a80974188b7888604c9feaa6a2e8b02",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/post_merge_routing.json": "c620d51618be55313b0052e4d004c41190ff5629333f03b79f6675e6c4cff0b4",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/pre_commit_receipt.json": "c57cfd8e24d7edef2000dc35f1cf52bb1305235c70fc9ce254720a131784e439",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/candidate_authority/workingrcx-local-review-legacy-history-r5-2026-10-12.spec.json": "9774ae7aaaef894fdf37db4e549470d0beb7384b7c28300411abfb8c0395e12e",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/pre_commit_receipts/receipt_2026-10-12T06-35-03p00-00_9553c2f0.json": "c57cfd8e24d7edef2000dc35f1cf52bb1305235c70fc9ce254720a131784e439",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/pre_commit_receipts/receipt_2026-10-12T06-03-57p00-00_0f3649fd.json": "21fc169442af32ba70c9f0daffaeb4c9f6f0a3bbc53c4bc4099cc232c44fcbba",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/pre_commit_receipts/receipt_2026-10-12T06-15-33p00-00_34658b42.json": "150e512f1cc39205db1e1fdc0c736e44f3babc8cda20e21f6080dcfaab86e949",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/pre_commit_receipts/receipt_2026-10-12T05-51-49p00-00_b060721d.json": "dab4c1ab94f321f28c65c3e51d6aef7d1b5561219405d71905fa4b7dad1f90cb",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-3187d4bc--r1-meta.txt": "95a541e25a8ee437109bd0b6f908415b03e73d4690bf232da47cd2d722f8b035",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-97cc2905--r1-meta.txt": "95a541e25a8ee437109bd0b6f908415b03e73d4690bf232da47cd2d722f8b035",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-65d510ac--r1-meta.txt": "a4c7e983118ad5af69cd8efc97ce2506c06c95f439854debde40ad838c4f7357",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-c017aa84--r1-meta.txt": "f0213633942e06d57e9ca273a205dc7a2765a3d34e3445b8aa31bb00e38591ff",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-3187d4bc--r1-meta.txt": "38b2ce340d48bbd0dc1ea428e9f8f2d97796be6ee45fc05a68704579df578142",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-97cc2905--r1-meta.txt": "4899b81b8434c3e1c78dce641fbc5bba9b3a687c4621af97f50f4eae29ec452e",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-65d510ac--r1-meta.txt": "93519337795cfb80214cbf5f34a5a2fa0213594141497cafd4faa739c0885d62",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-c017aa84--r1-meta.txt": "749e146749c909badfde4081ffbe7e3381dbd74adec8e000d31f90f127ce822f",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/candidate_authority_receipts/workingrcx-local-review-legacy-history-r5-2026-10-12/phase_b-bridge_pre_review.json": "07ff5ede2161307e609eff3b43628a3a7f1f922863213cbe407315a14cfc1dc9",
+      ".agent_bus-local-review-legacy-history-r5-20261012/meta/candidate_authority_receipts/workingrcx-local-review-legacy-history-r5-2026-10-12/commit-pre-supervisor.json": "7b9d4d4115223066d1f51d0b63634edea4d61484ab94333aa1241b691fc2d38e",
+      ".agent_bus-local-review-legacy-history-r5-20261012/recovery/recovery_status.json": "f80ad3e3db40ea876380ea2ddff66e355596af4a0dbfeea62aead0bb59c90190",
+      ".agent_bus-local-review-legacy-history-r5-20261012/recovery/recovery_log.json": "e61ceebca20ae67263e17caf9cad754c4d4595b6ea3719f17eb7dff1d898bd65",
+      ".agent_bus/meta/local_pr_review_admissions/legacy_interruptions/local-pr-review-a705c468d1154ffa8364ac2b595f39d5.intent.json": "9bc42fa40dc0d07d5c628b47a59fd143f494a5fcc67e1a80e437cc842cdc15f5",
+      ".agent_bus/meta/local_pr_review_admissions/legacy_interruptions/local-pr-review-a705c468d1154ffa8364ac2b595f39d5.published.json": "3974dbe9cb17f74204e3f1dcdf8b58353461f742e21367ce538e496090ee76ca",
+      ".agent_bus-local-review-legacy-history-r6-20261012/bridge_config.json": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+      ".agent_bus-local-review-legacy-history-r6-20261012/bridge.db": "d5c10d85d43541eeb0de8e4a36b57d73cd99369829ccc2e8f51571588c4ff77e",
+      ".agent_bus-local-review-legacy-history-r6-20261012/bridge.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ".agent_bus-local-review-legacy-history-r6-20261012/raw/phase-a-r1-80f401f0/phase-a-r1-80f401f0--r1-reader-1ccfb050.txt": "6ab2c5b022db6b7599af6156a4491494cb4298a882bdd60432e41b6b926662c0",
+      ".agent_bus-local-review-legacy-history-r6-20261012/raw/phase-a-r1-80f401f0/phase-a-r1-80f401f0--r1-reviewer-f7e8d87c.txt": "517c63cbbd4b4601621c722b9ea67d8a8ee8d2ae99c72531d054e31ff0cddac3",
+      ".agent_bus-local-review-legacy-history-r6-20261012/raw/phase-b-r1-d1c9076b/phase-b-r1-d1c9076b--r1-reviewer-bcf32d95.txt": "dc95578743a270285e3a78addd73a22130e78a3ecc7c7c65be4f36363cfb9b7e",
+      ".agent_bus-local-review-legacy-history-r6-20261012/raw/phase-b-r1-d1c9076b/phase-b-r1-d1c9076b--r1-reader-a062ad66.txt": "3e04a588a9916eed4d2604ef77043c93428a980f5f2ec3e3e146cff298a30155",
+      ".agent_bus-local-review-legacy-history-r6-20261012/prompts/phase-a-r1-80f401f0/phase-a-r1-80f401f0--r1-reader-1ccfb050.txt": "c2b6d317281f926dc3f82b3550384ad36a149f016faeaf72ecd2850191d1cad5",
+      ".agent_bus-local-review-legacy-history-r6-20261012/prompts/phase-a-r1-80f401f0/phase-a-r1-80f401f0--r1-reviewer-f7e8d87c.txt": "b98e54d60cd5a56862d377875ef31f768954e00b601fc0677c17995d65a771fb",
+      ".agent_bus-local-review-legacy-history-r6-20261012/prompts/phase-b-r1-d1c9076b/phase-b-r1-d1c9076b--r1-reviewer-bcf32d95.txt": "f810498a85224519bf3f5f13dab2724adef3829ea8e3880482c1072d8de04c3a",
+      ".agent_bus-local-review-legacy-history-r6-20261012/prompts/phase-b-r1-d1c9076b/phase-b-r1-d1c9076b--r1-reader-a062ad66.txt": "edf2f72e34c35fdd6c76eea2723ba7d7f2741882bfa239cbf138935759cccb21",
+      ".agent_bus-local-review-legacy-history-r6-20261012/rendered/phase-b-r1-d1c9076b.md": "e7f87250dcd6df0b374afa98018fcd8f8ec05ece980f3ad2196b3bf2b94911ef",
+      ".agent_bus-local-review-legacy-history-r6-20261012/rendered/phase-a-r1-80f401f0.md": "a0d329db46c120c9482ba276a09b9259e64d7eb7d4b394bb43f49426fdaf2a4d",
+      ".agent_bus-local-review-legacy-history-r6-20261012/validations/phase-b-r1-d1c9076b/phase-b-r1-d1c9076b--r1-reader-a062ad66/validation-1.txt": "0fd384fdfedb1b824377e6ada5836fbe49af68d87c56b0c3f3929d730c9f7acb",
+      ".agent_bus-local-review-legacy-history-r6-20261012/validations/phase-b-r1-d1c9076b/phase-b-r1-d1c9076b--r1-reader-a062ad66/validation-2.txt": "acf6b47f55922b699603ddfe0fa16212a566b50cf7b148640838d5ffb3d4fb58",
+      ".agent_bus-local-review-legacy-history-r6-20261012/validations/phase-a-r1-80f401f0/phase-a-r1-80f401f0--r1-reader-1ccfb050/validation-1.txt": "8a5da3de35e1a29bd0ea3a370372915e46a90b9def1c43765d26e429bc3b4c35",
+      ".agent_bus-local-review-legacy-history-r6-20261012/validations/phase-a-r1-80f401f0/phase-a-r1-80f401f0--r1-reader-1ccfb050/validation-2.txt": "0761d7a07e1ade2ab28b6a5d8dafbc661197669c632e0b502970813eb19564da",
+      ".agent_bus-local-review-legacy-history-r6-20261012/meta/post_merge_routing.json": "fa79896f5b99fd6e5b4af3c7722009e767a5e47ef31d796b3dd9fbe36c185f3c",
+      ".agent_bus-local-review-legacy-history-r6-20261012/meta/launch_wave_dispatch_terminal.json": "bd3402d633ddba0dbddbd8d604243470782ceb59938ae71e284690e8aab9566e",
+      ".agent_bus-local-review-legacy-history-r6-20261012/meta/candidate_authority/workingrcx-local-review-legacy-history-r6-2026-10-12.spec.json": "25f9eba121b558ba5291515077f6b516bbd851e4b492cc359f78f6f2c6ef93a1",
+      ".agent_bus-local-review-legacy-history-r6-20261012/meta/candidate_authority_receipts/workingrcx-local-review-legacy-history-r6-2026-10-12/phase_b-bridge_pre_review.json": "89af35d5aa8fcf9d1c5e76b4936064806757b76c8afb36695cf2da64a9c8e568",
+      ".agent_bus-local-review-legacy-history-r6-20261012/executors/phase_b_state.json": "3a4dcc1ef8bd29e46594e0dbb991d62af04aeec1a47583f027e71100fc05e842",
+      ".agent_bus-local-review-legacy-history-r7-20261012/raw/phase-a-r1-2e563eab/phase-a-r1-2e563eab--r1-reader-433c1574.txt": "1b05374427c972aca20d91a16af683426785f3563a9b7ff564a5038ebf59fe36",
+      ".agent_bus-local-review-legacy-history-r7-20261012/rendered/phase-a-r1-2e563eab.md": "244e289b46238bda7f30408eed8257a8f130821b3b2facdc142b1e3c49558c64",
+      ".agent_bus-local-review-legacy-history-r7-20261012/rendered/phase-b-r1-922f17a0.md": "8470beefe6ec3c32cce7fe78ba5e4bf614345106bfa179cd29f86d12ae4b1b62",
+      ".agent_bus-local-review-legacy-history-r7-20261012/validations/phase-b-r2-a4e86c6b/phase-b-r2-a4e86c6b--r1-reader-e29400c6/validation-2.txt": "4c833d75a1255a606830c000ac7822268e7e1456ef046d38b20eb90d8fb260cb",
+      ".agent_bus-local-review-legacy-history-r7-20261012/raw/phase-b-r2-a4e86c6b/phase-b-r2-a4e86c6b--r1-reviewer-23cf1835.txt": "60ad1f2e5fc6809250f5339abf49b69fd603476883cc951759985fb5f93b88d4",
+      ".agent_bus-local-review-legacy-history-r7-20261012/validations/phase-b-r1-922f17a0/phase-b-r1-922f17a0--r1-reader-d0a851dc/validation-2.txt": "4c833d75a1255a606830c000ac7822268e7e1456ef046d38b20eb90d8fb260cb",
+      ".agent_bus-local-review-legacy-history-r7-20261012/validations/phase-b-r1-922f17a0/phase-b-r1-922f17a0--r1-reader-d0a851dc/validation-1.txt": "a43a171f0458874f65bf240e58e63f7d53b6c5ce2bf056ab6e61df493098db4a",
+      ".agent_bus-local-review-legacy-history-r7-20261012/bridge.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ".agent_bus-local-review-legacy-history-r7-20261012/rendered/phase-b-r2-a4e86c6b.md": "0dcb1df2cdd1869f44d35eae13c548cd66fbba1b79f5939cf66d918579dbb45e",
+      ".agent_bus-local-review-legacy-history-r7-20261012/prompts/phase-a-r1-2e563eab/phase-a-r1-2e563eab--r1-reviewer-950a5bdc.txt": "54529b6f07d716325095117ef45afa5bb7da7485372244f53300e9f1cd92caa1",
+      ".agent_bus-local-review-legacy-history-r7-20261012/recovery/recovery_status.json": "6b2f3c590fb2f1bd3e871e1d6379b2fec010c4b40a23e7bd1c0051004bb37085",
+      ".agent_bus-local-review-legacy-history-r7-20261012/bridge_config.json": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+      ".agent_bus-local-review-legacy-history-r7-20261012/meta/candidate_authority_receipts/workingrcx-local-review-legacy-history-r7-2026-10-12/phase_b-bridge_pre_review.json": "f6bf2b4136f35fbcdbfd5667eb27e27c61a14dad64ebc95ef61e9b677d51f8fa",
+      ".agent_bus-local-review-legacy-history-r7-20261012/validations/phase-a-r1-2e563eab/phase-a-r1-2e563eab--r1-reader-433c1574/validation-1.txt": "b4c5f19342200ad546cbd38b7be3f2c936278f408b512f651d6aea03d1b0c912",
+      ".agent_bus-local-review-legacy-history-r7-20261012/prompts/phase-a-r1-2e563eab/phase-a-r1-2e563eab--r1-reader-433c1574.txt": "1d56002cc647731f4f6ed6351cd0b2fad4df242a3d852a77dace4cd21841e39c",
+      ".agent_bus-local-review-legacy-history-r7-20261012/prompts/phase-b-r2-a4e86c6b/phase-b-r2-a4e86c6b--r1-reader-e29400c6.txt": "56d734d47fc73a7844b20b20a678aa949ba1cf30953be7fa938a586b72fcbb52",
+      ".agent_bus-local-review-legacy-history-r7-20261012/bridge.db": "143fefcd4e18255d8213501382a3f2d1f523f9d92f13aeeb75cac819dd65110a",
+      ".agent_bus-local-review-legacy-history-r7-20261012/validations/phase-a-r1-2e563eab/phase-a-r1-2e563eab--r1-reader-433c1574/validation-2.txt": "d5c4050f07ba65f10963d8ee32e417f0d03623dceafcf089548ca6aafcfa377e",
+      ".agent_bus-local-review-legacy-history-r7-20261012/recovery/recovery_log.json": "f27ff04ed8a5223adfbb14417fb2243b5431e74d825496e8a4d60cd467f56499",
+      ".agent_bus-local-review-legacy-history-r7-20261012/meta/candidate_authority/workingrcx-local-review-legacy-history-r7-2026-10-12.spec.json": "a29ea69b242c24a2273e666f30497e5986bce81010b70a2044966f59882fbba1",
+      ".agent_bus-local-review-legacy-history-r7-20261012/raw/phase-b-r1-922f17a0/phase-b-r1-922f17a0--r1-reader-d0a851dc.txt": "8025143de28ceefd165f7f5fcc34fd2b100559b053b047932da2572ec153a71e",
+      ".agent_bus-local-review-legacy-history-r7-20261012/raw/phase-a-r1-2e563eab/phase-a-r1-2e563eab--r1-reviewer-950a5bdc.txt": "8579ea41c0757f56cdd1e61c7a53be244747998528e7a5b1694b2d81ef22825d",
+      ".agent_bus-local-review-legacy-history-r7-20261012/meta/post_merge_routing.json": "cc8154138433ec1205c49a73f1608b9dbfd337e202332483adb693f7129554d8",
+      ".agent_bus-local-review-legacy-history-r7-20261012/prompts/phase-b-r2-a4e86c6b/phase-b-r2-a4e86c6b--r1-reviewer-23cf1835.txt": "5090c5ade2b987e5884c4c15e4c12fa8d01e3690ea3bec557ee734589997d78d",
+      ".agent_bus-local-review-legacy-history-r7-20261012/raw/phase-b-r2-a4e86c6b/phase-b-r2-a4e86c6b--r1-reader-e29400c6.txt": "cda5e273b22819125a3cd0d3a4b28478db0829466b70f8610427f3ed28458bfc",
+      ".agent_bus-local-review-legacy-history-r7-20261012/validations/phase-b-r2-a4e86c6b/phase-b-r2-a4e86c6b--r1-reader-e29400c6/validation-1.txt": "a43a171f0458874f65bf240e58e63f7d53b6c5ce2bf056ab6e61df493098db4a",
+      ".agent_bus-local-review-legacy-history-r7-20261012/raw/phase-b-r1-922f17a0/phase-b-r1-922f17a0--r1-reviewer-8556e304.txt": "986433d09b8a4cc18cdacf735271893e2f2bd3a35240017d3ad135923d87f33a",
+      ".agent_bus-local-review-legacy-history-r7-20261012/prompts/phase-b-r1-922f17a0/phase-b-r1-922f17a0--r1-reviewer-8556e304.txt": "b803120e647c052789f97d0f10587edd169220ba22c082dfbb0ad1b4ca82ddd6",
+      ".agent_bus-local-review-legacy-history-r7-20261012/prompts/phase-b-r1-922f17a0/phase-b-r1-922f17a0--r1-reader-d0a851dc.txt": "bed2365e819fd61b007f64c2f517ff56e80ccf107d1d204e24abc4b393c1fe6d",
+      ".agent_bus-local-review-legacy-history-r8-20261012/bridge_config.json": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+      ".agent_bus-local-review-legacy-history-r8-20261012/bridge.db": "10980a245ac2dedbd936996c3002611d53ea793e83071848ad16d98dbe15e40a",
+      ".agent_bus-local-review-legacy-history-r8-20261012/bridge.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ".agent_bus-local-review-legacy-history-r8-20261012/recovery/recovery_status.json": "3e2a09aabaa43ca0247fb1934e11e5ce77273bf49b3dbcd23393a01947154dd8",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/meta_bridge.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/post_merge_routing.json": "85085e05506d5fc7e1ecd3df3e7c12b4f41857ce8b1806743ac5b4fdbf26bc20",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/pre_commit_receipt.json": "2999a36458e96391700f25385ab8b5e5767b222ad90301d1c7aeb141b700730c",
+      ".agent_bus-local-review-legacy-history-r8-20261012/observability/pipeline_agent_pager_state.json": "7ee9449df9966f5a0ca3555e25de8f564983707f66e82745adb1970a7b68915f",
+      ".agent_bus-local-review-legacy-history-r8-20261012/observability/pipeline_agent_pager.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ".agent_bus-local-review-legacy-history-r8-20261012/observability/pipeline_agent_delivery_receipts.jsonl": "b4c6f7607f115ac609b7200de2c3fcedc687a7978261db47469919e4c7650343",
+      ".agent_bus-local-review-legacy-history-r8-20261012/observability/pipeline_agent_events.jsonl": "460297d796a3a5ac774f933a701adf4f99869dfbc28c535674929142ddd76f42",
+      ".agent_bus-local-review-legacy-history-r8-20261012/rendered/phase-a-r1-b9f3a211.md": "01b15147bc1fa9d8c5a6630cd48140df39fbdd918c42667e370edeeb41e2db3d",
+      ".agent_bus-local-review-legacy-history-r8-20261012/rendered/phase-b-r1-ceeb629b.md": "f4d8ce9f1212f1f578bdf715de2269fc4a1e9fa405ca14db4c4a2df283e76075",
+      ".agent_bus-local-review-legacy-history-r8-20261012/executors/phase_b_handoff.json": "0470317f940c2c50a0b3c004a089c5cb1304bdb7570eb3c457defd62241e122c",
+      ".agent_bus-local-review-legacy-history-r8-20261012/raw/phase-a-r1-b9f3a211/phase-a-r1-b9f3a211--r1-reviewer-cb21f6a4.txt": "19b156a1267189e492c4a9019cf4dd19e04b85cd320d38cff323d1591e426a7b",
+      ".agent_bus-local-review-legacy-history-r8-20261012/raw/phase-a-r1-b9f3a211/phase-a-r1-b9f3a211--r1-reader-caac5bcf.txt": "d6f1d8388a0a96b3bfc19152cbcdb9b457965ff98e6f88456be842445e2107df",
+      ".agent_bus-local-review-legacy-history-r8-20261012/raw/phase-b-r1-ceeb629b/phase-b-r1-ceeb629b--r1-reviewer-d46ce4e7.txt": "82536a94aa1c2073a29943028c7942341e46928b2df6e2a082f6016f5201f11a",
+      ".agent_bus-local-review-legacy-history-r8-20261012/raw/phase-b-r1-ceeb629b/phase-b-r1-ceeb629b--r1-reader-1d4e6f0f.txt": "76e24cd17ccaaaa50e9272c5a6cbc958647398e83244b4e4d75c9e3ad27fdb20",
+      ".agent_bus-local-review-legacy-history-r8-20261012/prompts/phase-a-r1-b9f3a211/phase-a-r1-b9f3a211--r1-reviewer-cb21f6a4.txt": "ea33f69c7bf1aa70251847fa573fda9a1a5406ec1c2116280789e56d06bec108",
+      ".agent_bus-local-review-legacy-history-r8-20261012/prompts/phase-a-r1-b9f3a211/phase-a-r1-b9f3a211--r1-reader-caac5bcf.txt": "2937af105d4c66fbdcde65737e81727be9c72d2fe3dab3e07a1d8a7abb6d15b8",
+      ".agent_bus-local-review-legacy-history-r8-20261012/prompts/phase-b-r1-ceeb629b/phase-b-r1-ceeb629b--r1-reviewer-d46ce4e7.txt": "663e208caeced031e5f4a96a16c8de9a63f2d03bfe01de92b3002e905f8e6bc9",
+      ".agent_bus-local-review-legacy-history-r8-20261012/prompts/phase-b-r1-ceeb629b/phase-b-r1-ceeb629b--r1-reader-1d4e6f0f.txt": "098f38c1efd7636f54900892d592bed9828c87f41aab9bf616fb8b3286000ddb",
+      ".agent_bus-local-review-legacy-history-r8-20261012/validations/phase-b-r1-ceeb629b/phase-b-r1-ceeb629b--r1-reader-1d4e6f0f/validation-1.txt": "ad0a5f9988cc1f9e1cef9d4508e8c35b50f786c9e7190e1e680de73392325c38",
+      ".agent_bus-local-review-legacy-history-r8-20261012/validations/phase-b-r1-ceeb629b/phase-b-r1-ceeb629b--r1-reader-1d4e6f0f/validation-2.txt": "e73188e9983262600f41040b3a479cc21fba5d47ccc149e2833bd217da7a9d47",
+      ".agent_bus-local-review-legacy-history-r8-20261012/validations/phase-a-r1-b9f3a211/phase-a-r1-b9f3a211--r1-reader-caac5bcf/validation-1.txt": "cc9b5e864d13f49dc7959fa2e3160c4ec9ffbee6a2195be59ef606ce8e96fa00",
+      ".agent_bus-local-review-legacy-history-r8-20261012/validations/phase-a-r1-b9f3a211/phase-a-r1-b9f3a211--r1-reader-caac5bcf/validation-2.txt": "c1db04a74540e1370476e3591685f486e824b13646a5431830829fc0e02da09a",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/candidate_authority/workingrcx-local-review-legacy-history-r8-2026-10-12.spec.json": "05a89dd61a31179c853576d2e4c33ce2d852da6c93f076872686b694e111f652",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/pre_commit_receipts/receipt_2026-10-12T10-41-01p00-00_eaaf6245.json": "2999a36458e96391700f25385ab8b5e5767b222ad90301d1c7aeb141b700730c",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/pre_commit_receipts/receipt_2026-10-12T10-35-18p00-00_682d9459.json": "80c2394b6f5050c79845757347e625fce21fd5b26f19f0208c9534d099d9ee06",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-76c35106--r1-meta.txt": "70381d2e24761c68d08c0db919b067f88da8a06fc72398b90e0c9c15e61e9e6b",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-6737aa53--r1-meta.txt": "70381d2e24761c68d08c0db919b067f88da8a06fc72398b90e0c9c15e61e9e6b",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-76c35106--r1-meta.txt": "cbd3e66335fdf77332ca35b6e512e778116fa97923313da9e87618e18f1d6664",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-6737aa53--r1-meta.txt": "93d93699f58d043fbbe6fc69b78b9ce26d819935662770c0518eb9bc8eb9a2e8",
+      ".agent_bus-local-review-legacy-history-r8-20261012/meta/candidate_authority_receipts/workingrcx-local-review-legacy-history-r8-2026-10-12/phase_b-bridge_pre_review.json": "0a89deb212d1a64dd13b027c48a0c3bfa4b9e0e3f36641c9fb3f4997d30d37e3",
+      ".agent_bus-local-review-legacy-history-r9-20261012/bridge_config.json": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+      ".agent_bus-local-review-legacy-history-r9-20261012/bridge.db": "885919c3a78f77637a269a27812836286e4b527407d7f79892260a124429782b",
+      ".agent_bus-local-review-legacy-history-r9-20261012/bridge.db-shm": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+      ".agent_bus-local-review-legacy-history-r9-20261012/bridge.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ".agent_bus-local-review-legacy-history-r9-20261012/bridge.db-wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ".agent_bus-local-review-legacy-history-r9-20261012/recovery/recovery_status.json": "c8f6a7d483ea8f84ecd34c845d921ba40725b5f57edc1f61948de8a606c28ffc",
+      ".agent_bus-local-review-legacy-history-r9-20261012/recovery/recovery_log.json": "21a957b897d0d06cb2588660f805bde898250bc246209302e0d4898e397ca2ea",
+      ".agent_bus-local-review-legacy-history-r9-20261012/meta/post_merge_routing.json": "0b481c48db063bf1f701c3f50ca52632a76dccdc180b37a0d1b742105be64d19",
+      ".agent_bus-local-review-legacy-history-r9-20261012/observability/pipeline_agent_pager_state.json": "cb2baf3eea9efe8b8eab5ddece1734b19c03c0119bcdd22a6172e3c9cd499009",
+      ".agent_bus-local-review-legacy-history-r9-20261012/observability/pipeline_agent_pager.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      ".agent_bus-local-review-legacy-history-r9-20261012/observability/pipeline_agent_delivery_receipts.jsonl": "60d1cfa834927778f2787f85fa8a6ca513095601f2f5a05152855c29ed0260d5",
+      ".agent_bus-local-review-legacy-history-r9-20261012/observability/pipeline_agent_events.jsonl": "b5633a44fdebc16694ffb9fbbc7dc2617fbefb16a7f4307879e9db38667b875e",
+      ".agent_bus-local-review-legacy-history-r9-20261012/rendered/phase-a-r1-a5886c6b.md": "de8be0f4ee8891a9ed53d33698869fbc321b9b7e188ad867f1a3a1c78bbae9db",
+      ".agent_bus-local-review-legacy-history-r9-20261012/raw/phase-a-r1-a5886c6b/phase-a-r1-a5886c6b--r1-reader-689feb78.txt": "464de2926c79df91f3843fb6fd477e8bc859174ecb8b1224ca2628f5bb6c1f68",
+      ".agent_bus-local-review-legacy-history-r9-20261012/raw/phase-a-r1-a5886c6b/phase-a-r1-a5886c6b--r1-reviewer-2ce23ae9.txt": "dfa20607de6308183ab5c86b07b21fb76bc6767770ffade7e541e35202b0a783",
+      ".agent_bus-local-review-legacy-history-r9-20261012/prompts/phase-a-r1-a5886c6b/phase-a-r1-a5886c6b--r1-reader-689feb78.txt": "907a547e62a1e32a1113507a63c4dac6ffe9ec5bcb7265fda9d31e22609b0a61",
+      ".agent_bus-local-review-legacy-history-r9-20261012/prompts/phase-a-r1-a5886c6b/phase-a-r1-a5886c6b--r1-reviewer-2ce23ae9.txt": "878436650f4f6486a23ab33c6090385bb85366d89c3bd164e4b01afb536147ad",
+      ".agent_bus-local-review-legacy-history-r9-20261012/validations/phase-a-r1-a5886c6b/phase-a-r1-a5886c6b--r1-reader-689feb78/validation-1.txt": "8b76e566f98172c5929a4eff7da65fc6d49323ecafb528871617f150eca6f9be",
+      ".agent_bus-local-review-legacy-history-r9-20261012/validations/phase-a-r1-a5886c6b/phase-a-r1-a5886c6b--r1-reader-689feb78/validation-2.txt": "746bf63c5bd15ce9d58790a0ee27c3b1e26e1a9df4953eb05ec2bf2f5ac44ad4",
+      ".agent_bus-local-review-legacy-history-r9-20261012/meta/candidate_authority/workingrcx-local-review-legacy-history-r9-2026-10-12.spec.json": "e6fc5f2c0c5ae1d97ca9de0ead37eac06f3827174eb7ad3c1cee761d97e86d32"
+    },
+    "old_authority_absent": [
+      ".agent_bus-local-review-legacy-history-r7-20261012/executors/phase_b_state.json",
+      ".agent_bus-local-review-legacy-history-r8-20261012/executors/phase_b_state.json",
+      ".agent_bus-local-review-legacy-history-r9-20261012/executors/phase_a_state.json",
+      ".agent_bus-local-review-legacy-history-r9-20261012/executors/phase_b_state.json"
+    ],
+    "baseline": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/baseline.json",
+      "sha256": "a6eca85daba8cb7e27e62ff94dab7727821513565c436710f47ab522b5c15b08",
+      "bytes": 541976
+    },
+    "inherited_approval": false
+  },
+  "canonical_tracker_authority": {
+    "path": "TASKS.md",
+    "note": "Tracker sync note (2026-10-12, workingrcx-local-review-legacy-history-r10-2026-10-12)",
+    "note_edited": false,
+    "l4_class": "L4_ENABLER",
+    "target_gate_id": "G8",
+    "founder_override": "workingrcx-local-review-legacy-history-r10-2026-10-12"
+  },
+  "validation_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider tests/docs/test_growth_caps.py tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py tests/tools/test_executor_dispatch.py tests/tools/test_commit_executor_local_review.py --tb=long",
+  "validation_result": {
+    "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider tests/docs/test_growth_caps.py tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py tests/tools/test_executor_dispatch.py tests/tools/test_commit_executor_local_review.py --tb=long",
+    "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+    "started_utc": "2026-10-12T19:33:43.505580+00:00",
+    "environment_pins": {
+      "PYTHONHASHSEED": "0",
+      "RCX_CI": "1",
+      "HYPOTHESIS_PROFILE": "ci_fast",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "inherited_environment": {
+      "PYTEST_ADDOPTS": null,
+      "PYTHONPATH": null,
+      "PATH": "/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex-path:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.bun/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.codeium/windsurf/bin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.elan/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/TeX/texbin:/Users/jeffabrams/.codex/tmp/arg0/codex-arg0X1AExB:/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex-path:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.bun/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.codeium/windsurf/bin:/Users/jeffabrams/.elan/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/Users/jeffabrams/.codex/tmp/arg0/codex-arg0dG9ltv:/Users/jeffabrams/.cargo/bin:/Users/jeffabrams/.cabal/bin:/Users/jeffabrams/.ghcup/bin",
+      "RCX_PIPELINE_SESSION": "1",
+      "RCX_IMPLEMENTER_AGENT_OVERRIDE": "codex",
+      "RCX_REVIEWER_AGENT_OVERRIDE": "codex",
+      "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008"
+    },
+    "python3_path": "/Users/jeffabrams/.local/bin/python3",
+    "python3_realpath": "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/bin/python3.13",
+    "status": "PASS",
+    "collection_coverage_verified_before_execution": true,
+    "finished_utc": "2026-10-12T19:36:18.255072+00:00",
+    "elapsed_seconds": 154.7481495839893,
+    "exit_code": 0,
+    "summary": "2204 passed in 136.44s (0:02:16)",
+    "source_index_refs_unchanged": true,
+    "trackers_unchanged_during_execution": true,
+    "stdout_sha256": "e78b8a6db367d1c8499575d76eaf7abc52ce6e39dea372bc54d666c18848f1ba",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "before": {
+      "source_paths": 710,
+      "source_sha256_manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-tracker-validation.json#before.source_sha256",
+      "index_sha256": "047b25ef00bb9333133317d8c55252e62efc69fe65d7c2f04922da4bc1d0e07a",
+      "refs_sha256": "df973caa30e59145f23fa5ae194470be7cd30945808993ffd7f2661a102e5ee1",
+      "tracker_sha256": {
+        "TASKS.md": "d1e0b03ce1fe827830a562ec8e75293d9798b80589034510838ebc6dc7c53c10",
+        "CHANGELOG.md": "e1607e01259b6a01878cd6efa751e8c4e8b02d7ff153ed3e2720feae1416c6f9"
+      }
+    },
+    "after": {
+      "source_paths": 710,
+      "source_sha256_manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-tracker-validation.json#after.source_sha256",
+      "index_sha256": "047b25ef00bb9333133317d8c55252e62efc69fe65d7c2f04922da4bc1d0e07a",
+      "refs_sha256": "df973caa30e59145f23fa5ae194470be7cd30945808993ffd7f2661a102e5ee1",
+      "tracker_sha256": {
+        "TASKS.md": "d1e0b03ce1fe827830a562ec8e75293d9798b80589034510838ebc6dc7c53c10",
+        "CHANGELOG.md": "e1607e01259b6a01878cd6efa751e8c4e8b02d7ff153ed3e2720feae1416c6f9"
+      }
+    },
+    "receipt": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-tracker-validation.json",
+      "sha256": "15386b29ce5c715537011cac681415e01ef743107d7cb83bd019dd16a2328aaa",
+      "bytes": 176947
+    }
+  },
+  "collection": {
+    "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider tests/docs/test_growth_caps.py tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py tests/tools/test_executor_dispatch.py tests/tools/test_commit_executor_local_review.py --tb=long --collect-only",
+    "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+    "started_utc": "2026-10-12T19:26:13.908475+00:00",
+    "finished_utc": "2026-10-12T19:26:17.591575+00:00",
+    "elapsed_seconds": 3.641260707983747,
+    "exit_code": 0,
+    "summary": "2204 tests collected in 3.15s",
+    "environment_pins": {
+      "PYTHONHASHSEED": "0",
+      "RCX_CI": "1",
+      "HYPOTHESIS_PROFILE": "ci_fast",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "python3_path": "/Users/jeffabrams/.local/bin/python3",
+    "python3_realpath": "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/bin/python3.13",
+    "source_index_refs_unchanged": true,
+    "coverage": {
+      "original_inventory_sources": {
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r7-collection-order-controls/tools_only.stdout": "f4663179de51bd238f3a5fb6a339ca353ffd832514eac9f16d23fdf7c733b784",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r7-collection-order-controls/docs_only.stdout": "3be70a9c53ee6a1fb3b567885ea2362da6be70de0a4c1982d0f8255d613fe63b"
+      },
+      "original_required_node_count": 180,
+      "collected_node_count": 2204,
+      "missing_nodes": [],
+      "original_nodes_sha256": "936c4c177bdbfcd31ddb9620f93d83b37cf59556d2dc68f3c9f6217dc23d2d01",
+      "collected_nodes_sha256": "c0fb5c55fb67d866fb28ada0b3ae62b19d69b973dcc4cb4705a1d4fdbf0878a6"
+    },
+    "stdout_sha256": "6b5d9a1905869b644a385c431c8b5be126e34b5aa2eb30de020e521cec34a82c",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "preload_hooks_import_hacks_or_addopts_override": false
+  },
+  "collection_receipt": {
+    "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/collection.json",
+    "sha256": "a3518f755e8a3a6e8675d8e6d1f25f0313ed300a0a6913f1f9d29644f2b3e1bb",
+    "bytes": 177710
+  },
+  "test_integrity": {
+    "command": "commit_executor.run_private_attr_test_gate(actual_repo_root, frozen_test_files)",
+    "observed_utc": "2026-10-12T19:25:42.281767+00:00",
+    "elapsed_seconds": 0.37401779199717566,
+    "result": {
+      "passed": true,
+      "skipped": false,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "",
+      "test_files": [
+        "mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_executor_dispatch.py",
+        "mu/tests/tools/test_local_review_history_recovery.py"
+      ]
+    }
+  },
+  "native_noop": {
+    "observed_utc": "2026-10-12T19:35:28.889675+00:00",
+    "command": "launch_wave._native_post_commit_packet_matches_config(actual_repo_root, frozen_config); phase_b_executor._phase_b_target_branch_for_current_worktree(actual_branch, actual_rendered_and_locked_packet); commit_executor._capture_growth_cap_retry_authority(actual_repo_root, wave_id, base_branch=85d02749642d704776e21eea332ceeb2e27a30f6); commit_executor._growth_cap_snapshot_candidate_state(snapshot)",
+    "source_refs": [
+      "mu/tools/executors/launch_wave.py:2304",
+      "mu/tools/executors/phase_b_executor.py:6926",
+      "mu/tools/executors/commit_executor.py:20160",
+      "mu/tools/executors/commit_executor.py:20387"
+    ],
+    "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+    "config_sha256": "81ddcba89b2a7341d67ec60d789259317853805ef8f4e4a525840e5fa82bace2",
+    "packet_sha256": "29f38353b1a6a4d09fc0210012edee08d494ef53a4a042d82b3bb54a15a5d822",
+    "native_packet_valid": true,
+    "producer_controls": [
+      {
+        "packet": "rendered",
+        "actual_target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "passed": true
+      },
+      {
+        "packet": "actual_locked",
+        "actual_target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "passed": true
+      }
+    ],
+    "head": "85d02749642d704776e21eea332ceeb2e27a30f6",
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "comparison_commit": "85d02749642d704776e21eea332ceeb2e27a30f6",
+    "base_branch_argument": "85d02749642d704776e21eea332ceeb2e27a30f6",
+    "native_candidate_state": "preimage",
+    "native_capture_error": null,
+    "actual_caps": {
+      "CAP_TEST_FILES": "175",
+      "CAP_TOOL_SCRIPTS": "64"
+    },
+    "cap_sha256": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+    "head_target": {
+      "path": "mu/tests/docs/test_growth_caps.py",
+      "mode": "100644",
+      "blob_oid": "41e4d69a8c5a8be1ba6ff07acd2e2bafdcea5a4e"
+    },
+    "index_target": {
+      "path": "mu/tests/docs/test_growth_caps.py",
+      "mode": "100644",
+      "blob_oid": "41e4d69a8c5a8be1ba6ff07acd2e2bafdcea5a4e"
+    },
+    "complete_head_index_worktree_cap_exact": true,
+    "new_test_files": [],
+    "new_tool_scripts": [],
+    "new_core_docs": [],
+    "expected_postimage_present": false,
+    "generated_postimage_verifier_called": false,
+    "index_sha256": "047b25ef00bb9333133317d8c55252e62efc69fe65d7c2f04922da4bc1d0e07a",
+    "after_outer_staging": "PENDING_OUTER_EXECUTOR",
+    "actual_indexed_handoff": "PENDING_OUTER_STAGING; no actual handoff fabricated"
+  },
+  "native_packet": {
+    "predicate": "launch_wave._native_post_commit_packet_matches_config",
+    "actual_locked_packet_valid_before_execution": true,
+    "builder_packet_edited": false,
+    "before_completion": true,
+    "after_outer_staging": "PENDING_OUTER_EXECUTOR",
+    "result_before_completion": true,
+    "actual_packet_sha256": "29f38353b1a6a4d09fc0210012edee08d494ef53a4a042d82b3bb54a15a5d822",
+    "final_read_only_receipt": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/native-authority-final.json",
+      "sha256": "6bd599ef8c4e6b231ff9bb81760b71ca321230eb8b4b396817c61043852dcfa9",
+      "bytes": 2746
+    }
+  },
+  "branch_continuity": {
+    "actual_producer_controls": [
+      {
+        "case": "rendered",
+        "actual": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "passed": true
+      },
+      {
+        "case": "actual_locked",
+        "actual": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "passed": true
+      },
+      {
+        "case": "missing_phrase",
+        "actual": "",
+        "expected": "",
+        "passed": true
+      },
+      {
+        "case": "missing_override",
+        "actual": "",
+        "expected": "",
+        "passed": true
+      },
+      {
+        "case": "wrong_class",
+        "actual": "",
+        "expected": "",
+        "passed": true
+      },
+      {
+        "case": "protected_dev",
+        "actual": "",
+        "expected": "",
+        "passed": true
+      },
+      {
+        "case": "protected_main",
+        "actual": "",
+        "expected": "",
+        "passed": true
+      },
+      {
+        "case": "wrong_owner",
+        "actual": "",
+        "expected": "",
+        "passed": true
+      },
+      {
+        "case": "malformed",
+        "actual": "",
+        "expected": "",
+        "passed": true
+      },
+      {
+        "case": "actual_R5_historical",
+        "actual": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "passed": true
+      },
+      {
+        "case": "actual_R8_historical",
+        "actual": "",
+        "expected": "",
+        "passed": true
+      }
+    ],
+    "producer_source": "mu/tools/executors/phase_b_executor.py:6926",
+    "frozen_config_comparison": "85d02749642d704776e21eea332ceeb2e27a30f6",
+    "source_and_config_bound_native_admission_controls": {
+      "observed_utc": "2026-10-12T19:19:45.192316+00:00",
+      "wave_id": "workingrcx-local-review-legacy-history-r10-2026-10-12",
+      "config_sha256": "81ddcba89b2a7341d67ec60d789259317853805ef8f4e4a525840e5fa82bace2",
+      "config_errors": [],
+      "packet_fence_errors": [],
+      "positive_authorization": true,
+      "actual_producer_and_consumer_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+      "comparison_commit": "85d02749642d704776e21eea332ceeb2e27a30f6",
+      "old_r4_packet_still_held_and_unchanged": true,
+      "cases": [
+        {
+          "case": "actual_producer_rendered",
+          "actual": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "passed": true
+        },
+        {
+          "case": "actual_producer_locked",
+          "actual": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "passed": true
+        },
+        {
+          "case": "missing_exact_phrase",
+          "actual": "",
+          "expected": "",
+          "passed": true
+        },
+        {
+          "case": "missing_override",
+          "actual": "",
+          "expected": "",
+          "passed": true
+        },
+        {
+          "case": "wrong_class",
+          "actual": "",
+          "expected": "",
+          "passed": true
+        },
+        {
+          "case": "protected_dev",
+          "actual": "",
+          "expected": "",
+          "passed": true
+        },
+        {
+          "case": "unowned_branch",
+          "actual": "",
+          "expected": "",
+          "passed": true
+        },
+        {
+          "case": "malformed_branch",
+          "actual": "",
+          "expected": "",
+          "passed": true
+        },
+        {
+          "case": "actual_R8_omission",
+          "actual": "",
+          "expected": "",
+          "passed": true
+        },
+        {
+          "case": "actual_R5_positive",
+          "actual": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+          "passed": true
+        },
+        {
+          "case": "exact_rendered_packet",
+          "actual": true,
+          "expected": true,
+          "passed": true
+        },
+        {
+          "case": "exact_locked_packet",
+          "actual": true,
+          "expected": true,
+          "passed": true
+        },
+        {
+          "case": "exact_reserved_clarification",
+          "actual": true,
+          "expected": true,
+          "passed": true
+        },
+        {
+          "case": "unknown_implementation_h2",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "case": "normative_constraint_mutation",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "case": "wrong_wave_header",
+          "actual": false,
+          "expected": false,
+          "passed": true
+        },
+        {
+          "case": "actual_indexed_reader_and_builder",
+          "actual": true,
+          "expected": true,
+          "passed": true,
+          "errors": []
+        },
+        {
+          "case": "wrong_wave_indexed",
+          "actual": false,
+          "expected": false,
+          "passed": true,
+          "errors": [
+            "target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-local-review-legacy-history-r10-2026-10-12': jabramsja/workingrcx-local-review-quota-r3-2026-10-05"
+          ]
+        },
+        {
+          "case": "negative_authority_indexed",
+          "actual": false,
+          "expected": false,
+          "passed": true,
+          "errors": [
+            "target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-local-review-legacy-history-r10-2026-10-12': jabramsja/workingrcx-local-review-quota-r3-2026-10-05"
+          ]
+        },
+        {
+          "case": "unstaged_packet_not_authority",
+          "actual": false,
+          "expected": false,
+          "passed": true,
+          "errors": [
+            "target_branch must equal the canonical wave branch or a restart branch derived from wave_id, unless this is an authorized standalone control-surface L4_ENABLER repair under the branch prefix for wave_id 'workingrcx-local-review-legacy-history-r10-2026-10-12': jabramsja/workingrcx-local-review-quota-r3-2026-10-05"
+          ]
+        }
+      ],
+      "limits": "Disposable Git/index and actual native predicates. No production source/index/packet mutation, execution launch, receipt or approval. Actual future locked/indexed candidate remains subject to native review."
+    },
+    "actual_current_indexed_handoff": "PENDING_OUTER_STAGING",
+    "no_checkout_performed": true,
+    "requirement": "Actual indexed handoff must retain original PR branch and85d comparison before any checkout; missing or mismatched authority holds.",
+    "actual_producer_before_completion": [
+      {
+        "packet": "rendered",
+        "actual_target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "passed": true
+      },
+      {
+        "packet": "actual_locked",
+        "actual_target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "expected": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+        "passed": true
+      }
+    ]
+  },
+  "history": {
+    "bindings": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/history-bindings.json",
+      "sha256": "650d4e8ea02cc8faa78ad9118f70e804ed317cb5c483862d1538480ba9b88f5c",
+      "bytes": 106428
+    },
+    "r9": "Original REQUEST_CHANGES/corrected-config-relaunch-required and launcher exit1 remain negative; root sent no stop signals. Verified terminal snapshot1f885b33 contains63files; old checkpoints remain absent.",
+    "r8": "Stopped producer-routing mismatch after three2204PASS runs, staged-only proofs and two COMMIT_GO receipts. Snapshot857cfd73 preserves wrong-base authority. Bounded unchanged native snapshot/clear/restore helpers restored original85d branch in the same physical checkout, retaining14candidate/59protected/187authority files and refs. Only raw handoff/recovery captured before signals; Phase B checkpoint was already absent.",
+    "r7": "Two failed locked gates (138passed/1collection error in8.18s and8.41s), two REQUEST_CHANGES reviews, deliberate bounded operator interruption and launcher exit-15. Separate native transient-kill recovery cleared checkpoint, retried initial Phase A against advanced packet and hard-failed09:28:42Z. Actual post-lock validation remains true. Lifecycle completion separately exhausted three attempts and is ESCALATED for active process references; no Phase B review-budget exhaustion. Pre-stop values are in stop_record.phase_b_before; original raw checkpoint absent and never recreated.",
+    "r6": "Source-bound9411PASS/1skip complete-tools run is historical support; earlier1failed/9409passed/1skip and QUESTION remain unchanged.",
+    "older": "R3 operator-error correction, R4 packet hold, R5 local85d commit/four COMMIT_GO receipts/approval=false negative-history publication/later failed pre-push remain distinct. Original a705 and a928 negative artifacts are retained; no republish at a new HEAD.",
+    "diagnostic_limit": "Complete docs-first modules and normal fast-suite collection pass; selected-node/importlib/canonical-path/reordering failures remain evidence. No universal package-isolation source fix is claimed."
+  },
+  "tracker_reconciliation": {
+    "canonical_ids": 268,
+    "ordered_owners": 44,
+    "original_tracker_notes_preserved": 732,
+    "primary_tracker_notes_missing": 0,
+    "primary_missing_row_observations_reconciled": {
+      "38": [
+        "    Current R10 Phase B2026-10-12T19:22:06Z: native Phase A GO; implementer1557d0b0 active on original85d PR branch. Frozen63paths/207old authority records remain exact. Validation/review/commit/CI/full-PR approval/landing/PRIMARY sync and ordered folder/retention/disposition obligations remain pending.",
+        "    Historical R10 launch2026-10-12T19:20:29Z: native Phase A reviewer fdee2268 active on original85d PR branch. All20 admission controls, clean native cap no-op and100PRIMARY tracker tests pass; snapshot5f05179e verifies58launch inputs. R9 terminal snapshot1f885b33 complete, WD access restored,63protected/207old authority records unchanged. Native implementation/commit/pre-push/current-head CI/full-PR approval/merge/PRIMARY sync remain pending, followed by PR1331 disposition, folders, retention and final coverage/useful-work. Prior negative authority is unchanged.",
+        "    Historical preserved queue heading: 38. **[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] CURRENT R10 explicit-scope native admission; WD restored and R9 preserved; PR1332 unmerged; folders and retention open** Task: `[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]`. Wave ID: `workingrcx-local-review-legacy-history-r10-2026-10-12`. Class: `L4_ENABLER`. Category: PROGRAM QUEUE.",
+        "    Historical R10 admission 2026-10-12T19:19:05.909500+00:00: WD access restored; verified R9 terminal snapshot1f885b33 retains native REQUEST_CHANGES and launcher exit1 with no root signals. Native R9 tracker annotation is preserved. Explicit19-path R10 scope and original85d branch contract pass initial native predicates; fresh disposable controls and launch remain pending. Native PR1332 landing/PRIMARY sync precede PR1331 disposition, folders, deduplicated retention and final coverage/useful-work obligations. No inherited approval, live retirement or source purge.",
+        "    Historical preserved queue heading: 38. **[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] CURRENT recovery-drive access HOLD; R9 scope finding; R10 explicit-scope draft; R8 preserved and original branch restored; PR1332 unmerged; folders and retention open** Task: `[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]`. Wave ID: `workingrcx-local-review-legacy-history-r9-2026-10-12`. Class: `L4_ENABLER`. Category: PROGRAM QUEUE.",
+        "    Historical access HOLD2026-10-12T11:35Z: R9 natively terminated for missing in-packet candidate enumeration; source/index unchanged and recorded owners absent. Root sent no stop signals. Correct mounted WD returns Operation not permitted for reads/writes, so R9 terminal snapshot remains incomplete. R10 local governance draft enumerates15carried/4own paths and passes provisional native predicates; no launch until access, preservation and full fresh admission verify. No internal recovery fallback or source retirement. Original R8/R9 records remain history, with no approval inherited.",
+        "    Historical R9 launch2026-10-12T11:18:06Z: native Phase A reviewer phase-a-r1-a5886c6b active on original85d PR branch;20actual producer/packet/indexed-consumer controls, cap no-op and100PRIMARY tracker checks PASS. Snapshot7b079b26 restores63launch-input files. All62protected paths/187old authority records remain exact. Implementation/commit/pre-push/current-head CI/full-PR approval/merge/PRIMARY sync remain pending. Later v3 drafts require actual prior-wave landing; no old R8 authority replay.",
+        "    Historical R9 admission preparation2026-10-12T11:10Z: original85d PR branch restored using bounded native helpers after independently verified R8 snapshot857cfd73. All14candidate/59protected/187authority files verified and refs unchanged. The exact existing PR branch producer contract is now explicit; fresh actual producer plus indexed consumer tests, quota/roles/base checks and launch-input preservation precede launch. Native implementation and landing remain pending; no old approval/replay or checkpoint recreation. Branch-routing automation follow-up stays under row40.",
+        "    Historical preserved queue heading: 38. **[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION] CURRENT legacy-history R8 branch-routing mismatch held, preservation/corrected admission pending; R7 interrupted and preserved; R5 committed locally, PR1332 unmerged; folders and retention open** Task: `[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]`. Wave ID: `workingrcx-local-review-legacy-history-r8-2026-10-12`. Class: `L4_ENABLER`. Category: PROGRAM QUEUE.",
+        "    Historical R8 routing hold2026-10-12T10:48Z: both supervisor reviews returned COMMIT_GO, then native handoff omitted target_branch and checkout changed admitted85d/existing PR1332 branch to canonical R8 at35f. Candidate authority rejected the changed comparison. Root stopped exact owned actors; all six are absent, and raw handoff/recovery bytes were captured before signals. Phase B checkpoint was already absent; no raw checkpoint copy exists or is recreated. Original85d branch remains intact. Correct the exact existing-PR producer contract under fresh authority; preserve this failure and do not reset/replay R8. No new numbered prerequisite.",
+        "    Historical R8 native progress2026-10-12T10:29:48Z: independent Phase B GO and final pytest PASS are recorded; pre-commit supervisor is active. Three earlier declared2204-test runs passed, all180original nodes retained. Actual staged packet/cap no-op proof passed;59protected paths/153old authority records remain exact. Commit approval/execution, pre-push, current-head CI/full-PR review, merge and PRIMARY sync remain pending.",
+        "    Historical R8 launch progress2026-10-12T09:53:02Z: native Phase A reviewer phase-a-r1-b9f3a211 is active; ten admission controls, cap no-op and100PRIMARY focused checks passed. Snapshot97b21d46ee644c739e0ace9f69421b6f11e736dc05923bd22276c491f7c9c167 restores38launch-input files. No native GO, additional commit, push, current-head CI, merge or source retirement is claimed.",
+        "    Historical R8 prelaunch admission context (superseded by current Phase B progress above): The unchanged fixture candidate passed the complete docs-first2204-test cohort, containing every180original required node. R7 retains both failed selected-node receipts, both REQUEST_CHANGES reviews, operator interruption and subsequent native recovery failure. Fresh source-frozen contract admission and prelaunch packet/index/cap checks subsequently passed; actual later-index checks remain required. No R7 outcome is reclassified as approval. No new numbered prerequisite.",
+        "    Historical R7 progress followed the PROGRAM QUEUE checkpoint and active working to-do above. Phase A returned GO at08:50:52Z; the declared gate failed138PASS/1collection error and native independent disposition is pending. The exact preserved R6 fixture correction retains its source-bound9411PASS/1skip tools result. Actual R7 packet validation and clean native cap no-op at175/64 pass before outer staging; the exact declared check failed138PASS/1collection error at test_doc_freshness.py:37. Native final disposition, corrected fresh validation admission, commit and landing remain pending. Older approvals, the R6 QUESTION and failed validations remain separate historical evidence. All source/tests and prior authority are frozen; no new numbered prerequisite.",
+        "    Historical R5 admission follows the PROGRAM QUEUE checkpoint and active working to-do above. Fresh R5 preserves the tested R4 source, retains the exact native packet grammar and derives current-wave cap provenance through the existing computation. All production/test guards stay frozen. Actual post-lock packet and indexed cap verification precede fresh review/commit. Row40 retains interrupted-mutation continuation and remaining lifecycle obligations; no new numbered prerequisite."
+      ],
+      "40": [
+        "    Current R10 Phase B2026-10-12T19:22:06Z: native Phase A GO; implementer1557d0b0 active on original85d PR branch. Frozen63paths/207old authority records remain exact. Validation/review/commit/CI/full-PR approval/landing/PRIMARY sync and ordered folder/retention/disposition obligations remain pending.",
+        "    Historical R10 launch2026-10-12T19:20:29Z: native Phase A reviewer fdee2268 active on original85d PR branch. All20 admission controls, clean native cap no-op and100PRIMARY tracker tests pass; snapshot5f05179e verifies58launch inputs. R9 terminal snapshot1f885b33 complete, WD access restored,63protected/207old authority records unchanged. Native implementation/commit/pre-push/current-head CI/full-PR approval/merge/PRIMARY sync remain pending, followed by PR1331 disposition, folders, retention and final coverage/useful-work. Prior negative authority is unchanged.",
+        "    Historical preserved queue heading: 40. **[FLEET-NATIVE-LIFECYCLE-PREVENTION] CURRENT R10 native admission; branch/cohort/cancellation automation follow-ups retained; prior reader coordination LANDED** Task: `[FLEET-NATIVE-LIFECYCLE-PREVENTION]`. Wave ID: `workingrcx-local-review-legacy-history-r10-2026-10-12`. Class: `L4_ENABLER`. Category: PROGRAM QUEUE.",
+        "    Historical R10 admission 2026-10-12T19:19:05.909500+00:00: WD access restored; verified R9 terminal snapshot1f885b33 retains native REQUEST_CHANGES and launcher exit1 with no root signals. Native R9 tracker annotation is preserved. Explicit19-path R10 scope and original85d branch contract pass initial native predicates; fresh disposable controls and launch remain pending. Native PR1332 landing/PRIMARY sync precede PR1331 disposition, folders, deduplicated retention and final coverage/useful-work obligations. No inherited approval, live retirement or source purge.",
+        "    Historical preserved queue heading: 40. **[FLEET-NATIVE-LIFECYCLE-PREVENTION] CURRENT recovery-drive access HOLD; R10 explicit-scope/branch-continuity draft; validation-cohort and owner-cancellation follow-ups; prior reader coordination LANDED** Task: `[FLEET-NATIVE-LIFECYCLE-PREVENTION]`. Wave ID: `workingrcx-local-review-legacy-history-r9-2026-10-12`. Class: `L4_ENABLER`. Category: PROGRAM QUEUE.",
+        "    Historical access HOLD2026-10-12T11:35Z: R9 natively terminated for missing in-packet candidate enumeration; source/index unchanged and recorded owners absent. Root sent no stop signals. Correct mounted WD returns Operation not permitted for reads/writes, so R9 terminal snapshot remains incomplete. R10 local governance draft enumerates15carried/4own paths and passes provisional native predicates; no launch until access, preservation and full fresh admission verify. No internal recovery fallback or source retirement. Original R8/R9 records remain history, with no approval inherited.",
+        "    Historical R9 launch2026-10-12T11:18:06Z: native Phase A reviewer phase-a-r1-a5886c6b active on original85d PR branch;20actual producer/packet/indexed-consumer controls, cap no-op and100PRIMARY tracker checks PASS. Snapshot7b079b26 restores63launch-input files. All62protected paths/187old authority records remain exact. Implementation/commit/pre-push/current-head CI/full-PR approval/merge/PRIMARY sync remain pending. Later v3 drafts require actual prior-wave landing; no old R8 authority replay.",
+        "    Historical R9 admission preparation2026-10-12T11:10Z: original85d PR branch restored using bounded native helpers after independently verified R8 snapshot857cfd73. All14candidate/59protected/187authority files verified and refs unchanged. The exact existing PR branch producer contract is now explicit; fresh actual producer plus indexed consumer tests, quota/roles/base checks and launch-input preservation precede launch. Native implementation and landing remain pending; no old approval/replay or checkpoint recreation. Branch-routing automation follow-up stays under row40.",
+        "    Historical preserved queue heading: 40. **[FLEET-NATIVE-LIFECYCLE-PREVENTION] CURRENT R8 validation-cohort and owner-cancellation follow-ups; round-alias repair PRESERVED; prior reader coordination LANDED** Task: `[FLEET-NATIVE-LIFECYCLE-PREVENTION]`. Wave ID: `workingrcx-local-review-legacy-history-r8-2026-10-12`. Class: `L4_ENABLER`. Category: PROGRAM QUEUE.",
+        "    Branch-routing automation follow-up (R8, existing row40): bind and verify the intended branch and comparison parent through launch, actual Phase B producer and commit handoff before any checkout. The immutable85d producer requires exact existing PR branch wording; R8 omitted it, although a consumer-only fixture supplied target_branch explicitly and passed. Preserve original R8 negative controls, R5 positive control and protected/main/unbound branch refusals; missing or ambiguous authority must HOLD before branch mutation. Evidence: WD legacy-history-r8-branch-handoff-diagnosis.json. Fresh admission must exercise the real producer; this note claims no production fix or restored approval.",
+        "    Historical R8 routing hold2026-10-12T10:48Z: both supervisor reviews returned COMMIT_GO, then native handoff omitted target_branch and checkout changed admitted85d/existing PR1332 branch to canonical R8 at35f. Candidate authority rejected the changed comparison. Root stopped exact owned actors; all six are absent, and raw handoff/recovery bytes were captured before signals. Phase B checkpoint was already absent; no raw checkpoint copy exists or is recreated. Original85d branch remains intact. Correct the exact existing-PR producer contract under fresh authority; preserve this failure and do not reset/replay R8. No new numbered prerequisite.",
+        "    Historical preserved row40 heading before R8 tracker reconciliation: 40. **[FLEET-NATIVE-LIFECYCLE-PREVENTION] Approved round-alias repair PRESERVED for native recovery after cleanup; prior reader coordination LANDED** Task: `[FLEET-NATIVE-LIFECYCLE-PREVENTION]`. Wave ID: `workingrcx-commit-ready-round-alias-r1-2026-10-04`. Class: `L4_ENABLER`. Category: PROGRAM QUEUE.",
+        "    Historical R8 native progress2026-10-12T10:29:48Z: independent Phase B GO and final pytest PASS are recorded; pre-commit supervisor is active. Three earlier declared2204-test runs passed, all180original nodes retained. Actual staged packet/cap no-op proof passed;59protected paths/153old authority records remain exact. Commit approval/execution, pre-push, current-head CI/full-PR review, merge and PRIMARY sync remain pending.",
+        "    Historical R8 launch progress2026-10-12T09:53:02Z: native Phase A reviewer phase-a-r1-b9f3a211 is active; ten admission controls, cap no-op and100PRIMARY focused checks passed. Snapshot97b21d46ee644c739e0ace9f69421b6f11e736dc05923bd22276c491f7c9c167 restores38launch-input files. No native GO, additional commit, push, current-head CI, merge or source retirement is claimed.",
+        "    Historical phase-specific evidence observation (2026-10-12 R7): row38 now carries the exact R6 fixture candidate under fresh R7 native cap-no-op admission. R6 supplies the preserved broad-tools validation, not approval of R7; R7 supplies its own current packet, indicator and review evidence. The old R6 generated-cap requirement and QUESTION remain historical. Existing source-bound finding delivery, interrupted continuation, reader/lifecycle and useful-work automation obligations below remain open. No subsystem or new queue owner is added."
+      ]
+    },
+    "primary_snapshot_sha256": "88e6ef9e7b8081c4b4dea2fab70e6a473298a36dadbe7ad314d968262d96b5ba",
+    "r10_tracker_sync_note_unchanged": true,
+    "source_edits": 0,
+    "index_writes": 0,
+    "final_verification": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-verification.json",
+      "sha256": "000a531fc35d1be3636d5bc76e5570bebb6496af329d30a27dcb15fb721465d3",
+      "bytes": 8695
+    },
+    "latest_primary_observation": {
+      "observed_utc": "2026-10-12T19:33:43.367207+00:00",
+      "primary_sha256": "88e6ef9e7b8081c4b4dea2fab70e6a473298a36dadbe7ad314d968262d96b5ba",
+      "same_as_reconciled_snapshot": true
+    },
+    "final_declared_validation": "2204 passed in 136.44s (0:02:16)"
+  },
+  "invariant_tuple": {
+    "debt_before_after": "unchanged; source-bound, no new metrics execution claimed",
+    "host_semantics_before_after": "unchanged; frozen source manifest",
+    "runtime_substrate_delta": 0,
+    "cap_before_after": {
+      "CAP_TEST_FILES": [
+        175,
+        175
+      ],
+      "CAP_TOOL_SCRIPTS": [
+        64,
+        64
+      ]
+    },
+    "canonical_ids": [
+      268,
+      268
+    ],
+    "ordered_owners": [
+      44,
+      44
+    ]
+  },
+  "outer_owned_pending": [
+    "Native staging of all15carried paths and own governance; generate the own indicator under native authority.",
+    "Repeat actual frozen-config packet predicate and HEAD/index/worktree cap-no-op capture after staging.",
+    "Verify actual indexed handoff target_branch and comparison remain admitted original PR branch and85d before any checkout.",
+    "Fresh independent Phase B review, native final validation, actual commit and pre-push.",
+    "Corrected-head CI and complete authenticated current-request full-PR approval; protected ordered-parent PR1332 merge.",
+    "Separately verify PRIMARY synchronization, then actual PR1331 remote disposition.",
+    "Verify latest folder-wave-launch-preparation-20261012-v3.json, retention-wave-launch-preparation-20261012-v3.json and pr-coverage-wave-launch-preparation-20261012-v3.json in order after dependencies.",
+    "Final physical/registration/preserved-useful-work and pausedPR1325 obligations."
+  ],
+  "boundaries": {
+    "startup_preflight_attestation_dispatcher_executor_commit_push_pr_merge_closeout_not_run": true,
+    "manual_git_mutations": false,
+    "protected_source_or_frozen_config_repair": false,
+    "history_authority_or_budget_reset": false,
+    "live_retirement_purge_or_backup_settings_role_hook_change": false,
+    "current_generated_postimage_fabricated": false,
+    "source_test_assertions_changed": false,
+    "cohort_selected_nodes_substituted": false,
+    "preload_import_hacks_or_pytest_addopts_override": false
+  },
+  "limits": [
+    "Local candidate implementation and validation confer no independent review, commit, CI, full-PR approval, merge or PRIMARY sync.",
+    "Native own indicator was not generated at pre-stage because the index was clean; outer native Step5 owns generation/staging.",
+    "No callable one-shot quota tool is available to this implementer; no percentage is inferred and quota-stop policy remains active.",
+    "Startup persona/cache canary and PRIMARY docs-registry limitations remain explicit.",
+    "PRIMARY unlaunched v4 downstream drafts are observations only; this locked packet retains its v3 dependency checks."
+  ],
+  "evidence_root": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b",
+  "evidence_volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+  "validation_history": [
+    {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider tests/docs/test_growth_caps.py tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py tests/tools/test_executor_dispatch.py tests/tools/test_commit_executor_local_review.py --tb=long",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+      "started_utc": "2026-10-12T19:29:31.280327+00:00",
+      "environment_pins": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "inherited_environment": {
+        "PYTEST_ADDOPTS": null,
+        "PYTHONPATH": null,
+        "PATH": "/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex-path:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.bun/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.codeium/windsurf/bin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.elan/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/TeX/texbin:/Users/jeffabrams/.codex/tmp/arg0/codex-arg0X1AExB:/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex-path:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.bun/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.codeium/windsurf/bin:/Users/jeffabrams/.elan/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/Users/jeffabrams/.codex/tmp/arg0/codex-arg0dG9ltv:/Users/jeffabrams/.cargo/bin:/Users/jeffabrams/.cabal/bin:/Users/jeffabrams/.ghcup/bin",
+        "RCX_PIPELINE_SESSION": "1",
+        "RCX_IMPLEMENTER_AGENT_OVERRIDE": "codex",
+        "RCX_REVIEWER_AGENT_OVERRIDE": "codex",
+        "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008"
+      },
+      "python3_path": "/Users/jeffabrams/.local/bin/python3",
+      "python3_realpath": "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/bin/python3.13",
+      "status": "PASS",
+      "collection_coverage_verified_before_execution": true,
+      "finished_utc": "2026-10-12T19:32:36.770500+00:00",
+      "elapsed_seconds": 185.48879458301235,
+      "exit_code": 0,
+      "summary": "2204 passed in 150.33s (0:02:30)",
+      "source_index_refs_unchanged": true,
+      "trackers_unchanged_during_execution": true,
+      "stdout_sha256": "80dc47faeb34be1d28f3f44add039e501b7e8ac46a6b64ccb9809f477afd54fa",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "before": {
+        "source_paths": 710,
+        "source_sha256_manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/declared-validation.json#before.source_sha256",
+        "index_sha256": "047b25ef00bb9333133317d8c55252e62efc69fe65d7c2f04922da4bc1d0e07a",
+        "refs_sha256": "df973caa30e59145f23fa5ae194470be7cd30945808993ffd7f2661a102e5ee1",
+        "tracker_sha256": {
+          "TASKS.md": "c21e1eb7fecba10a49a9e1b450fdffe1228e33db00d4502606138b4c62e613e0",
+          "CHANGELOG.md": "fd73a45f46aa5492fd963ba046eda69087750e3368687a6e78ce3b437d4f366f"
+        }
+      },
+      "after": {
+        "source_paths": 710,
+        "source_sha256_manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/declared-validation.json#after.source_sha256",
+        "index_sha256": "047b25ef00bb9333133317d8c55252e62efc69fe65d7c2f04922da4bc1d0e07a",
+        "refs_sha256": "df973caa30e59145f23fa5ae194470be7cd30945808993ffd7f2661a102e5ee1",
+        "tracker_sha256": {
+          "TASKS.md": "c21e1eb7fecba10a49a9e1b450fdffe1228e33db00d4502606138b4c62e613e0",
+          "CHANGELOG.md": "fd73a45f46aa5492fd963ba046eda69087750e3368687a6e78ce3b437d4f366f"
+        }
+      },
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/declared-validation.json",
+        "sha256": "3bcb05c386d36ab862253aab86160480c63d813742a47945472f0042c0872f50",
+        "bytes": 176948
+      }
+    },
+    {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider tests/docs/test_growth_caps.py tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py tests/tools/test_executor_dispatch.py tests/tools/test_commit_executor_local_review.py --tb=long",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+      "started_utc": "2026-10-12T19:33:43.505580+00:00",
+      "environment_pins": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "inherited_environment": {
+        "PYTEST_ADDOPTS": null,
+        "PYTHONPATH": null,
+        "PATH": "/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex-path:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.bun/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.codeium/windsurf/bin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.elan/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/TeX/texbin:/Users/jeffabrams/.codex/tmp/arg0/codex-arg0X1AExB:/Users/jeffabrams/.npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex-path:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.bun/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.codeium/windsurf/bin:/Users/jeffabrams/.elan/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/Users/jeffabrams/.codex/tmp/arg0/codex-arg0dG9ltv:/Users/jeffabrams/.cargo/bin:/Users/jeffabrams/.cabal/bin:/Users/jeffabrams/.ghcup/bin",
+        "RCX_PIPELINE_SESSION": "1",
+        "RCX_IMPLEMENTER_AGENT_OVERRIDE": "codex",
+        "RCX_REVIEWER_AGENT_OVERRIDE": "codex",
+        "RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008"
+      },
+      "python3_path": "/Users/jeffabrams/.local/bin/python3",
+      "python3_realpath": "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/bin/python3.13",
+      "status": "PASS",
+      "collection_coverage_verified_before_execution": true,
+      "finished_utc": "2026-10-12T19:36:18.255072+00:00",
+      "elapsed_seconds": 154.7481495839893,
+      "exit_code": 0,
+      "summary": "2204 passed in 136.44s (0:02:16)",
+      "source_index_refs_unchanged": true,
+      "trackers_unchanged_during_execution": true,
+      "stdout_sha256": "e78b8a6db367d1c8499575d76eaf7abc52ce6e39dea372bc54d666c18848f1ba",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "before": {
+        "source_paths": 710,
+        "source_sha256_manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-tracker-validation.json#before.source_sha256",
+        "index_sha256": "047b25ef00bb9333133317d8c55252e62efc69fe65d7c2f04922da4bc1d0e07a",
+        "refs_sha256": "df973caa30e59145f23fa5ae194470be7cd30945808993ffd7f2661a102e5ee1",
+        "tracker_sha256": {
+          "TASKS.md": "d1e0b03ce1fe827830a562ec8e75293d9798b80589034510838ebc6dc7c53c10",
+          "CHANGELOG.md": "e1607e01259b6a01878cd6efa751e8c4e8b02d7ff153ed3e2720feae1416c6f9"
+        }
+      },
+      "after": {
+        "source_paths": 710,
+        "source_sha256_manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-tracker-validation.json#after.source_sha256",
+        "index_sha256": "047b25ef00bb9333133317d8c55252e62efc69fe65d7c2f04922da4bc1d0e07a",
+        "refs_sha256": "df973caa30e59145f23fa5ae194470be7cd30945808993ffd7f2661a102e5ee1",
+        "tracker_sha256": {
+          "TASKS.md": "d1e0b03ce1fe827830a562ec8e75293d9798b80589034510838ebc6dc7c53c10",
+          "CHANGELOG.md": "e1607e01259b6a01878cd6efa751e8c4e8b02d7ff153ed3e2720feae1416c6f9"
+        }
+      },
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-tracker-validation.json",
+        "sha256": "15386b29ce5c715537011cac681415e01ef743107d7cb83bd019dd16a2328aaa",
+        "bytes": 176947
+      }
+    }
+  ],
+  "final_verification": {
+    "observed_utc": "2026-10-12T19:37:55.230246+00:00",
+    "head": "85d02749642d704776e21eea332ceeb2e27a30f6",
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "comparison_commit": "85d02749642d704776e21eea332ceeb2e27a30f6",
+    "index_sha256": "047b25ef00bb9333133317d8c55252e62efc69fe65d7c2f04922da4bc1d0e07a",
+    "index_clean": true,
+    "refs_sha256": "df973caa30e59145f23fa5ae194470be7cd30945808993ffd7f2661a102e5ee1",
+    "source_paths": 710,
+    "source_manifest_unchanged": true,
+    "source_manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/baseline.json#source_sha256",
+    "protected_and_historical_verification": {
+      "protected_sha256": {
+        "paths": 63,
+        "mismatches": []
+      },
+      "old_authority_sha256": {
+        "paths": 207,
+        "mismatches": []
+      }
+    },
+    "frozen_carried_verification": {
+      "mu/tests/tools/test_commit_executor_local_review.py": {
+        "sha256": "5c4ffcf83e3167779fb9a7bb4e934b2681fa417b8572f79737d0a0e4f6771035",
+        "mode": 420,
+        "expected_sha256": "5c4ffcf83e3167779fb9a7bb4e934b2681fa417b8572f79737d0a0e4f6771035",
+        "expected_mode": 420
+      },
+      "mu/tests/tools/test_executor_dispatch.py": {
+        "sha256": "fc6cbe681161802ad87a2d7fb0d83a735d0139412d1adb344293dff8dbbba90f",
+        "mode": 420,
+        "expected_sha256": "fc6cbe681161802ad87a2d7fb0d83a735d0139412d1adb344293dff8dbbba90f",
+        "expected_mode": 420
+      },
+      "reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md": {
+        "sha256": "18af283d9c2cc565c35c9b57145cb923c14b40d65a64fce7b0a0f73e99416f66",
+        "mode": 420,
+        "expected_sha256": "18af283d9c2cc565c35c9b57145cb923c14b40d65a64fce7b0a0f73e99416f66",
+        "expected_mode": 420
+      },
+      "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12.md": {
+        "sha256": "9bc238cfa51c6235b1b88ca611161d5934d79e5efc6d2d99c40378fceec3414e",
+        "mode": 420,
+        "expected_sha256": "9bc238cfa51c6235b1b88ca611161d5934d79e5efc6d2d99c40378fceec3414e",
+        "expected_mode": 420
+      },
+      "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12_implementation_evidence.json": {
+        "sha256": "fdb66657a7277e35b1cf0a38cfea5f9023cb8b8f5be317bfaa1df2ee77f0d56c",
+        "mode": 420,
+        "expected_sha256": "fdb66657a7277e35b1cf0a38cfea5f9023cb8b8f5be317bfaa1df2ee77f0d56c",
+        "expected_mode": 420
+      },
+      "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12.md": {
+        "sha256": "8e47d294805c312efcc2f80db066a36a5be724a2b79fb854df06d9209f2e5d57",
+        "mode": 420,
+        "expected_sha256": "8e47d294805c312efcc2f80db066a36a5be724a2b79fb854df06d9209f2e5d57",
+        "expected_mode": 420
+      },
+      "reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12_implementation_evidence.json": {
+        "sha256": "3f673e107d8833a598ccb5f48923ce78863c81bf809b71defbf7a8834426004b",
+        "mode": 420,
+        "expected_sha256": "3f673e107d8833a598ccb5f48923ce78863c81bf809b71defbf7a8834426004b",
+        "expected_mode": 420
+      },
+      "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12.md": {
+        "sha256": "821526a6ec980fbe48b1d443007fbc53a09e7498cb9b8d5d33abb3be9cb412ae",
+        "mode": 420,
+        "expected_sha256": "821526a6ec980fbe48b1d443007fbc53a09e7498cb9b8d5d33abb3be9cb412ae",
+        "expected_mode": 420
+      },
+      "reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12_implementation_evidence.json": {
+        "sha256": "a44ed349276b05975ff5f0990651dcfb36b7ee5ad1c801d107e79e100103357f",
+        "mode": 420,
+        "expected_sha256": "a44ed349276b05975ff5f0990651dcfb36b7ee5ad1c801d107e79e100103357f",
+        "expected_mode": 420
+      },
+      "reports/control_plane/workingrcx-local-review-legacy-history-r9-2026-10-12_2026-10-12.md": {
+        "sha256": "ac80807c68526821867ba4ae192a4d956e0f3a6f2e072901217c387030ed5ca2",
+        "mode": 420,
+        "expected_sha256": "ac80807c68526821867ba4ae192a4d956e0f3a6f2e072901217c387030ed5ca2",
+        "expected_mode": 420
+      },
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r6-2026-10-12.json": {
+        "sha256": "b6f7b8fd2d997828dc281f62093210977f7d3273008c2ad167b9808dbfcd340e",
+        "mode": 420,
+        "expected_sha256": "b6f7b8fd2d997828dc281f62093210977f7d3273008c2ad167b9808dbfcd340e",
+        "expected_mode": 420
+      },
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r7-2026-10-12.json": {
+        "sha256": "3e4417fd350f84680070e0f627af9c42790d4d74c0ea454d7d0819c1c6bed16b",
+        "mode": 420,
+        "expected_sha256": "3e4417fd350f84680070e0f627af9c42790d4d74c0ea454d7d0819c1c6bed16b",
+        "expected_mode": 420
+      },
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r8-2026-10-12.json": {
+        "sha256": "276c7e49a12c3dfb0836187044fc9e818e10b423a085892818fd5f34edc412fa",
+        "mode": 420,
+        "expected_sha256": "276c7e49a12c3dfb0836187044fc9e818e10b423a085892818fd5f34edc412fa",
+        "expected_mode": 420
+      }
+    },
+    "old_absences_preserved": {
+      ".agent_bus-local-review-legacy-history-r7-20261012/executors/phase_b_state.json": true,
+      ".agent_bus-local-review-legacy-history-r8-20261012/executors/phase_b_state.json": true,
+      ".agent_bus-local-review-legacy-history-r9-20261012/executors/phase_a_state.json": true,
+      ".agent_bus-local-review-legacy-history-r9-20261012/executors/phase_b_state.json": true
+    },
+    "packet_sha256": "29f38353b1a6a4d09fc0210012edee08d494ef53a4a042d82b3bb54a15a5d822",
+    "packet_unchanged_by_inner": true,
+    "config_sha256": "81ddcba89b2a7341d67ec60d789259317853805ef8f4e4a525840e5fa82bace2",
+    "native_packet_and_noop_result": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/native-authority-final.json",
+      "sha256": "6bd599ef8c4e6b231ff9bb81760b71ca321230eb8b4b396817c61043852dcfa9",
+      "bytes": 2746
+    },
+    "canonical_ids": 268,
+    "ordered_owners": 44,
+    "historical_tracker_notes_preserved": 732,
+    "rows38_40_current_paragraphs_identical": true,
+    "primary_followups_retained": {
+      "branch_continuity": true,
+      "collection_coverage": true,
+      "owner_cancellation": true
+    },
+    "tracker_sha256": {
+      "TASKS.md": "d1e0b03ce1fe827830a562ec8e75293d9798b80589034510838ebc6dc7c53c10",
+      "CHANGELOG.md": "e1607e01259b6a01878cd6efa751e8c4e8b02d7ff153ed3e2720feae1416c6f9"
+    },
+    "tracked_changes_by_this_implementer": [
+      "CHANGELOG.md",
+      "TASKS.md"
+    ],
+    "new_file_by_this_implementer": "reports/control_plane/workingrcx-local-review-legacy-history-r10-2026-10-12_2026-10-12_implementation_evidence.json",
+    "candidate_status": [
+      " M CHANGELOG.md",
+      " M TASKS.md",
+      " M mu/tests/tools/test_commit_executor_local_review.py",
+      " M mu/tests/tools/test_executor_dispatch.py",
+      " M reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md",
+      "?? reports/control_plane/workingrcx-local-review-legacy-history-r10-2026-10-12_2026-10-12.md",
+      "?? reports/control_plane/workingrcx-local-review-legacy-history-r10-2026-10-12_2026-10-12_implementation_evidence.json",
+      "?? reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12.md",
+      "?? reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12_implementation_evidence.json",
+      "?? reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12.md",
+      "?? reports/control_plane/workingrcx-local-review-legacy-history-r7-2026-10-12_2026-10-12_implementation_evidence.json",
+      "?? reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12.md",
+      "?? reports/control_plane/workingrcx-local-review-legacy-history-r8-2026-10-12_2026-10-12_implementation_evidence.json",
+      "?? reports/control_plane/workingrcx-local-review-legacy-history-r9-2026-10-12_2026-10-12.md",
+      "?? reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r6-2026-10-12.json",
+      "?? reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r7-2026-10-12.json",
+      "?? reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r8-2026-10-12.json"
+    ],
+    "candidate_scope_drift": [],
+    "volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+    "outer_staging_and_handoff_verification": "PENDING_OUTER_EXECUTOR",
+    "limits": "All checks describe the current unstaged Phase B candidate. Native staging, indexed handoff and subsequent approval/commit/landing remain distinct required boundaries."
+  },
+  "carried_candidate_hashes_are_initial_admission_values": true,
+  "validation_limits": {
+    "historical_gates_substitute_for_fresh_validation": false,
+    "all_180_required_nodes_covered": true,
+    "no_skip_xfail_or_test_omission": true,
+    "all_710_bound_source_paths_unchanged": true,
+    "source_index_and_refs_unchanged_in_both_runs": true,
+    "final_tracker_bytes_validated": true,
+    "stdout_pytest_duration_and_process_wall_duration_recorded_separately": true
+  },
+  "issues_encountered": [
+    {
+      "severity": "NON_BLOCKING",
+      "detail": "One-shot quota observation is unavailable to the inner implementer; no percentage inferred."
+    },
+    {
+      "severity": "OUTER_OWNED",
+      "detail": "Native indicator pre-stage was skipped on the clean index. Native generation/staging and actual indexed handoff/packet/cap verification remain pending."
+    },
+    {
+      "severity": "LOCAL_HELPER_CORRECTED",
+      "detail": "The initial doc-edit inventory assertion counted single-letter [E]/[N] markers. It stopped before writing; canonical-ID extraction was corrected to match all268 initial-facts IDs. No repository validation gate or source was changed."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/PRIMARY-TASKS-observed.md",
+      "sha256": "88e6ef9e7b8081c4b4dea2fab70e6a473298a36dadbe7ad314d968262d96b5ba",
+      "bytes": 2110935
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/baseline.json",
+      "sha256": "a6eca85daba8cb7e27e62ff94dab7727821513565c436710f47ab522b5c15b08",
+      "bytes": 541976
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/before-CHANGELOG.md",
+      "sha256": "96ce31e5fa143232e38d07ce8da88c1d6ac05008d639326e99e325076cbd1e39",
+      "bytes": 245816
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/before-TASKS.md",
+      "sha256": "f9b2ad17d08753acc35df06bd5a782fcb939d6384070010c488a6203f477b3a7",
+      "bytes": 2272029
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/collected-nodes.txt",
+      "sha256": "c0fb5c55fb67d866fb28ada0b3ae62b19d69b973dcc4cb4705a1d4fdbf0878a6",
+      "bytes": 287277
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/collection.json",
+      "sha256": "a3518f755e8a3a6e8675d8e6d1f25f0313ed300a0a6913f1f9d29644f2b3e1bb",
+      "bytes": 177710
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/collection.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/collection.stdout",
+      "sha256": "6b5d9a1905869b644a385c431c8b5be126e34b5aa2eb30de020e521cec34a82c",
+      "bytes": 287308
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/declared-validation.json",
+      "sha256": "3bcb05c386d36ab862253aab86160480c63d813742a47945472f0042c0872f50",
+      "bytes": 176948
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/declared-validation.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/declared-validation.stdout",
+      "sha256": "80dc47faeb34be1d28f3f44add039e501b7e8ac46a6b64ccb9809f477afd54fa",
+      "bytes": 2556
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-tracker-validation.json",
+      "sha256": "15386b29ce5c715537011cac681415e01ef743107d7cb83bd019dd16a2328aaa",
+      "bytes": 176947
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-tracker-validation.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-tracker-validation.stdout",
+      "sha256": "e78b8a6db367d1c8499575d76eaf7abc52ce6e39dea372bc54d666c18848f1ba",
+      "bytes": 2556
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/final-verification.json",
+      "sha256": "000a531fc35d1be3636d5bc76e5570bebb6496af329d30a27dcb15fb721465d3",
+      "bytes": 8695
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/history-bindings.json",
+      "sha256": "650d4e8ea02cc8faa78ad9118f70e804ed317cb5c483862d1538480ba9b88f5c",
+      "bytes": 106428
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/native-authority-before.json",
+      "sha256": "edbe3ebe322811ab476ab5358e6ae8f68fa46186ced6b247cf5a3f3f0875ac28",
+      "bytes": 3073
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/native-authority-final.json",
+      "sha256": "6bd599ef8c4e6b231ff9bb81760b71ca321230eb8b4b396817c61043852dcfa9",
+      "bytes": 2746
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/primary-final-observation.json",
+      "sha256": "287f4054c0634a1948fbcb8d00b5af0387de05f6cc5f07a6a553fe89419bdff5",
+      "bytes": 184
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/required-nodes.txt",
+      "sha256": "936c4c177bdbfcd31ddb9620f93d83b37cf59556d2dc68f3c9f6217dc23d2d01",
+      "bytes": 19752
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/test-integrity.json",
+      "sha256": "fd8a628f2a75c923801add59a4a00032a9e08a1fd83f46a5f3bc2d795aed14f9",
+      "bytes": 510
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-phase-b/tracker-reconciliation.json",
+      "sha256": "e0b5140079e28c08fb4a823e1daa6593e8f53ace01f633e4c792e589b07aa525",
+      "bytes": 15702
+    }
+  ]
+}
