@@ -1,25 +1,25 @@
 {
   "wave_id": "workingrcx-fleet-folder-recovery-r4-2026-10-13",
-  "repeat_run_speedup_ratio": 1.026308,
+  "repeat_run_speedup_ratio": 1.03533,
   "parity_diff_count": 3,
   "net_host_semantic_delta": 0,
-  "step_growth_slope": 0.324534,
+  "step_growth_slope": 0.302888,
   "repeat_run_raw_seconds": [
-    0.333072,
-    0.324534
+    0.313589,
+    0.302888
   ],
   "step_growth_points": [
     {
       "step": 1,
-      "elapsed_seconds": 0.333072
+      "elapsed_seconds": 0.313589
     },
     {
       "step": 2,
-      "elapsed_seconds": 0.657606
+      "elapsed_seconds": 0.616477
     }
   ],
   "parity_diff_source": "tools/checks/check_js_debt.sh",
-  "collection_timestamp_utc": "2026-10-13T04:40:08Z",
+  "collection_timestamp_utc": "2026-10-13T07:56:23Z",
   "collector_version": "2.3.0",
-  "comparison_commit": "27e35ed41b86d325546b7e13625c431794494e2d"
+  "comparison_commit": "6d300eeabdcd578fdaef436618d3c16c087c6e65"
 }

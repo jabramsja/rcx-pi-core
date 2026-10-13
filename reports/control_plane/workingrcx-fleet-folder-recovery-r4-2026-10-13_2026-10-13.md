@@ -173,21 +173,12 @@ FOUNDER_OVERRIDE:workingrcx-fleet-folder-recovery-r4-2026-10-13
 - Evidence command: `PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py --tb=short`.
 - Evidence delta: PENDING fresh public-boundary correction, unchanged scoped test-integrity checker, full six-module gate, native independent review, current-head CI and actual landing. Earlier R2 green results predate its supervisor finding..
 - Evidence handles:
+  - `candidate_authority_receipt`: `.agent_bus-fleet-folder-recovery-r4-20261013/meta/candidate_authority_receipts/workingrcx-fleet-folder-recovery-r4-2026-10-13/commit-pre-supervisor.json`
   - `indicator`: `reports/l4_wave_indicators/workingrcx-fleet-folder-recovery-r4-2026-10-13.json`
 - Current staged files:
-  - `CHANGELOG.md`
   - `TASKS.md`
-  - `mu/docs/agents/WorktreeLifecycle.v0.md`
-  - `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`
-  - `mu/tests/tools/test_pipeline_monitor_autofollow.py`
-  - `mu/tests/tools/test_recovery_gate.py`
-  - `mu/tests/tools/test_workingrcx_fleet_classification.py`
   - `mu/tests/tools/test_worktree_lifecycle.py`
-  - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/workingrcx_fleet_classification.py`
   - `mu/tools/executors/worktree_lifecycle.py`
-  - `mu/tools/observability/pipeline_monitor.sh`
   - `reports/control_plane/workingrcx-fleet-folder-recovery-r4-2026-10-13_2026-10-13.md`
-  - `reports/control_plane/workingrcx-fleet-folder-recovery-r4-2026-10-13_implementation_evidence.json`
   - `reports/l4_wave_indicators/workingrcx-fleet-folder-recovery-r4-2026-10-13.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->

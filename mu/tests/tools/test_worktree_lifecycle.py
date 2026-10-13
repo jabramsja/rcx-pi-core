@@ -298,6 +298,7 @@ def test_literal_watcher_path_requires_unambiguous_live_owner(native_lane, tmp_p
         directory = register_from_exited_owner(lane, env, status="success")
         authority = {p: p.read_bytes() for p in directory.glob("*.json")}
         result = lifecycle.complete_pending(directory, delay=0)
+        assert result["state"] == ("ESCALATED" if " " in folder else "COMPLETE"), result.get("reason", result)
         release = json.loads((directory / "reader-release.json").read_text())
         if " " in folder:
             assert result["state"] == "ESCALATED", result
@@ -418,10 +419,10 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
                     ps = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,command="],
                                         capture_output=True, text=True, check=True)
                     references = [line for line in ps.stdout.splitlines() if str(lane) in line]
-                assert result["state"] == "COMPLETE", (result, references)
+                assert result["state"] == "COMPLETE", f"{result.get('reason', result)}\nTarget references: {references}"
             if obstruction:
                 assert result["state"] == "ESCALATED", result
-                assert result.get("attempts_exhausted") == 3, result
+                assert result.get("attempts_exhausted") == 3, result.get("reason", result)
                 assert "Open target files/processes or uncertain lsof evidence" in result["reason"], result
                 assert lane.exists() and blocker.poll() is None
             else:
@@ -446,7 +447,7 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
     assert all(p.read_bytes() == raw for p, raw in receipts.items())
 
 
-@pytest.mark.parametrize("unobservable", [False, True], ids=["still-present", "permission-denied"])
+@pytest.mark.parametrize("unobservable", ["ps-present", "still-present", "permission-denied"])
 def test_reader_adoption_requires_pid_absence_before_respawn(tmp_path, monkeypatch, unobservable):
     """A disappearing ps row alone cannot authorize a public monitor respawn."""
     script = tmp_path.resolve() / "rcx_log_watcher.sh"
@@ -459,7 +460,7 @@ def test_reader_adoption_requires_pid_absence_before_respawn(tmp_path, monkeypat
 
     def kill(observed_pid, signum):
         signals.append((observed_pid, signum))
-        if signum == 0 and unobservable:
+        if signum == 0 and unobservable == "permission-denied":
             raise PermissionError("PID still cannot be proven absent")
 
     def run(argv, **kwargs):
@@ -467,8 +468,9 @@ def test_reader_adoption_requires_pid_absence_before_respawn(tmp_path, monkeypat
         if argv[:2] == ["tmux", "list-panes"]:
             return subprocess.CompletedProcess(argv, 0, pane_row, "")
         if argv[:2] == ["ps", "-ww"]:
-            return subprocess.CompletedProcess(argv, 1 if signals else 0,
-                "" if signals else f"{pid} 100 {started} {command}\n", "")
+            missing = bool(signals) and unobservable != "ps-present"
+            return subprocess.CompletedProcess(argv, 1 if missing else 0,
+                "" if missing else f"{pid} 100 {started} {command}\n", "")
         assert argv == ["tmux", "set-option", "-p", "-t", "%1", "remain-on-exit", "on"]
         return subprocess.CompletedProcess(argv, 0, "", "")
 
@@ -479,9 +481,14 @@ def test_reader_adoption_requires_pid_absence_before_respawn(tmp_path, monkeypat
     monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
     monkeypatch.setattr(time, "sleep", lambda _: None)
 
-    with pytest.raises(fleet.Hold, match="Old log watcher exit not acknowledged"):
+    with pytest.raises(fleet.Hold, match="Old log watcher exit not acknowledged") as held:
         lifecycle.monitor_reader_protocol("reader-test", adopt=True)
-    assert signals == [(pid, signal.SIGTERM), (pid, 0), (pid, 0)]
+    expected = dict(pid=pid, ppid=100, started=started, command=command)
+    assert json.loads(str(held.value).split("; evidence=", 1)[1]) == dict(
+        expected=expected, last_process=expected if unobservable == "ps-present" else None,
+        pid_absent=None if unobservable == "ps-present" else False)
+    assert signals == ([(pid, signal.SIGTERM)] if unobservable == "ps-present"
+                       else [(pid, signal.SIGTERM), (pid, 0), (pid, 0)])
     mutations = [c for c in commands if c[:2] == ["tmux", "set-option"] or "respawn-pane" in c]
     assert mutations == [["tmux", "set-option", "-p", "-t", "%1", "remain-on-exit", "on"]]
     assert script.read_text() == original

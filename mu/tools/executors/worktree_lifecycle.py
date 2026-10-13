@@ -131,10 +131,17 @@ def _adopt_monitor_pane(pane: dict, *, expected: dict | None = None) -> dict:
         deadline = time.monotonic() + READER_RELEASE_SECONDS
         # Both observations must acknowledge exit before the pane can respawn.
         # A missing ps row cannot release a still-present or unobservable PID.
-        while (_reader_process(process["pid"]) is not None
-               or not fleet._absent_pid(process["pid"])):
+        while True:
+            observed = _reader_process(process["pid"])
+            absent = fleet._absent_pid(process["pid"]) if observed is None else None
+            if observed is None and absent:
+                break
             if time.monotonic() >= deadline:
-                raise fleet.Hold("Old log watcher exit not acknowledged; no new retirement claim")
+                # Preserve the observations that actually failed the gate;
+                # a later process snapshot may miss an exit or PID reuse.
+                evidence = dict(expected=process, last_process=observed, pid_absent=absent)
+                raise fleet.Hold("Old log watcher exit not acknowledged; no new retirement claim; evidence="
+                                 + json.dumps(evidence, sort_keys=True))
             time.sleep(0.05)
         if {p["pane"]: p for p in _reader_panes()}.get(pane["pane"]) != pane:
             raise fleet.Hold("Old log watcher pane changed after exit; no respawn")
