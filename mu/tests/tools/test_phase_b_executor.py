@@ -14,13 +14,14 @@ Covers:
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
 import sqlite3
 import subprocess
 import sys
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -43,6 +44,66 @@ common_mod = load_module("executor_common_for_phase_b_tests", _EXECUTORS_DIR / "
 # Default valid routing record for tests that call run_phase_b.
 # Tests that specifically test routing validation should NOT use this.
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
+
+
+@pytest.fixture
+def phase_b_terminal_cli():
+    """Exercise the production CLI formatter with isolated actor and Git I/O."""
+    def emit(repo, payload, *, prefix="", stderr="", recovery=None):
+        output, errors = io.StringIO(), io.StringIO()
+
+        def actor(repo_root, plan_path, **kwargs):
+            assert repo_root == repo and kwargs["verbose"] is True
+            print(prefix, end="")
+            print(stderr, end="", file=sys.stderr)
+            return copy_payload(payload)
+
+        def git_root(command, **kwargs):
+            assert command == ["git", "rev-parse", "--show-toplevel"]
+            return SimpleNamespace(stdout=str(repo))
+
+        argv = ["phase_b_executor.py", "--json", "--verbose"]
+        if recovery is None:
+            argv.append("--dispatcher-owned-recovery")
+        recover = MagicMock(return_value=recovery)
+        with patch.object(pb_mod, "run_phase_b", side_effect=actor), \
+             patch.object(pb_mod.subprocess, "run", side_effect=git_root), \
+             patch.object(sys, "argv", argv), \
+             patch.dict(sys.modules, {"recovery_gate": SimpleNamespace(attempt_recovery=recover)}), \
+             redirect_stdout(output), redirect_stderr(errors):
+            code = pb_mod.main()
+        if recovery is None:
+            recover.assert_not_called()
+        else:
+            recover.assert_called_once()
+        return SimpleNamespace(returncode=code, stdout=output.getvalue(), stderr=errors.getvalue())
+
+    def copy_payload(payload):
+        return json.loads(json.dumps(payload))
+
+    return emit
+
+
+@pytest.mark.parametrize("prefix", [
+    "", "[phase-b] Complete\n",
+    '{"type":"thread.started","thread_id":"fixture"}\n',
+    '{"type":"system","subtype":"init"}\n{"type":"result","status":"success"}\n',
+])
+@pytest.mark.parametrize("status,recovery,exit_code", [
+    ("commit_ready", None, 0), ("error", None, 1),
+    ("error", {"recovered": True, "tier": 2}, 0),
+    ("continue_phase_b", None, 0),
+])
+def test_terminal_cli_preserves_real_pretty_output_and_exit(
+    tmp_path, phase_b_terminal_cli, prefix, status, recovery, exit_code,
+):
+    payload = {"status": status, "wave_id": "transport", "detail": {"quoted": 'brace } and "quote"'}}
+    result = phase_b_terminal_cli(tmp_path, payload, prefix=prefix, stderr="diagnostic stderr\n", recovery=recovery)
+    expected = {**payload, **({"recovery": recovery} if recovery else {})}
+    assert result.stdout == prefix + json.dumps(expected, indent=2) + "\n"
+    assert result.stderr == "diagnostic stderr\n"
+    assert result.returncode == exit_code
+    assert "recovery" not in payload
 
 
 @pytest.fixture
@@ -2651,6 +2712,149 @@ class TestPrepareCommitHandoff:
         handoff = json.loads(path.read_text())
         assert handoff["tracked_packet"] == "reports/control_plane/test_plan.md"
         assert handoff["scope_items"] == ["reports/control_plane/test_plan.md"]
+
+    @pytest.mark.parametrize("authorization,packet_state,allowed", [
+        pytest.param("explicit", "indexed", True, id="explicit-indexed-authority"),
+        pytest.param("standing", "indexed", True, id="standing-indexed-authority"),
+        pytest.param("explicit", "index_only", True, id="index-is-authoritative"),
+        pytest.param("missing", "indexed", False, id="override-and-commit-go-insufficient"),
+        pytest.param("lane_only", "indexed", False, id="lane-without-authorization"),
+        pytest.param("standing_only", "indexed", False, id="standing-without-lane"),
+        pytest.param("explicit", "worktree_only", False, id="unstaged-authorization"),
+        pytest.param("explicit", "unindexed", False, id="unindexed-packet"),
+        pytest.param("explicit", "wrong_wave", False, id="wrong-wave-packet"),
+        pytest.param("revoked", "indexed", False, id="revoked-authorization"),
+        pytest.param("neutral_observation", "indexed", True, id="separate-parser-observation"),
+        pytest.param("narrative_collision", "indexed", False, id="existing-broad-scanner-boundary"),
+    ])
+    def test_existing_pr_handoff_requires_indexed_packet_authority(
+        self, tmp_path, authorization, packet_state, allowed,
+    ):
+        """Exercise the selector and real builder without substituting branch authority."""
+        _init_git_repo(tmp_path)
+        wave_id = "current-repair-wave"
+        target_branch = "jabramsja/existing-pr-wave"
+        _git_stdout(tmp_path, "checkout", "-b", target_branch)
+        (tmp_path / "file.py").write_text("# staged candidate\n", encoding="utf-8")
+        _git_stdout(tmp_path, "add", "--", "file.py")
+
+        explicit = "Authorization: authorized control-surface L4_ENABLER.\n"
+        lane = "Lane: control-surface (pipeline repair)\n"
+        standing = "Founder authorization: standing pipeline-bug-fix authorization.\n"
+        authority_text = {
+            "explicit": explicit,
+            "standing": lane + standing,
+            "missing": "",
+            "lane_only": lane,
+            "standing_only": standing,
+            "revoked": explicit + "Authorization: revoked.\n",
+            "neutral_observation": explicit + (
+                "\n## Non-normative review clarification\n"
+                "Parser observation: malformed output fails closed.\n"
+            ),
+            # Preserve the current enforcement boundary; its narrative false
+            # positive is a separate row40 repair, not branch authority here.
+            "narrative_collision": explicit + (
+                "\n## Non-normative review clarification\n"
+                "Parser observation: malformed output was rejected.\n"
+            ),
+        }[authorization]
+        packet_rel = f"reports/control_plane/{wave_id}.md"
+        packet = tmp_path / packet_rel
+        packet.parent.mkdir(parents=True)
+        base_content = (
+            f"Wave ID: {wave_id}\n"
+            "Class: L4_ENABLER\n"
+            f"Purpose: bounded repair on the existing PR branch {target_branch}.\n"
+            f"FOUNDER_OVERRIDE:{wave_id}\n"
+        )
+        indexed_content = base_content + authority_text
+        if packet_state == "worktree_only":
+            indexed_content = base_content
+        elif packet_state == "wrong_wave":
+            indexed_content = indexed_content.replace(
+                f"Wave ID: {wave_id}\n", "Wave ID: another-repair-wave\n",
+            )
+        packet.write_text(indexed_content, encoding="utf-8")
+        if packet_state != "unindexed":
+            _git_stdout(tmp_path, "add", "--", packet_rel)
+        if packet_state == "worktree_only":
+            packet.write_text(base_content + authority_text, encoding="utf-8")
+        elif packet_state == "index_only":
+            packet.write_text(base_content, encoding="utf-8")
+
+        receipt_rel = ".agent_bus/meta/pre_commit_receipts/branch.json"
+        receipt = tmp_path / receipt_rel
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text(
+            json.dumps({"decision": "COMMIT_GO", "wave_name": wave_id}),
+            encoding="utf-8",
+        )
+        # Even both signals together cannot replace indexed packet authority.
+        note = pb_mod._build_phase_b_tracker_note(  # ANTICHEAT_OK: real tracker note at the branch handoff boundary
+            wave_id=wave_id,
+            task_id="[TEST]",
+            wave_class="L4_ENABLER",
+            target_gate_id="G8",
+            plan_path=packet_rel,
+            changed_files=["file.py", packet_rel],
+            test_files=[],
+            receipt_path=receipt_rel,
+            bridge_rounds=1,
+            reentry=False,
+            founder_override=wave_id,
+        )
+        assert f"FOUNDER_OVERRIDE:{wave_id}" in note
+        selected = pb_mod._phase_b_target_branch_for_current_worktree(  # ANTICHEAT_OK: selection alone must not authorize the real builder
+            _git_stdout(tmp_path, "symbolic-ref", "--short", "HEAD"),
+            wave_id=wave_id,
+            wave_class="L4_ENABLER",
+            plan_content=packet.read_text(encoding="utf-8"),
+        )
+        assert selected == target_branch
+        kwargs = {
+            "wave_id": wave_id,
+            "task_id": "[TEST]",
+            "wave_class": "L4_ENABLER",
+            "target_gate_id": "G8",
+            "target_branch": selected,
+            "tracked_packet": packet_rel,
+            "tracker_note_text": note,
+            "supervisor_lane": "hooks/agents/bridge control-surface",
+            "files_to_stage": ["file.py", packet_rel],
+            "commit_message": "test: existing PR repair handoff",
+            "fixes_implemented": ["test branch authorization"],
+            "pre_commit_receipt_path": receipt_rel,
+            "bus_dir": ".agent_bus",
+        }
+        handoff_path = tmp_path / ".agent_bus/executors/phase_b_handoff.json"
+        handoff_path.parent.mkdir(parents=True)
+        prior_handoff = json.dumps({"wave_id": "prior-wave", "target_branch": target_branch})
+        handoff_path.write_text(prior_handoff, encoding="utf-8")
+        git_head_before = (tmp_path / ".git/HEAD").read_bytes()
+        git_index_before = (tmp_path / ".git/index").read_bytes()
+
+        if allowed:
+            path = pb_mod.prepare_commit_handoff(tmp_path, **kwargs)
+            assert path == handoff_path
+            handoff = json.loads(path.read_text(encoding="utf-8"))
+            assert handoff["wave_id"] == wave_id
+            assert handoff["caller"] == "phase_b"
+            assert handoff["target_branch"] == target_branch
+            assert handoff["tracked_packet"] == packet_rel
+            assert handoff["pre_commit_receipt_path"] == receipt_rel
+            assert handoff["tracker_note_text"] == note
+        else:
+            with pytest.raises(
+                pb_mod.PhaseBExecutorError,
+                match="target_branch must equal the canonical wave branch",
+            ) as exc:
+                pb_mod.prepare_commit_handoff(tmp_path, **kwargs)
+            assert target_branch in str(exc.value)
+            assert handoff_path.read_text(encoding="utf-8") == prior_handoff
+
+        assert (tmp_path / ".git/HEAD").read_bytes() == git_head_before
+        assert (tmp_path / ".git/index").read_bytes() == git_index_before
 
     def test_wave_bound_target_branch_accepts_restart_branch(self):
         target_branch = pb_mod._wave_bound_target_branch(  # ANTICHEAT_OK: validating bounded restart-branch selection

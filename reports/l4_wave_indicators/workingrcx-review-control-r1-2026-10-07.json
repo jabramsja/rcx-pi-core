@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-review-control-r1-2026-10-07",
+  "repeat_run_speedup_ratio": 0.940131,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.309527,
+  "repeat_run_raw_seconds": [
+    0.290996,
+    0.309527
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.290996
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.600523
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-10-07T22:50:54Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "b27d1d88616891ee1478bd8dc49b592ebd5f42a2"
+}

@@ -391,11 +391,13 @@ esac
     return bin_dir
 
 
-def _fake_tmux_dir(tmp_path: Path, *, log_path: Path) -> Path:
+def _fake_tmux_dir(tmp_path: Path, *, log_path: Path, owner_only: bool = False) -> Path:
     """A recording ``tmux`` shim — logs every call and fakes pane/window ids.
 
     Mirrors the proven shim in test_recovery_gate.py so the first ``start`` runs a
     real ``rebuild_tmux_session`` and the pane commands land in ``log_path``.
+    In owner-only mode the foreground sees healthy panes, while the spawned
+    owner sees a missing session and must construct all four pane commands.
     """
     bin_dir = tmp_path / "tmux-bin"
     bin_dir.mkdir(exist_ok=True)
@@ -408,6 +410,7 @@ log_path={str(log_path)!r}
 counter_path={str(counter_path)!r}
 session_path={str(session_path)!r}
 panes_path={str(panes_path)!r}
+owner_build_path={str(tmp_path / 'tmux-owner-build.pid')!r}
 printf '%s\\n' "$*" >> "$log_path"
 cmd="${{1:-}}"
 shift || true
@@ -420,6 +423,9 @@ healthy_panes() {{
 }}
 case "$cmd" in
   has-session)
+    if [ {int(owner_only)} = 1 ] && [ "$PPID" != "$(cat "$RCX_PIPELINE_MONITOR_STATE_DIR/owner.pid")" ]; then
+      exit 0
+    fi
     [ -f "$session_path" ]
     ;;
   kill-session)
@@ -430,12 +436,17 @@ case "$cmd" in
     exit 1
     ;;
   new-session)
+    printf '%s\\n' "$PPID" > "$owner_build_path"
     : > "$session_path"
     printf '0' > "$counter_path"
     healthy_panes > "$panes_path"
     exit 0
     ;;
   list-panes)
+    if [ {int(owner_only)} = 1 ] && [ ! -f "$session_path" ]; then
+      healthy_panes
+      exit 0
+    fi
     [ -f "$session_path" ] || exit 1
     if [ -f "$panes_path" ]; then
       cat "$panes_path"
@@ -759,6 +770,7 @@ def _start_and_capture(
     *monitor_args: str,
     install_identity: bool = False,
     lane_config: dict | None = None,
+    owner_only: bool = False,
 ) -> list[str]:
     _install(repo, "pipeline_monitor.sh")
     if install_identity:
@@ -775,16 +787,21 @@ def _start_and_capture(
 
     git_bin = _fake_git_dir(tmp_path, show_toplevel=str(repo), branch="jabramsja/test-wave")
     tmux_log = tmp_path / "tmux.log"
-    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log)
+    tmux_bin = _fake_tmux_dir(tmp_path, log_path=tmux_log, owner_only=owner_only)
     env = os.environ | {
         "PATH": f"{tmux_bin}:{git_bin}:{os.environ['PATH']}",
         "RCX_PIPELINE_MONITOR_STATE_DIR": str(tmp_path / "monitor-state"),
         "RCX_PIPELINE_MONITOR_HEALTH_INTERVAL": "60",
+        "RCX_AGENT_BUS_DIR": ".agent_bus",
+        "RCX_PIPELINE_MONITOR_LANE": "",
     }
     monitor = repo / "mu" / "tools" / "observability" / "pipeline_monitor.sh"
+    # Isolate process discovery as well as tmux/state; explicit caller overrides
+    # still win. A session override does not pin the default bus.
+    command = ["bash", str(monitor), "--tmux-session", f"rcx-autofollow-{os.getpid()}", *monitor_args]
     try:
         result = subprocess.run(
-            ["bash", str(monitor), *monitor_args, "start", "--detach"],
+            [*command, "start", "--detach"],
             cwd=repo,
             capture_output=True,
             text=True,
@@ -792,10 +809,19 @@ def _start_and_capture(
             timeout=_TIMEOUT_S,
         )
         assert result.returncode == 0, result.stderr
+        if owner_only:
+            # Wait for an observable build milestone, never for a scheduling
+            # delay. The final title is set after all four pane commands.
+            _wait_for(lambda: tmux_log.exists() and
+                      "-T PANE 4 · SESSION TIMELINE" in tmux_log.read_text(),
+                      timeout=_TIMEOUT_S)
+            owner_pid = (tmp_path / "monitor-state" / "owner.pid").read_text().strip()
+            assert (tmp_path / "tmux-owner-build.pid").read_text().strip() == owner_pid
+            subprocess.run(["kill", "-0", owner_pid], check=True, timeout=_TIMEOUT_S)
         return tmux_log.read_text(encoding="utf-8").splitlines()
     finally:
         subprocess.run(
-            ["bash", str(monitor), *monitor_args, "stop"],
+            [*command, "stop"],
             cwd=repo,
             capture_output=True,
             text=True,
@@ -808,14 +834,17 @@ def _pane_command_lines(log_lines: list[str], pane_script: str) -> list[str]:
     return [line for line in log_lines if pane_script in line]
 
 
-def test_b1_default_monitor_panes_carry_autofollow_signal(tmp_path):
+@pytest.mark.parametrize("owner_only", [True, False], ids=["owner", "start"])
+def test_b1_default_monitor_panes_carry_autofollow_signal(tmp_path, owner_only):
     repo = tmp_path / "repo"
     repo.mkdir()
-    log_lines = _start_and_capture(tmp_path, repo)
+    log_lines = _start_and_capture(tmp_path, repo, owner_only=owner_only)
 
     for pane_script in ("rcx_log_watcher.sh", "_pane_findings.sh", "_pane_processes.sh", "_pane_timeline.sh"):
         commands = _pane_command_lines(log_lines, pane_script)
         assert commands, f"no pane command captured for {pane_script}"
+        if owner_only:
+            assert len(commands) == 1, commands
         for command in commands:
             assert "RCX_OBS_AUTOFOLLOW_BUS=1" in command, command
             # Still seeds the default bus; the signal only ENABLES per-refresh
@@ -831,13 +860,15 @@ def test_b1_default_monitor_panes_carry_autofollow_signal(tmp_path):
         pytest.param(("--bus-dir", ".agent_bus"), ".agent_bus", id="default-bus-pin"),
     ],
 )
-def test_b2_pinned_monitor_panes_have_no_autofollow_signal(tmp_path, pin_args, expected_bus):
+@pytest.mark.parametrize("owner_only", [True, False], ids=["owner", "start"])
+def test_b2_pinned_monitor_panes_have_no_autofollow_signal(tmp_path, pin_args, expected_bus, owner_only):
     repo = tmp_path / "repo"
     repo.mkdir()
     log_lines = _start_and_capture(
         tmp_path,
         repo,
         *pin_args,
+        owner_only=owner_only,
         install_identity=True,
         lane_config={
             "alpha": {
@@ -851,6 +882,8 @@ def test_b2_pinned_monitor_panes_have_no_autofollow_signal(tmp_path, pin_args, e
     for pane_script in ("rcx_log_watcher.sh", "_pane_findings.sh", "_pane_processes.sh", "_pane_timeline.sh"):
         commands = _pane_command_lines(log_lines, pane_script)
         assert commands, f"no pane command captured for {pane_script}"
+        if owner_only:
+            assert len(commands) == 1, commands
         for command in commands:
             assert "RCX_OBS_AUTOFOLLOW_BUS" not in command, command
             # Pinned monitors keep their explicit fixed bus.

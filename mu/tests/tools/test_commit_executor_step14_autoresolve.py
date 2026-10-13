@@ -24,6 +24,8 @@ import types
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from mu.tests.tools.module_loader import load_module
 from tests.repo_root import REPO_ROOT
 
@@ -2299,6 +2301,108 @@ def test_pr1304_activity_metadata_does_not_mask_older_unresolved_p1():
             data, "b" * 40) is None
 
 
+def test_pr1332_complete_activity_preserves_full_retained_thread_identity():
+    from mu.tests.tools.test_commit_executor_local_review import (
+        SERVICE_ACTIVITY_RUNNING, SERVICE_ACTIVITY_COMPLETED,
+    )
+
+    for body in (SERVICE_ACTIVITY_RUNNING, SERVICE_ACTIVITY_COMPLETED):
+        finding_body = "P1 retained verified defect\n" * 40
+        thread = _residual_review_thread("older-p1", finding_body)
+        thread["isOutdated"] = True
+        thread["comments"]["nodes"][0]["author"]["__typename"] = "Bot"
+        data = _residual_review_state([thread])
+        data["comments"]["nodes"][0]["body"] = body
+        extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: real classifier, full service control
+            data, "b" * 40, result={"steps_completed": []}, pr_number="1332", classify_quota=True)
+        assert extracted["outcome"] == "bot_findings"
+        assert extracted["bot_findings"] == [{
+            "author": commit_mod.BOT_REVIEW_LOGIN, "body": finding_body, "path": "docs/note.md", "line": 1,
+            "thread_id": "older-p1", "comment_id": "older-p1-comment", "reviewed_head": "b" * 40,
+            "thread_snapshot": thread,
+        }]
+        assert commit_mod._current_head_connector_issue_comment_outcome(  # ANTICHEAT_OK: no activity head binding
+            data, "b" * 40) is None
+
+
+def test_pr1332_activity_marker_cannot_hide_unknown_content_from_outcome():
+    from mu.tests.tools.test_commit_executor_local_review import SERVICE_ACTIVITY_COMPLETED
+
+    body = SERVICE_ACTIVITY_COMPLETED + "\nAn unresolved defect remains."
+    data = _residual_review_state([])
+    data["comments"]["nodes"][0]["body"] = body
+    outcome = commit_mod._current_head_connector_issue_comment_outcome(  # ANTICHEAT_OK: full-body consumption
+        data, "b" * 40)
+    assert outcome["kind"] == "other" and outcome["body"] == body
+    extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: complete retained issue finding
+        data, "b" * 40, result={"steps_completed": []}, pr_number="1332", classify_quota=True)
+    assert extracted["bot_findings"] == [{
+        "author": commit_mod.BOT_REVIEW_LOGIN, "body": body, "path": "", "line": None,
+    }]
+
+
+def test_pr1332_formal_metadata_retains_exact_unresolved_queue_finding(tmp_path):
+    from copy import deepcopy
+    import hashlib
+    import pytest
+    from mu.tests.tools.test_commit_executor_local_review import (
+        SAVED_REVIEW_HEAD, SERVICE_FORMAL_REVIEW, SERVICE_FORMAL_BODY_SHA256,
+        SERVICE_QUEUE_THREAD, SERVICE_QUEUE_BODY_SHA256,
+    )
+
+    review = deepcopy(SERVICE_FORMAL_REVIEW)
+    thread = deepcopy(SERVICE_QUEUE_THREAD)
+    body = thread["comments"]["nodes"][0]["body"]
+    assert hashlib.sha256(review["body"].encode()).hexdigest() == SERVICE_FORMAL_BODY_SHA256
+    assert hashlib.sha256(body.encode()).hexdigest() == SERVICE_QUEUE_BODY_SHA256
+    data = _residual_review_state([thread])
+    data["headRefOid"] = SAVED_REVIEW_HEAD
+    data["latestReviews"] = {"nodes": [review], "pageInfo": {"hasNextPage": False}}
+    data["comments"]["pageInfo"] = {"hasPreviousPage": False}
+    before = deepcopy(data)
+
+    extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: actual saved full formal/thread bodies
+        data, SAVED_REVIEW_HEAD, result={"steps_completed": []}, pr_number="1332", classify_quota=True)
+    assert extracted == {"outcome": "bot_findings", "bot_findings": [{
+        "author": "chatgpt-codex-connector", "body": body, "path": "mu/tools/executors/commit_executor.py",
+        "line": 17870, "thread_id": "PRRT_kwDOQvy8bs6qI-5e", "comment_id": "PRRC_kwDOQvy8bs77IAg6",
+        "reviewed_head": SAVED_REVIEW_HEAD, "thread_snapshot": thread,
+    }]}
+    assert data == before
+    # Replay only the offline isolation: no GitHub action or disposition. Even
+    # this synthetic resolved copy supplies no independent review approval.
+    isolated = deepcopy(data)
+    isolated["reviewThreads"]["nodes"][0]["isResolved"] = True
+    assert commit_mod._extract_review_findings(  # ANTICHEAT_OK: separately isolate the observed wrapper
+        isolated, SAVED_REVIEW_HEAD, result={"steps_completed": []}, pr_number="1332",
+        classify_quota=True) == {"outcome": "clean"}
+    with pytest.raises(ValueError, match="genuine current-head GitHub clearance"):
+        commit_mod._require_quota_history_cloud_clearance(  # ANTICHEAT_OK: metadata cannot grant clearance
+            isolated, SAVED_REVIEW_HEAD, tmp_path / "missing-continuation.json")
+    assert data == before
+
+
+def test_pr1332_formal_wrapper_is_never_thread_or_issue_metadata():
+    from copy import deepcopy
+    from mu.tests.tools.test_commit_executor_local_review import SERVICE_FORMAL_REVIEW
+
+    body = SERVICE_FORMAL_REVIEW["body"]
+    for location in ("thread", "issue"):
+        thread = _residual_review_thread("real-thread", body)
+        thread["comments"]["nodes"][0]["author"]["__typename"] = "Bot"
+        data = _residual_review_state([thread] if location == "thread" else [])
+        data["latestReviews"]["nodes"] = [deepcopy(SERVICE_FORMAL_REVIEW)]
+        if location == "issue":
+            data["comments"]["nodes"][0]["body"] = body
+        before = deepcopy(data)
+        extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: formal-only wrapper recognition
+            data, "b" * 40, result={"steps_completed": []}, pr_number="1332", classify_quota=True)
+        assert extracted["outcome"] == "bot_findings"
+        assert len(extracted["bot_findings"]) == 1
+        assert extracted["bot_findings"][0]["body"] == body
+        assert data == before
+
+
 def test_pr1304_new_review_does_not_clear_human_or_retained_nonoutdated_thread():
     human = _residual_review_thread("human", author="maintainer")
     extracted = commit_mod._extract_review_findings(  # ANTICHEAT_OK: human review preservation
@@ -2378,3 +2482,92 @@ def test_report_child_cannot_clear_late_unresolved_p1_before_merge(tmp_path, mon
     assert outcome["bot_findings"][0]["thread_id"] == "late"
     assert "P1" in outcome["bot_findings"][0]["body"]
     assert "ensure_review_clear_and_merge" not in result["steps_completed"]
+
+
+@pytest.mark.parametrize("evidence", ["unchanged", "open-base-drift", "wrong-parents", "missing-parents"])
+def test_protected_held_carrier_native_lifecycle_retains_and_resumes(tmp_path, monkeypatch, evidence):
+    """Real linked carrier, continuation and lifecycle; no retirement subprocess."""
+    import shutil
+    from mu.tests.tools.test_commit_executor_local_review import (
+        Carrier, BUS, commit, git, _cloud_clearance, _native_continuation, _resume_native,
+    )
+    from mu.tools.executors import worktree_lifecycle as lifecycle
+
+    primary = tmp_path / "primary"
+    primary.mkdir()
+    carrier = Carrier(primary, monkeypatch)
+    lane = tmp_path / "lane"
+    git(primary, "worktree", "add", "--detach", str(lane), carrier.head)
+    git(primary, "checkout", "--detach", carrier.head)
+    git(lane, "checkout", "fixture/quota")
+    shutil.copytree(carrier.bus, lane / BUS)
+    carrier.root, carrier.bus = lane, lane / BUS
+    carrier.continuation = carrier.bus / "continuation.json"
+    carrier.config_path = lane / "mu/tools/executors/executor_config.json"
+    carrier.bridge_path = carrier.bus / "bridge_config.json"
+    _cloud_clearance(carrier)
+    _native_continuation(carrier)
+    carrier.merge_queued = True
+    monkeypatch.setattr(commit, "PROTECTED_MERGE_WAIT_SECONDS", 12)
+    starts = []
+
+    def capture_start(record):
+        starts.append(record)
+        return {"state": "PENDING", "record": str(record)}
+
+    # Only the OS worker launch is replaced. All registration, terminal,
+    # closeout, retention and successor rules below are production functions.
+    monkeypatch.setattr(lifecycle, "start_completion", capture_start)
+    # commit_executor loaded by file path imports the same standalone module.
+    import worktree_lifecycle as standalone_lifecycle
+    monkeypatch.setattr(standalone_lifecycle, "start_completion", capture_start)
+    assert carrier.execute()["status"] == "held"
+    admission = json.loads(carrier.continuation.read_text())["protected_merge_intent"]["binding"]["review_identity"]
+    assert admission["base_sha"] == carrier.base and admission["head_sha"] == carrier.head
+    if evidence == "open-base-drift":
+        carrier.pr["baseRefOid"] = carrier.commit_evidence([carrier.base])["oid"]
+    elif evidence in {"wrong-parents", "missing-parents"}:
+        merge = carrier.commit_evidence([carrier.head, carrier.base])
+        if evidence == "missing-parents":
+            merge.pop("parents")
+        carrier.pr.update(state="MERGED", mergeCommit=merge)
+    held = _resume_native(carrier)
+    assert held["status"] == "held", held
+    record = Path(held["worktree_completion"]["record"])
+    before = carrier.continuation.read_bytes()
+    # Model exited fixture owners at the process-liveness I/O boundary.
+    monkeypatch.setattr(lifecycle.fleet, "_absent_pid", lambda _: True)
+    retained = lifecycle.complete_pending(record, delay=0)
+    assert retained["state"] == "ESCALATED", retained
+    assert retained["reason"] == lifecycle.FAILED_CLOSEOUT_REASON
+    assert lane.is_dir() and carrier.continuation.read_bytes() == before
+    original = {p: p.read_bytes() for p in record.rglob("*") if p.is_file()}
+
+    carrier.pr.update(state="MERGED", baseRefOid=carrier.merge_evidence["oid"], mergeCommit=carrier.merge_evidence)
+    # The closeout sink is outside Step15; retain the verified merge fact as
+    # the real completion routine does before lifecycle successor admission.
+    def complete(**kwargs):
+        carrier.landed.append(kwargs)
+        return {**kwargs["result"], "status": "success", "merge_sha": kwargs["verified_merge_sha"]}
+
+    monkeypatch.setattr(commit, "_complete_post_merge_pipeline", complete)
+    git(primary, "update-ref", "refs/remotes/origin/dev", carrier.merge_evidence["oid"])
+    native_git = standalone_lifecycle.fleet.git
+
+    def remote_io(root, *args, **kwargs):
+        if args[:3] == ("fetch", "origin", "dev"):
+            return subprocess.CompletedProcess(args, 0, b"", b"")
+        return native_git(root, *args, **kwargs)
+
+    monkeypatch.setattr(standalone_lifecycle.fleet, "git", remote_io)
+    landed = _resume_native(carrier)
+    assert landed["status"] == "success", landed
+    successor = Path(landed["worktree_completion"]["record"])
+    assert successor != record
+    assert json.loads((successor / "terminal.json").read_text())["merge_sha"] == carrier.merge_evidence["oid"]
+    assert json.loads((successor / "predecessor.json").read_text())["attempts_used"] == 1
+    assert json.loads((successor / "closeout.json").read_text())["result"]["status"] == "success"
+    assert all(p.read_bytes() == raw for p, raw in original.items())
+    assert len(carrier.landed) == 1
+    assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == 1
+    assert lane.is_dir()  # Retirement remains owned by the captured worker boundary.

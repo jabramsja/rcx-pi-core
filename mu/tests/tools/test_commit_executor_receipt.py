@@ -8409,13 +8409,13 @@ class TestCommitExecutorPytestGate:
             "run",
             return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
         ) as mock_run:
-            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing single-file timeout floor
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing exact full Phase B module's 600s allocation
                 repo,
                 ["mu/tests/tools/test_phase_b_executor.py"],
             )
 
         assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 240
+        assert mock_run.call_args.kwargs["timeout"] == 600
 
     def test_run_pytest_on_files_gives_two_heavy_files_real_slack(self, tmp_path):
         from types import SimpleNamespace
@@ -8428,7 +8428,7 @@ class TestCommitExecutorPytestGate:
             "run",
             return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
         ) as mock_run:
-            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing 2-file timeout floor after observed 198.857s gate
+            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing Phase B 600s plus ordinary selector 240s allocation
                 repo,
                 [
                     "mu/tests/tools/test_phase_b_executor.py",
@@ -8437,7 +8437,7 @@ class TestCommitExecutorPytestGate:
             )
 
         assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 480
+        assert mock_run.call_args.kwargs["timeout"] == 840
 
     def test_run_pytest_on_files_timeout_reports_budget(self, tmp_path):
         import subprocess
@@ -8448,7 +8448,7 @@ class TestCommitExecutorPytestGate:
         with patch.object(
             commit_mod.subprocess,
             "run",
-            side_effect=subprocess.TimeoutExpired(["pytest"], timeout=480),
+            side_effect=subprocess.TimeoutExpired(["pytest"], timeout=840),
         ):
             result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing timeout diagnostic includes computed budget
                 repo,
@@ -8460,7 +8460,7 @@ class TestCommitExecutorPytestGate:
 
         assert result["passed"] is False
         assert result["exit_code"] == -1
-        assert result["stderr"] == "pytest timed out after 480s"
+        assert result["stderr"] == "pytest timed out after 840s"
 
     def test_run_pytest_on_files_uses_fast_shard_marker_filter(self, tmp_path):
         from types import SimpleNamespace

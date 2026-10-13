@@ -1,0 +1,388 @@
+{
+  "wave_id": "workingrcx-local-review-clearance-format-r1-2026-10-12",
+  "task_id": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+  "role": "Phase B code implementer",
+  "observed_utc": "2026-10-12T21:55:14.235197+00:00",
+  "status": "Implementation locally validated; final tracker receipt referenced below; outer native review and landing pending",
+  "implementation_complete": true,
+  "outer_governance_complete": false,
+  "summary": "Add one literal full-service courtesy alternative. The complete parser remains bounded and anchored; all authentication, request, time, classification, finding-retention and protected merge authority functions are unchanged.",
+  "files_edited_by_this_implementer": [
+    "mu/tools/executors/commit_executor.py",
+    "mu/tests/tools/test_commit_executor_local_review.py",
+    "TASKS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/workingrcx-local-review-clearance-format-r1-2026-10-12_2026-10-12_implementation_evidence.json"
+  ],
+  "candidate_allowlist": [
+    "mu/tools/executors/commit_executor.py",
+    "mu/tests/tools/test_commit_executor_local_review.py",
+    "TASKS.md",
+    "CHANGELOG.md",
+    "mu/tests/docs/test_growth_caps.py",
+    "reports/control_plane/workingrcx-local-review-clearance-format-r1-2026-10-12_2026-10-12.md",
+    "reports/control_plane/workingrcx-local-review-clearance-format-r1-2026-10-12_2026-10-12_implementation_evidence.json",
+    "reports/l4_wave_indicators/workingrcx-local-review-clearance-format-r1-2026-10-12.json",
+    "reports/deferred/non_blocking/workingrcx-local-review-clearance-format-r1-2026-10-12_bridge_nonblockers.md"
+  ],
+  "native_owned_untouched": {
+    "packet": "reports/control_plane/workingrcx-local-review-clearance-format-r1-2026-10-12_2026-10-12.md",
+    "packet_sha256": "a8bcf83522f14dd51b11b0351776be72b3858fa1f0781e23183d680e6d90d589",
+    "cap": "mu/tests/docs/test_growth_caps.py",
+    "indicator": {
+      "path": "reports/l4_wave_indicators/workingrcx-local-review-clearance-format-r1-2026-10-12.json",
+      "exists": false,
+      "ownership": "outer native generation; no hand-authored substitute"
+    },
+    "optional_nonblocking_ledger_created": false
+  },
+  "source_test_changes": {
+    "production_ast_nodes_changed": [
+      "_connector_no_issues_control_head"
+    ],
+    "accepted_new_sentence": "Already looking forward to the next diff.",
+    "existing_forms_retained": [
+      "Nice work! complete service form",
+      "compact no-issues form"
+    ],
+    "unchanged_controls": [
+      "65536-character body bound",
+      "whole normalized message re.fullmatch",
+      "explicit 7-40 hex reviewed-commit token",
+      "literal complete known footer",
+      "Bot actor and positive integer comment ID",
+      "recorded current-head User request and exact integer request ID",
+      "response after valid request timestamp",
+      "complete review/comment/thread pagination",
+      "pending-review and retained-finding holds",
+      "protected exact-head merge without admin fallback"
+    ],
+    "test_retention": {
+      "baseline_nodes": 2343,
+      "final_nodes": 2535,
+      "added_nodes": 192,
+      "removed_nodes": [],
+      "baseline_functions": 136,
+      "baseline_assertions": 674,
+      "all_baseline_assertions_retained": true
+    },
+    "integration": "Existing disposable two-commit real Git carriers; actual Step15, quota-history clearance, CI recheck and protected merge call construction; fake remote/model I/O only. No live GitHub, real review process or real merge process."
+  },
+  "captured_regression": {
+    "raw_evidence": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/legacy-history-r10-review-observations/627391cd8b71248578e66cba17ff4297b20fff0bedce8096f7dbc972372f3aeb.json",
+      "sha256": "627391cd8b71248578e66cba17ff4297b20fff0bedce8096f7dbc972372f3aeb",
+      "bytes": 11712
+    },
+    "comment_database_id": 6132765003,
+    "body_sha256": "4c58eb3e6877fe3830c8187f8c94e61ea9e561a553ac6d729bd3ca6ff371c494",
+    "fixture_matches_exact_raw_comment": true,
+    "before_source_sha256": "68372ae6d9785bb28f1de0903ceca721d19bfd6789ae6481b1c21202e13f0f2b",
+    "before_complete_parser_result": null,
+    "before_broad_outcome_kind": "clear",
+    "after_complete_parser_result": "e043abde39",
+    "reproduction_receipt": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/unchanged-parser-reproduction.json",
+      "sha256": "6cad071e51d29ceab8fbaa642bb2ee38d4ef423deb3faa5db17176b539e52e90",
+      "bytes": 1941
+    },
+    "limits": "Stored GitHub evidence is read-only regression input. Per-carrier tests model fresh requests and heads independently. No diagnostic control, stored response or prior approval is used as live review authority."
+  },
+  "validation_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider tests/docs/test_growth_caps.py tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py tests/tools/test_executor_dispatch.py tests/tools/test_commit_executor_local_review.py tests/tools/test_local_review_history_recovery.py --tb=long",
+  "validation_history": [
+    {
+      "summary": "4 failed, 2531 passed in 206.55s; four newly added initial missing/wrong recorded-head fixture cases",
+      "exit_code": 1,
+      "elapsed_seconds": 230.30256899999222,
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/declared-cohort.json",
+        "sha256": "84381eb075b9cbb048ad35d96a3f99b0614800a013cfaa48d6f533093177357e",
+        "bytes": 121004
+      },
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/declared-cohort.stdout",
+        "sha256": "8530ce75b8d712aa881e31e838b2d6246ecc08c0d1f73b16a2af51153fd00980",
+        "bytes": 34308
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/declared-cohort.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    {
+      "summary": "2535 passed in 194.07s (0:03:14)",
+      "exit_code": 0,
+      "elapsed_seconds": 194.44209320901427,
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-declared-cohort.json",
+        "sha256": "3143ac5ed15dff748ab9df216978c8aff7e28b3aee195dc19bb03808a1b21b9e",
+        "bytes": 121004
+      },
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-declared-cohort.stdout",
+        "sha256": "eb25444752e52611747580c74fd5603483ae22c62ca1dace34938c780f4e73aa",
+        "bytes": 2956
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-declared-cohort.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    }
+  ],
+  "validation_result": {
+    "exit_code": 0,
+    "passed": 2535,
+    "pytest_seconds": 194.07,
+    "process_seconds": 194.44209320901427
+  },
+  "collection": {
+    "baseline": {
+      "summary": "2343 tests collected before substantive edits",
+      "exit_code": 0,
+      "elapsed_seconds": 3.720084832981229,
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/baseline-collection.json",
+        "sha256": "618c213a91b723377fff512eff66248008a9f4cd0f8aa53787b9598babd72e4c",
+        "bytes": 121305
+      },
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/baseline-collection.stdout",
+        "sha256": "a4592f9deea9b6e267a130eefde3aa06e10caa3b5c53344825d1cf21c8538eb9",
+        "bytes": 306505
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/baseline-collection.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "final": {
+      "summary": "2535 tests collected; every baseline node retained",
+      "exit_code": 0,
+      "elapsed_seconds": 3.7757522499887273,
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-collection.json",
+        "sha256": "16873ed25f619b9e9a8ea318d206f24061f7500d7c43d92b4a6ed6e6a41ca657",
+        "bytes": 121026
+      },
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-collection.stdout",
+        "sha256": "f828650dd17061712dd7f49f1993f4585c868c3bbabf9dc600281a35257697f5",
+        "bytes": 333226
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-collection.stderr",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    },
+    "retention": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-test-retention.json",
+      "sha256": "629ee38769a156649e3168cd5b11089cd00dd203161f9258e6a732cfd67b2694",
+      "bytes": 200
+    }
+  },
+  "test_integrity": {
+    "command": "commit_executor.run_private_attr_test_gate(actual_repo_root, declared_test_files)",
+    "result": {
+      "passed": true,
+      "skipped": false,
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "",
+      "test_files": [
+        "mu/tests/docs/test_doc_freshness.py",
+        "mu/tests/docs/test_growth_caps.py",
+        "mu/tests/docs/test_l4_current_state_truth.py",
+        "mu/tests/docs/test_status_tasks_consistency.py",
+        "mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_executor_dispatch.py",
+        "mu/tests/tools/test_local_review_history_recovery.py"
+      ]
+    },
+    "receipt": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-test-integrity.json",
+      "sha256": "06edfa0388f1ad2986047634a8d5e59b0a1021be8cf4e4d1ec1363d1154c8433",
+      "bytes": 120644
+    }
+  },
+  "final_tracker_validation": {
+    "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider tests/docs/test_growth_caps.py tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py tests/tools/test_executor_dispatch.py tests/tools/test_commit_executor_local_review.py tests/tools/test_local_review_history_recovery.py --tb=long",
+    "receipt_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-tracker-cohort.json",
+    "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-tracker-cohort.stdout",
+    "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-tracker-cohort.stderr",
+    "limits": "Final tracker bytes receive the same exact seven-file command. Its durable receipt records actual exit, elapsed time and source/index/ref observations. This reference is evidence location, not approval or a substituted validation result."
+  },
+  "native_noop": {
+    "native_candidate_state": "preimage",
+    "cap_values": [
+      175,
+      64
+    ],
+    "generated_transition": false,
+    "governed_additions": [],
+    "cap_sha256": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+    "command": "commit_executor._capture_growth_cap_retry_authority(actual_repo_root, wave_id, base_branch=e043abde39c55b03a66a1cb6c51ca3ecc0524023); commit_executor._growth_cap_snapshot_candidate_state(snapshot)",
+    "receipt": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/native-cap-noop.json",
+      "sha256": "f658e98011b3d2bc83d4e93b6dc5902a6e595de47e020bc8201dc472c5f602e5",
+      "bytes": 1269
+    },
+    "limits": "Actual HEAD/index/worktree clean preimage. Historical provenance unchanged; no generated postimage or numerical cap bump fabricated. Repeat indexed capture at native staging."
+  },
+  "branch_continuity": {
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "comparison_commit": "e043abde39c55b03a66a1cb6c51ca3ecc0524023",
+    "physical_checkout": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+    "frozen_config_sha256": "21fe1061abfd27ead39ea1327cc9d8d12301f121a2e64806824ff5b974cbed32",
+    "admission_controls": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-admission/admission-probes.json",
+      "sha256": "e7ae90ea71b1497eda8fe1be56eb92fdfc1be15cede8eb3ea7bdb5833ede804f",
+      "bytes": 4498
+    },
+    "admission_control_count": 20,
+    "producer_consumer_limits": "Admission used actual rendered/locked Phase B producer and disposable indexed consumer positive/negative controls. Actual new handoff and actual staged consumer are outer-owned and must retain this branch/parent before checkout; no injected target substitutes for actual producer proof.",
+    "actual_handoff_exists_at_implementation": false
+  },
+  "canonical_tracker_authority": {
+    "path": "TASKS.md",
+    "note": "2026-10-12 tracker sync note for workingrcx-local-review-clearance-format-r1-2026-10-12",
+    "note_sha256": "f060f9f5459283edded2efbf7d5952dc6ce13ecc701ab0a562dd9523deab4836",
+    "unchanged": true
+  },
+  "tracker_reconciliation": {
+    "canonical_ids": 268,
+    "ordered_owners": 44,
+    "baseline_tracker_lines": 743,
+    "retained_baseline_tracker_lines": 743,
+    "PRIMARY_tracker_lines": 715,
+    "missing_PRIMARY_tracker_lines": [],
+    "same_current_stage_occurrences": 4,
+    "followup_lines_retained": 35,
+    "canonical_L4_note_sha256": "f060f9f5459283edded2efbf7d5952dc6ce13ecc701ab0a562dd9523deab4836",
+    "canonical_L4_note_unchanged": true,
+    "PRIMARY_sha256": "6a3918d7d4c4bec307edc50ad80009de31cbc88d1911381d24f92a989d1ff112",
+    "PRIMARY_not_edited": true,
+    "current_stage": "Phase B local validation PASS2535; native review/commit/landing pending",
+    "TASKS_sha256": "856cef8e86d5e48948c21933b2eb814a55f04bafbcd3d6e7ccd73d047efe4049",
+    "CHANGELOG_sha256": "284d4eb7ea47553db5f709ba6c9e6d97ac37ce09c5e12bd50e885dd182019b68"
+  },
+  "history": {
+    "R10": "COMMIT_GO decisions, published e043 and CI PASS are real. Authenticated e043 no-issues response arrived at 21:17:21Z; old native complete-service parser HOLD remained. Verified terminal snapshot586b37ae preserves122 files and bridge integrity; preservation is not clearance or landing.",
+    "R10_preservation": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r10-terminal-preserved/preservation.json",
+      "sha256": "f75c4269673c82662a8edd219590ddb58f6397fa37dd4248b8ee791a9c86d841",
+      "bytes": 43249
+    },
+    "retained": [
+      "R1 quota interruption",
+      "a705 recovered-history publication approval=false",
+      "a928 negative review",
+      "R6 QUESTION and failed/passing gates",
+      "R7 failed gates/reviews and separate native lifecycle outcome",
+      "R8 producer/consumer branch mismatch and checkpoint absence",
+      "R9 terminal REQUEST_CHANGES/corrected-config-required",
+      "all old receipts, budgets and absent checkpoints"
+    ],
+    "protected_file_count": 64,
+    "old_authority_file_count": 251,
+    "checkpoint_absences": [
+      ".agent_bus-local-review-legacy-history-r7-20261012/executors/phase_b_state.json",
+      ".agent_bus-local-review-legacy-history-r8-20261012/executors/phase_b_state.json",
+      ".agent_bus-local-review-legacy-history-r9-20261012/executors/phase_a_state.json",
+      ".agent_bus-local-review-legacy-history-r9-20261012/executors/phase_b_state.json",
+      ".agent_bus-local-review-legacy-history-r10-20261012/executors/phase_a_state.json",
+      ".agent_bus-local-review-legacy-history-r10-20261012/executors/phase_b_state.json"
+    ],
+    "checks": "All admission hashes and absences rechecked before/after both complete cohorts; see their receipts. No old namespace replay or authority reset."
+  },
+  "l4_result": {
+    "class": "L4_ENABLER",
+    "target_gate_id": "G8",
+    "kind": "tooling integration",
+    "actual_native_indicator": {
+      "path": "reports/l4_wave_indicators/workingrcx-local-review-clearance-format-r1-2026-10-12.json",
+      "exists": false,
+      "ownership": "outer native generation; no hand-authored substitute"
+    },
+    "enforcer": "Not launched by this implementer; staged L4 enforcement and native indicator generation remain outer executor boundaries. Declared tests/docs/test_l4_current_state_truth.py passed within the complete cohort.",
+    "invariant_tuple": {
+      "tracked_markers_before_after": [
+        5,
+        5
+      ],
+      "authority_sites_before_after": [
+        217,
+        217
+      ],
+      "total_inventory_sites_before_after": [
+        312,
+        312
+      ],
+      "infrastructure_before_after": [
+        135,
+        135
+      ],
+      "runtime_substrate_delta": 0,
+      "basis": "Unchanged STATUS.md and no host/runtime/debt surface in candidate diff; fresh ratchet/enforcer measurements belong to outer native validation."
+    }
+  },
+  "outer_owned_pending": [
+    "Actual Phase B handoff and indexed consumer branch/parent proof",
+    "Native indicator generation and staged L4 enforcement",
+    "Native final validation and independent review",
+    "Actual commit and pre-push",
+    "Corrected new-head CI",
+    "Complete authenticated new-head full-PR review",
+    "Protected exact-head PR1332 merge",
+    "Separately verified PRIMARY sync",
+    "Then PR1331 disposition, prepared folder work, separate deduplicated retention, final complete coverage/native PR disposition and fresh physical/useful-work obligations; v4 drafts require fresh landed base"
+  ],
+  "issues_encountered": [
+    {
+      "classification": "test fixture modeling",
+      "initial_result": "4 newly added controls failed because the shared fake gh post reused request ID1; native Step15 legitimately requests a new review for absent/wrong recorded head.",
+      "correction": "Only new controls now model a distinct fake request ID99 missing from the observed comments. Native binding rejects both the invalid original record and reuse of the old response. Other continuation fields and all historical receipts remain intact.",
+      "final_result": "All2535 passed; production authority checks unchanged; failed output preserved."
+    }
+  ],
+  "limits": [
+    "Known local startup persona/cache canary and PRIMARY docs-registry limitations remain open.",
+    "No current one-shot quota capability is exposed to this implementer; no quota percentage invented.",
+    "Old-head CI or provider evidence does not approve this correction or a new commit.",
+    "Host/debt invariant counts are source-bound unchanged values, not fresh ratchet measurements.",
+    "Pipeline launch, startup/preflight, attestation, staging, commit, push, PR, merge and closeout execution remain outside this Phase B-local validation. The read-only session contract was rendered."
+  ],
+  "evidence_root": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b",
+  "evidence_volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+  "artifacts": [
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/source-index-refs-before.json",
+      "sha256": "5d9db7262c532e713038225b6a92b0c16202d20ce9411eeba989419cd6ac6cdf",
+      "bytes": 59419
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-static-observations.json",
+      "sha256": "b18b2055f084d80ba297141a44431003a56a6b911605e7c29c03cb0f3eb6aa41",
+      "bytes": 2165
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-phase-b/final-tracker-observations.json",
+      "sha256": "fab2c176b36cd51b84b0262eb7b9715593c36f275375d85a6a15220e45ed75de",
+      "bytes": 794
+    }
+  ],
+  "source_hashes_after_implementation": {
+    "mu/tools/executors/commit_executor.py": "5d286b81ee45901b153ac7ac8975ca1a6fd3ce4990e92dbe9f09ab0498c5e2d8",
+    "mu/tests/tools/test_commit_executor_local_review.py": "a1f5b338929ea980042785d082c4cdc91f25f518be683ee43e897023cbff7b77",
+    "TASKS.md": "856cef8e86d5e48948c21933b2eb814a55f04bafbcd3d6e7ccd73d047efe4049",
+    "CHANGELOG.md": "284d4eb7ea47553db5f709ba6c9e6d97ac37ce09c5e12bd50e885dd182019b68"
+  },
+  "initial_admission": {
+    "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-clearance-format-r1-admission/initial-facts.json",
+    "sha256": "1efdecd52c90d55fb26fc166883a9e98e55779516e876e1d1102150ad8f59769",
+    "bytes": 76454
+  }
+}

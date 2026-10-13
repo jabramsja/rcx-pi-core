@@ -1,0 +1,215 @@
+{
+  "schema_version": 1,
+  "wave_id": "workingrcx-review-control-r1-2026-10-07",
+  "phase": "Phase B local implementation",
+  "generated_at_utc": "2026-10-07T22:22:03.277448+00:00",
+  "proof_scope": {
+    "binding": "Source/test execution observations only. This is not a final staged-candidate approval or receipt.",
+    "native_governance": "Native Phase A owns the locked packet. The TASKS.md 2026-10-07 tracker sync note for this wave is the canonical L4 authority; native governance owns its refresh, indicators and growth caps.",
+    "final_authority": "Fresh native final approval and candidate receipts must bind later generated governance. No implementation-time TASKS, packet, tracker or indicator hash is asserted as final candidate truth.",
+    "no_self_hash": true
+  },
+  "checkout": {
+    "repo_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/review-control-r1-20261007",
+    "parent_head": "b27d1d88616891ee1478bd8dc49b592ebd5f42a2",
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "existing_pr": 1332,
+    "remote_identity": "refs/heads/jabramsja/workingrcx-local-review-quota-r3-2026-10-05 and refs/pull/1332/head both matched the parent before edits and after the gate"
+  },
+  "preservation": {
+    "recovery_root": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z",
+    "volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+    "preserved_test_sha256": {
+      "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+      "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+      "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8"
+    },
+    "preserved_tests_byte_identical_to_parent": true,
+    "historical_snapshot": "5bab4cf8e803681dfaf1fdf34593ec005d6eff52745dc536c996e8a583972041",
+    "historical_evidence_read_only": [
+      {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-r2-bot-review-diagnostic/diagnosis.json",
+        "observed_sha256": "8d3fc836b1c2a6c5550619a697e44410ccb752bb2a31e8583c2971c032ca532b"
+      },
+      {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-r2-bot-review-diagnostic/pr-review-state.json",
+        "observed_sha256": "9f695be547bf528db78a8d45d1825e46788070357c30d953333db3953cbd0da6"
+      },
+      {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-r2-bot-review-diagnostic/native-result.json",
+        "observed_sha256": "94e2ec355192cb191dd434372702bd0c43d5fe212272a0f964b770ab6749d02a"
+      },
+      {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-r2-bot-review-diagnostic/completed-control-replay.json",
+        "observed_sha256": "060df9cbb6b696eaab6559049d51b4d8b4e439d95ea6137157abeda28c4cdef7"
+      },
+      {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-r2-preserved/preservation.json",
+        "observed_sha256": "985066d0d6ad87fb4ef2582f9a982bfc614a01d000b0ba63d34ae9ddb79cbcd3"
+      }
+    ],
+    "prior_carriers_receipts_recovery_budgets": "Not modified or transferred"
+  },
+  "files_changed_by_implementer": [
+    "mu/tools/executors/commit_executor.py",
+    "mu/tests/tools/test_commit_executor_local_review.py",
+    "mu/tests/tools/test_commit_executor_step14_autoresolve.py",
+    "TASKS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/workingrcx-review-control-r1-2026-10-07_implementation_evidence.json"
+  ],
+  "preexisting_native_surfaces": {
+    "packet": "reports/control_plane/workingrcx-review-control-r1-2026-10-07_2026-10-07.md",
+    "tracker": "Pre-existing same-wave canonical tracker note retained unchanged"
+  },
+  "source_test_execution": {
+    "source_sha256": {
+      "mu/tools/executors/commit_executor.py": "1b153ee68c736df67b25ebf6ecd8e5a4b7f93bee944b84bc0b6b5a94f059ad2e",
+      "mu/tests/tools/test_commit_executor_local_review.py": "a75b6e35f9b21296e23c754fb11d6bc5c726c8073db81dcdb55abb0c808892e5",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "5313ea7720148e764c59523e7b1b93c1bdb72884ddc82db3c5614cd0a3384d2e",
+      "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+      "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+      "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8"
+    },
+    "saved_running_body_sha256": "618ca236e14153dda36ca9900c48228253d725d31498831bdcb5bb534f0c9321",
+    "modeled_completed_body_matches_saved_observation_sha256": "de5ad7c034880671b02814dd349fc3c003267907f90ced43b5b6f15a94f7c9a5",
+    "saved_complete_clear_body_sha256": "7d939bab6b6089e0ea89d069a9e3d8cb37e3df052fa58c7c54dee81a228e816b",
+    "offline_fixture": "Complete literal bodies in mu/tests/tools/test_commit_executor_local_review.py; pytest never reads recovery storage or calls live GitHub.",
+    "before_source_change": {
+      "source_sha256": "8e08969813ba837d7ec118db6bbe978ed85c05486d37aa21bc6f7cffe44ebfc0",
+      "control_predicate": false,
+      "outcome": "bot_findings",
+      "full_body_retained": true,
+      "record": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/review-control-r1-validation/before-implementation.json"
+    },
+    "behavioral_controls": [
+      "Real Step15 classifier/reviewer/CI/merge fixture at initial classification, after independent review and after CI.",
+      "Full Running and observed Completed payloads; established compact controls; complete genuine no-major-issues service reply.",
+      "Quoted, leading, trailing, cell, details, malformed timestamps/rows/headers/separators/commits/HTML and unknown boilerplate retain full finding bodies.",
+      "Separate old/current issue and formal findings, outdated unresolved threads, human objections, sweep evidence and complete pagination remain blocking.",
+      "Activity alone, historical quota, timeout, pending/commented/stale reviews, wrong-head clearance and unauthenticated or mismatched request IDs cannot authorize merge or local quota review.",
+      "Quota-history cloud clearance rechecks PR/repository/branch/head/base/diff, live local HEAD, required CI and retained findings; protected merge uses --match-head-commit without --admin or thread resolution.",
+      "Changes during CI, blocked/queued merges and CI failure cannot enter landed closeout or fall back to the legacy wrapper.",
+      "Prior receipt and continuation bytes remain intact at holds. Original assertions/skips remain; the original --sweep assertion is retained in an explicit unrelated legacy case."
+    ]
+  },
+  "validation": {
+    "declared_two_module_gate": {
+      "phase": "Phase B execution observation; not final candidate authority",
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_commit_executor_step14_autoresolve.py --tb=short",
+      "started_at": "2026-10-07T22:16:27.245710+00:00",
+      "source_sha256": {
+        "mu/tools/executors/commit_executor.py": "1b153ee68c736df67b25ebf6ecd8e5a4b7f93bee944b84bc0b6b5a94f059ad2e",
+        "mu/tests/tools/test_commit_executor_local_review.py": "a75b6e35f9b21296e23c754fb11d6bc5c726c8073db81dcdb55abb0c808892e5",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "5313ea7720148e764c59523e7b1b93c1bdb72884ddc82db3c5614cd0a3384d2e",
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8"
+      },
+      "exit_status": 0,
+      "summary": "656 passed in 153.23s (0:02:33)",
+      "finished_at": "2026-10-07T22:19:00.775388+00:00",
+      "source_unchanged_during_run": true,
+      "log": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/review-control-r1-validation/gate-attempt2.log"
+    },
+    "isolated_focused_replays": {
+      "parent": {
+        "mode": "parent",
+        "phase": "Phase B focused test observation, not final candidate approval",
+        "parent": "b27d1d88616891ee1478bd8dc49b592ebd5f42a2",
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/review-control-r1-validation/replay_focused.py' /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/review-control-r1-20261007 parent",
+        "pytest_arguments": [
+          "--import-mode=importlib",
+          "-q",
+          "-n",
+          "0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "mu/tests/tools/test_commit_executor_local_review.py",
+          "mu/tests/tools/test_commit_executor_step14_autoresolve.py",
+          "--tb=short",
+          "-k",
+          "test_recorded_activity_survives_each_real_quota_gate"
+        ],
+        "exit_status": 1,
+        "executed_source_sha256": "8e08969813ba837d7ec118db6bbe978ed85c05486d37aa21bc6f7cffe44ebfc0",
+        "active_candidate_sha256": "1b153ee68c736df67b25ebf6ecd8e5a4b7f93bee944b84bc0b6b5a94f059ad2e",
+        "active_candidate_unchanged": true,
+        "test_source_sha256": {
+          "mu/tests/tools/test_commit_executor_local_review.py": "a75b6e35f9b21296e23c754fb11d6bc5c726c8073db81dcdb55abb0c808892e5",
+          "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "5313ea7720148e764c59523e7b1b93c1bdb72884ddc82db3c5614cd0a3384d2e"
+        },
+        "summary": "6 failed, 650 deselected in 1.99s",
+        "log": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/review-control-r1-validation/parent-isolated-focused.log"
+      },
+      "candidate": {
+        "mode": "candidate",
+        "phase": "Phase B focused test observation, not final candidate approval",
+        "parent": "b27d1d88616891ee1478bd8dc49b592ebd5f42a2",
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/review-control-r1-validation/replay_focused.py' /Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/review-control-r1-20261007 candidate",
+        "pytest_arguments": [
+          "--import-mode=importlib",
+          "-q",
+          "-n",
+          "0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "mu/tests/tools/test_commit_executor_local_review.py",
+          "mu/tests/tools/test_commit_executor_step14_autoresolve.py",
+          "--tb=short",
+          "-k",
+          "test_recorded_activity_survives_each_real_quota_gate"
+        ],
+        "exit_status": 0,
+        "executed_source_sha256": "1b153ee68c736df67b25ebf6ecd8e5a4b7f93bee944b84bc0b6b5a94f059ad2e",
+        "active_candidate_sha256": "1b153ee68c736df67b25ebf6ecd8e5a4b7f93bee944b84bc0b6b5a94f059ad2e",
+        "active_candidate_unchanged": true,
+        "test_source_sha256": {
+          "mu/tests/tools/test_commit_executor_local_review.py": "a75b6e35f9b21296e23c754fb11d6bc5c726c8073db81dcdb55abb0c808892e5",
+          "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "5313ea7720148e764c59523e7b1b93c1bdb72884ddc82db3c5614cd0a3384d2e"
+        },
+        "summary": "6 passed, 650 deselected in 2.37s",
+        "log": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/review-control-r1-validation/candidate-isolated-focused.log"
+      }
+    },
+    "initial_gate_attempt": {
+      "phase": "Phase B execution observation; not final candidate authority",
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_commit_executor_step14_autoresolve.py --tb=short",
+      "started_at": "2026-10-07T22:10:49.893682+00:00",
+      "source_sha256": {
+        "mu/tools/executors/commit_executor.py": "49e091ec84322717d040e01a28ebcc61d986bd3fc6efa92ebdf900c6cdb0d4a3",
+        "mu/tests/tools/test_commit_executor_local_review.py": "bf0d9903231b18656db003bf01b64bc41c18afae0fd0b853d3d1c368d6ee4d51",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "5313ea7720148e764c59523e7b1b93c1bdb72884ddc82db3c5614cd0a3384d2e",
+        "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+        "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+        "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8"
+      },
+      "exit_status": 1,
+      "summary": "17 failed, 631 passed in 160.43s (0:02:40)",
+      "finished_at": "2026-10-07T22:13:30.615510+00:00",
+      "log": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/review-control-r1-validation/gate-attempt1.log",
+      "issue": "17 new post-CI negative tests failed because their clock fixture lacked monotonic(); fixed the fixture before the passing declared gate."
+    },
+    "storage": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/review-control-r1-validation"
+  },
+  "read_only_identity_commands": [
+    "git status --short --branch",
+    "git log -1 --format='%H %D'",
+    "git ls-remote origin refs/heads/jabramsja/workingrcx-local-review-quota-r3-2026-10-05 refs/pull/1332/head",
+    "diskutil info -plist '/Volumes/RCX Recovery'"
+  ],
+  "limits": [
+    "Implementation is local and phase-scoped; native approval, staging, hooks, fresh required CI, commit, push, protected merge and PRIMARY synchronization remain outer-executor-owned and pending.",
+    "Only the declared two-module pytest gate and focused reproduction/replay were run as Phase B validations; no broad gates, dispatcher/executor launches, commit/push or merge commands were executed against the live repository.",
+    "Native tracker/indicator/cap generation was not run by this implementer; no manual growth-cap increase or locked-packet rewrite.",
+    "No runtime/host/seed/loader/template/hook/model/recovery-policy/launcher/dispatcher/CI snapshot fixture changes.",
+    "Existing row40 retains recovery admission, terminal transport/raw-stream retention, governance phase binding, maintenance.lock snapshot fixture and task-ID-only postmerge APPLY routing.",
+    "No physical APPLY plan, retirement, blanket cleanup completion, producer dedup integration or paused PR1325 resumption. PR1331/1330/1329 and PR1325 useful-work/disposition obligations remain open."
+  ]
+}

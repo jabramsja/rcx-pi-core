@@ -1,0 +1,343 @@
+{
+  "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+  "branch_admission": {
+    "actual_handoff": "not yet emitted; outer Phase B owner must verify target_branch before commit admission",
+    "actual_helper": "phase_b_executor._phase_b_target_branch_for_current_worktree",
+    "actual_helper_result": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "actual_helper_result_after_clarification": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "after_observation_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r2-validation/preservation-after.json",
+    "ancestor_check_exit": 0,
+    "canonical_packet_required_literal": "existing PR branch",
+    "commit_entry_requirements": [
+      "Actual handoff target_branch exactly equals the existing PR branch.",
+      "Candidate HEAD retains comparison commit 678ca40cfa00643a377a0902756540972738118a as an ancestor.",
+      "Exact allowed staged inventory and fresh current native receipt bind this candidate before branch mutation.",
+      "Missing/mismatched authority holds; do not create a wave branch from dev or rebind comparison."
+    ],
+    "comparison_commit": "678ca40cfa00643a377a0902756540972738118a",
+    "founder_override": "FOUNDER_OVERRIDE:workingrcx-merge-base-binding-r2-2026-10-08",
+    "head": "678ca40cfa00643a377a0902756540972738118a",
+    "helper_execution": "Read-only function invocation; no executor entry point launched.",
+    "helper_source": "mu/tools/executors/phase_b_executor.py:6926"
+  },
+  "fresh_r2_validation": {
+    "argv": [
+      "python3",
+      "-m",
+      "pytest",
+      "-q",
+      "-n",
+      "0",
+      "-p",
+      "no:cacheprovider",
+      "--import-mode=importlib",
+      "-m",
+      "not slow and not fuzzer",
+      "mu/tests/tools/test_commit_executor_local_review.py",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py",
+      "--tb=short"
+    ],
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_commit_executor_step14_autoresolve.py --tb=short",
+    "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+    "duration_seconds": 429.436,
+    "environment_overrides": {
+      "HYPOTHESIS_PROFILE": "ci_fast",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "RCX_CI": "1"
+    },
+    "exit_code": 0,
+    "finished_utc": "2026-10-08T06:09:27.803273+00:00",
+    "head": "678ca40cfa00643a377a0902756540972738118a",
+    "output_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r2-validation/gate-output.log",
+    "output_sha256": "8edd9940bb216a5aa2d6e6aae6aa6ed947538a850daa296ed6b0db5798721e9f",
+    "phase": "Phase B local validation only",
+    "result_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r2-validation/gate-result.json",
+    "sha256_after": {
+      "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+      "mu/tools/executors/commit_executor.py": "eb7246db0cca9fd7eead9215f38da05ba0ccc4e61cf7336c239de1d70c7b043a"
+    },
+    "sha256_before": {
+      "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+      "mu/tools/executors/commit_executor.py": "eb7246db0cca9fd7eead9215f38da05ba0ccc4e61cf7336c239de1d70c7b043a"
+    },
+    "source_hashes_unchanged": true,
+    "started_utc": "2026-10-08T06:02:18.361436+00:00",
+    "status": "finished",
+    "summary": "952 passed in 427.65s (0:07:07)",
+    "wave_id": "workingrcx-merge-base-binding-r2-2026-10-08"
+  },
+  "governance": {
+    "approval": "Fresh native review, final staged authority and hooks remain outer-owned; no governance self-hash or final-byte claim.",
+    "implementation_edits": [
+      "Existing row38 checkpoint/entry and own canonical tracker note",
+      "Existing row40 branch/terminal-transport and separate CI fixture obligations",
+      "Own CHANGELOG entry",
+      "Reserved non-normative packet clarification",
+      "Own implementation evidence only"
+    ],
+    "indicator_and_growth_caps": "Mechanical native generation remains outer-owned; no implementer edit.",
+    "normative_packet": "Retain original launcher authorization and constraints unchanged.",
+    "observations_lane": "Non-normative review clarification",
+    "original_normative_packet_preserved": true,
+    "packet": "reports/control_plane/workingrcx-merge-base-binding-r2-2026-10-08_2026-10-08.md",
+    "tracker_authority": "TASKS.md: 2026-10-08 tracker sync note for workingrcx-merge-base-binding-r2-2026-10-08"
+  },
+  "historical_r1_validation": {
+    "all_log_hashes_verified": true,
+    "approval_transfer": false,
+    "classification": "Historical R1/PR1332 evidence only; not fresh R2 validation or approval",
+    "evidence_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-approved-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r1-20261008/reports/control_plane/workingrcx-merge-base-binding-r1-2026-10-08_2026-10-08_implementation_evidence.json",
+    "evidence_sha256": "b2caa6d4b6c03e4c797c3e20b0f2193f6ecaa82a6b5c9d6020b04a063db1550d",
+    "runs": [
+      {
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_commit_executor_step14_autoresolve.py --tb=short",
+        "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r1-20261008",
+        "elapsed_seconds": 263.392288832998,
+        "ended_utc": "2026-10-08T04:31:38.171985+00:00",
+        "exit_code": 1,
+        "interpretation": "Reproduced eight false completions: local/cloud x Step15/native reload x OPEN drift/other first parent; four added stable controls pass. Source unchanged until reproduction summary.",
+        "label": "before",
+        "log_sha256": "516a7a0fdd0b7af472882befcbd91a6b099a3a2cf61f91d10b530de51ce7e892",
+        "output_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-validation/before.log",
+        "source_sha256": {
+          "mu/tests/tools/test_commit_executor_local_review.py": "cf4457cb4f768b87ed74d457117b89fee1a7023bf990b86696d206ed97d3bdcb",
+          "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "08b9fd8990cfd909fcb12af1499a63ae3d579bbc55203b3efd2f2890924f917a",
+          "mu/tools/executors/commit_executor.py": "58ed6299ec30ccbe6d7852ba9550ba5f43f47c86bda4da014579fb0dfd0bf596"
+        },
+        "started_utc": "2026-10-08T04:27:14.778749+00:00",
+        "summary": "8 failed, 859 passed in 244.17s"
+      },
+      {
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_commit_executor_step14_autoresolve.py --tb=short",
+        "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r1-20261008",
+        "elapsed_seconds": 0.8016389999975218,
+        "ended_utc": "2026-10-08T04:34:31.713133+00:00",
+        "exit_code": 2,
+        "interpretation": "Added lifecycle parametrization required a pytest import; fixed in the existing module.",
+        "label": "after",
+        "log_sha256": "df88681ceb882f2d99262e7e782ee4e1489a6c1a623a417976e71b26c9bde696",
+        "output_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-validation/after.log",
+        "source_sha256": {
+          "mu/tests/tools/test_commit_executor_local_review.py": "0d4e698107afcecee96cb3a3a4ac19686938484649a0037ffbcc3f8e0561eee2",
+          "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "ed6ea16b760f5fe350db78751fd57d39f1dfbd877feb77e4a2e98a6a78fc13e6",
+          "mu/tools/executors/commit_executor.py": "2df5b583232e0283d45b6961f091cb75437b478e44eddca5efd93df5ee7e4189"
+        },
+        "started_utc": "2026-10-08T04:34:30.911398+00:00",
+        "summary": "1 collection error in 0.52s"
+      },
+      {
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_commit_executor_step14_autoresolve.py --tb=short",
+        "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r1-20261008",
+        "elapsed_seconds": 371.84460012499767,
+        "ended_utc": "2026-10-08T04:40:53.401000+00:00",
+        "exit_code": 1,
+        "interpretation": "New dirty-source test required loader success before calling the public driver. Production refused dirty authority; test now invokes the public driver and also tests hidden source mutation. Sources changed during this intermediate run; archived run-start snapshots are not final candidate authority.",
+        "label": "after-import-fix",
+        "log_sha256": "f544c9e3be88e33d3e0f5e1e5c122510fdfef3dab3498ba5a04f04e1d199192c",
+        "output_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-validation/after-import-fix.log",
+        "source_sha256": {
+          "mu/tests/tools/test_commit_executor_local_review.py": "0d4e698107afcecee96cb3a3a4ac19686938484649a0037ffbcc3f8e0561eee2",
+          "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+          "mu/tools/executors/commit_executor.py": "2df5b583232e0283d45b6961f091cb75437b478e44eddca5efd93df5ee7e4189"
+        },
+        "started_utc": "2026-10-08T04:34:41.555118+00:00",
+        "summary": "1 failed, 949 passed in 371.57s"
+      },
+      {
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_commit_executor_step14_autoresolve.py --tb=short",
+        "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r1-20261008",
+        "elapsed_seconds": 375.3847654169949,
+        "ended_utc": "2026-10-08T04:48:00.916209+00:00",
+        "exit_code": 1,
+        "interpretation": "New fixture rebuilt equivalent merge commits across wall-clock seconds. Actual Git objects have identical trees/parents and timestamps one second apart. Fixed fake I/O to publish the existing real object; exact-SHA assertions retained.",
+        "label": "final",
+        "log_sha256": "10dd4777ebede34e0160dd36d67afd7d54c1d645ed75af931785372a654b3900",
+        "output_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-validation/final.log",
+        "source_sha256": {
+          "mu/tests/tools/test_commit_executor_local_review.py": "9d7465107ab54e463d156406fbda7fbb3b60340be8d1d0cef5bb44adf0b2e1a6",
+          "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+          "mu/tools/executors/commit_executor.py": "eb7246db0cca9fd7eead9215f38da05ba0ccc4e61cf7336c239de1d70c7b043a"
+        },
+        "started_utc": "2026-10-08T04:41:45.530609+00:00",
+        "summary": "3 failed, 949 passed in 375.09s"
+      },
+      {
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_commit_executor_step14_autoresolve.py --tb=short",
+        "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r1-20261008",
+        "elapsed_seconds": 376.9826377499994,
+        "ended_utc": "2026-10-08T04:55:04.839587+00:00",
+        "exit_code": 0,
+        "interpretation": "Final production/test files remained byte-identical to run-start snapshots through completion.",
+        "label": "final-candidate",
+        "log_sha256": "adf72f68929d23cd86f652892e88cbec9f5976654176d0e045c55cd2cb3ca8fe",
+        "output_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-validation/final-candidate.log",
+        "source_sha256": {
+          "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+          "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+          "mu/tools/executors/commit_executor.py": "eb7246db0cca9fd7eead9215f38da05ba0ccc4e61cf7336c239de1d70c7b043a"
+        },
+        "started_utc": "2026-10-08T04:48:47.855739+00:00",
+        "summary": "952 passed in 372.05s"
+      }
+    ]
+  },
+  "implementation": {
+    "before_request": "Original admission is persisted before side effects and compared against fresh remote identity and review clearance after CI. Uncertain outcomes spend the request.",
+    "intent_version": 2,
+    "landing": "Authenticated PR GraphQL mergeCommit supplies exactly two complete ordered parents: reviewed base then exact PR head. Moving post-merge base ref is not compared with the old base.",
+    "legacy": "Version-1 protected intents or missing/unprovable review identity hold without upgrade or borrowing authority. Unrelated legacy wrapper paths remain successful.",
+    "mutation_limits": "At most one protected merge request and at most one verified completion across tested invocations, interruptions and holds.",
+    "open_observation": "Exact original reviewed base required; drift holds without rebind, repeat request, disposition or remediation.",
+    "persisted_admission": "Complete original review identity: repository, PR, URL, checkout, branches, head/base OIDs, merge-base OID, full binary diff digest and command.",
+    "resume": "Actual native loader/driver retains owner, handoff, checkpoint, receipt and complete Git diff identity. Local source/artifacts/receipt/provenance and current-head cloud clearance remain required."
+  },
+  "observed_utc": "2026-10-08T06:12:37.946793+00:00",
+  "parent_head": "678ca40cfa00643a377a0902756540972738118a",
+  "phase": "Phase B implementation observations only; not native final staged-candidate authority or approval",
+  "pr_number": 1332,
+  "proof_limits": [
+    "Fresh gate is phase-local behavior evidence using actual production/native continuation/CLI/lifecycle paths, real disposable Git graphs, and fake remote/model I/O.",
+    "Historical eight drift failures/859 passes, intermediate failures, 952-pass R1 result and R1 native approvals remain historical, not fresh R2 results or approval.",
+    "No implementation-time handoff, final staged receipt, corrected-head CI, authenticated current-head clearance, thread disposition, landing or PRIMARY sync is claimed.",
+    "Only the declared two-module pytest gate runs here; startup/preflight, attestation, dispatcher/executor launches, commit/push and closeout gates remain outer-owned.",
+    "No new tests, broad test glob, checker change or ANTICHEAT_OK addition; recovered source/test bytes are retained exactly.",
+    "Numeric debt and host ratchets are not run in Phase B; byte comparison establishes preservation of adjacent runtime/host/seed surfaces.",
+    "Local review checks cannot make remote queue admission atomic; unsupported merge-parent evidence remains held."
+  ],
+  "repo_root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+  "saved_thread_snapshots": {
+    "disposition_gate": "Actual fix and before/after proof, fresh final native approval, all required corrected-head CI, and independent authenticated current-head GitHub clearance while both old threads remain unresolved. Only exact unchanged addressed threads may then be resolved individually by the operator/pipeline; re-fetch complete evidence and require aggregate clearance before merge. Added/changed comments or findings require renewed assessment. No human-thread action, blanket resolution, dismissal or deletion.",
+    "observation": "Historical complete one-comment Bot-only unresolved snapshots verified offline; no live GitHub query or action.",
+    "source_observed_utc": "2026-10-08T04:09:45.412559+00:00",
+    "source_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r3-review-wait-diagnostic/review-state-040945Z.json",
+    "source_sha256": "265ac16f28a65981c6e08ca0f282ad90b6beefc78829cf8f10961b6e8b6893f3",
+    "threads": [
+      {
+        "body_sha256": "ff2c6b22b5f36ec3b2347da074a3be12739fe0643a6748f3cffb1fc883860fbc",
+        "comment_id": "PRRC_kwDOQvy8bs77IAg6",
+        "snapshot": {
+          "comments": {
+            "nodes": [
+              {
+                "author": {
+                  "__typename": "Bot",
+                  "login": "chatgpt-codex-connector"
+                },
+                "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Wait for merge-queue completion before verifying the landing**\n\nOn a base branch that requires a merge queue, this protected quota path reports an error immediately after successfully enqueueing the PR: `gh pr merge --help` states, \u201cIf required checks have passed, the pull request will be added to the merge queue,\u201d but the YAML-equivalent command flow here queries once and requires the PR to already be landed. The queued PR therefore remains open at this instant, `_verified_remote_merge_sha` returns no merge SHA, and Step 15 fails even though GitHub may merge it later without post-merge completion or cleanup. Poll the exact-head PR until it lands or reaches a terminal failure, as the existing merge wrapper/CI flow does.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+                "createdAt": "2026-10-07T23:49:31Z",
+                "id": "PRRC_kwDOQvy8bs77IAg6",
+                "line": null,
+                "path": "mu/tools/executors/commit_executor.py"
+              }
+            ],
+            "pageInfo": {
+              "hasPreviousPage": false
+            }
+          },
+          "id": "PRRT_kwDOQvy8bs6qI-5e",
+          "isOutdated": true,
+          "isResolved": false
+        },
+        "thread_id": "PRRT_kwDOQvy8bs6qI-5e"
+      },
+      {
+        "body_sha256": "c161930ad5ed0dede0fa2aabca3885d88af3712087ef6828783c99c77f39b078",
+        "comment_id": "PRRC_kwDOQvy8bs77NDtC",
+        "snapshot": {
+          "comments": {
+            "nodes": [
+              {
+                "author": {
+                  "__typename": "Bot",
+                  "login": "chatgpt-codex-connector"
+                },
+                "body": "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Revalidate the reviewed base while polling the merge queue**\n\nWhen another change lands on the base branch while this PR is queued, `baseRefOid` can advance, but this check accepts any well-formed SHA. The local-review receipt is bound to the earlier `identity[\"base_sha\"]`, while the protected intent records only the base branch name, so the queue can land against a base/diff that the independent reviewer never approved. Preserve the admitted base OID in the intent and, while the PR is open, require subsequent observations to match it (or obtain fresh review authority); after landing, verify the merge commit against that stored base.\n\nUseful? React with \ud83d\udc4d\u00a0/ \ud83d\udc4e.",
+                "createdAt": "2026-10-08T04:08:38Z",
+                "id": "PRRC_kwDOQvy8bs77NDtC",
+                "line": 10175,
+                "path": "mu/tools/executors/commit_executor.py"
+              }
+            ],
+            "pageInfo": {
+              "hasPreviousPage": false
+            }
+          },
+          "id": "PRRT_kwDOQvy8bs6qMIWE",
+          "isOutdated": false,
+          "isResolved": false
+        },
+        "thread_id": "PRRT_kwDOQvy8bs6qMIWE"
+      }
+    ]
+  },
+  "scope_preservation": {
+    "after_observation_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r2-validation/preservation-after.json",
+    "candidate_inventory_at_implementation": [
+      "CHANGELOG.md",
+      "TASKS.md",
+      "mu/tests/tools/test_commit_executor_local_review.py",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py",
+      "mu/tools/executors/commit_executor.py",
+      "reports/control_plane/workingrcx-merge-base-binding-r2-2026-10-08_2026-10-08.md",
+      "reports/control_plane/workingrcx-merge-base-binding-r2-2026-10-08_2026-10-08_implementation_evidence.json"
+    ],
+    "entry_observation_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r2-validation/source-entry.json",
+    "initial_preservation_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r2-validation/preservation-before.json",
+    "initial_tracked_hashes_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r2-validation/initial-tracked-hashes.json",
+    "live_historical_files_unchanged": 121,
+    "protected_committed_test_sha256": {
+      "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+      "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+      "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8"
+    },
+    "protected_test_hashes_match_678ca40": true,
+    "queue_row_identity_and_order_preserved": true,
+    "restored_r1_entries_unchanged": {
+      "approved": 97,
+      "stopped": 118
+    },
+    "task_id_set_preserved": true,
+    "tracked_read_only_files_unchanged": 3094,
+    "undeclared_changes": []
+  },
+  "separate_obligations": {
+    "open_work": "PR1331/PR1330/PR1329 and paused PR1325/useful-work remain open; no new numbered prerequisite, physical APPLY, retired-folder replay or producer deduplicated-store integration claim.",
+    "postmerge": "Report any routing hold separately from actual verified landing and PRIMARY sync.",
+    "r3_ci_fixture": "Attempt1 passed 13489 tests but remote.git teardown raised ENOTEMPTY. Identical-head attempt2 passed all seven checks. Surviving entry/writer unobserved; CI fixture unchanged and separately owned.",
+    "row40_branch_transport": "Retain structured terminal result and raw child stdout/stderr; bind semantic existing-PR intent as typed branch authority rather than substring selection; prove target branch and comparison HEAD before branch mutation. R1 root admission omitted that check.",
+    "row40_other": "Retain existing staged-inventory reconciliation, recovery exact-scope admission, phase-bound governance, finding disposition and task-ID-only postmerge APPLY routing obligations."
+  },
+  "source_recovery": {
+    "budgets_or_guards_reset": false,
+    "method": "Copy only the three declared implementation files from the verified approved pre-entry R1 restored tree; retain their exact bytes.",
+    "preservations": {
+      "approved": {
+        "manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-approved-preserved/preservation.json",
+        "manifest_sha256": "8329ad31edf965766891586dafa57d375516b8778aab8669fdc30f76b219a402",
+        "restored_entries_verified_before": 97,
+        "snapshot": "896a300d21f4f145dc9b3b8c681082c59d7c3330a58f60eb19a09b9beb599cec"
+      },
+      "stopped": {
+        "manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-stopped-preserved/preservation.json",
+        "manifest_sha256": "57c70246993ffe68368ba16446031f1e0a8ca051f2585b19a284c227d44980ea",
+        "restored_entries_verified_before": 118,
+        "snapshot": "9490be2a9016eb256f4d8a456949a4bc01b8e00876f74fe1e9c3c388ee32f950"
+      }
+    },
+    "prior_carriers_resumed": false,
+    "prior_receipts_or_approvals_adopted": false,
+    "required_sha256": {
+      "mu/tests/tools/test_commit_executor_local_review.py": "4f2503e7b89948ce04de3f4971f0f1673e20c5f6b88d5242e12f5d659334eacd",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b",
+      "mu/tools/executors/commit_executor.py": "eb7246db0cca9fd7eead9215f38da05ba0ccc4e61cf7336c239de1d70c7b043a"
+    },
+    "source_root": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-approved-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r1-20261008",
+    "stopped_r1_diagnosis": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-base-binding-r1-terminal-transport-diagnostic/branch-binding-diagnosis.json"
+  },
+  "task_id": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+  "wave_id": "workingrcx-merge-base-binding-r2-2026-10-08"
+}

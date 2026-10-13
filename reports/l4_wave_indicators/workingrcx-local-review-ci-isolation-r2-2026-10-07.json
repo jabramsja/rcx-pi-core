@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-local-review-ci-isolation-r2-2026-10-07",
+  "repeat_run_speedup_ratio": 0.98446,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.29293,
+  "repeat_run_raw_seconds": [
+    0.288378,
+    0.29293
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.288378
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.581308
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-10-07T18:36:03Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "d978fcff7b984b1739b3ae2ca88627276a16d5bc"
+}

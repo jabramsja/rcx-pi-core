@@ -1,0 +1,401 @@
+{
+  "version": 1,
+  "wave_id": "workingrcx-local-review-terminal-r3-2026-10-09",
+  "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+  "observed_utc": "2026-10-09T15:46:47.743994+00:00",
+  "status": "Phase B implementation validated; native final governance and landing pending",
+  "authority_limit": "Implementation evidence only. Not a supervisor receipt, complete-PR approval, generated governance, final staged source authority, commit or landing record.",
+  "head": "f36b982b8b45774cf68fc621acf0d9727d72e6d5",
+  "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+  "locked_review_base": "35f7c225a25025aec893230c072754cf7d7c76fc",
+  "implementation_files_changed": [
+    "mu/tools/executors/commit_executor.py",
+    "mu/tests/tools/test_commit_executor_local_review.py",
+    "mu/tests/tools/test_executor_dispatch.py",
+    "mu/tests/tools/test_recovery_gate.py",
+    "TASKS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/workingrcx-local-review-terminal-r3-2026-10-09_2026-10-09_implementation_evidence.json"
+  ],
+  "finding_addressed": {
+    "class": "DEFECT",
+    "title": "Bind failed-review admission independently of the selected bus",
+    "source": "mu/tools/executors/commit_executor.py::_prior_local_review_stop",
+    "before": "Native CLI and production continuation reproduced two reviews for the same candidate/request after an active-bus change, with original evidence unchanged and zero recovery/remediation/merge calls.",
+    "after": "Fixed canonical ownership is durable before provider entry. All governed buses consult that ownership plus bounded native historical evidence; admission is serialized and rechecked before invoking the provider."
+  },
+  "implementation": [
+    "Keep original native bus-local attempts, receipts, terminal markers and raw evidence. Publish and validate complete attempt/completion proofs under the fixed .agent_bus/meta/local_pr_review_admissions owner.",
+    "Discover compatible legacy evidence only in governed repository-root buses at the native local_pr_reviews depth. Reject path indirection, damaged directories/records/artifacts, missing bound evidence and changed identity/request bindings.",
+    "Retain negative and interrupted STARTED stops across new buses, new comments and empty commits. Intact foreign identities do not own this candidate. Corrected PR content needs fresh native review; historical approvals never supply fresh approval.",
+    "Keep the complete R2 terminal transport, recovery/dispatcher fences, reviewer prompt, provider provenance, gate budgets, Phase B source, CI and protected-merge behavior. Product-source edits are confined to local-review admission and its typed hold catch."
+  ],
+  "validation_runs": [
+    {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_recovery_gate.py --tb=short",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_executor_dispatch.py",
+        "mu/tests/tools/test_recovery_gate.py",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "started_at": "2026-10-09T15:09:55.399788+00:00",
+      "before_sha256": {
+        "mu/tools/executors/commit_executor.py": "f18f05c3cb9303e2584f189d2b306c6b425572cb92ba5032b0c220d2fa01b0a1",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/recovery_gate.py": "38da91330fe962729300f36e32bfdd5857501bad9dcceadee0238d3ecec0a906",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_commit_executor_local_review.py": "a758175d694e1b3ffadcdff5de7a7b3e2f5257d5e2da4d5e08636923a12e5d1a",
+        "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+        "mu/tests/tools/test_recovery_gate.py": "02f7d2e7174cc513f9766e9861cfa7bf6d4f5153c294a883c8c5a828182745e6",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b"
+      },
+      "output_file": "r3-full-gate-1.log",
+      "status": "finished",
+      "exit_code": 1,
+      "finished_at": "2026-10-09T15:23:36.470600+00:00",
+      "elapsed_seconds": 821.0623798750166,
+      "after_sha256": {
+        "mu/tools/executors/commit_executor.py": "f18f05c3cb9303e2584f189d2b306c6b425572cb92ba5032b0c220d2fa01b0a1",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/recovery_gate.py": "38da91330fe962729300f36e32bfdd5857501bad9dcceadee0238d3ecec0a906",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_commit_executor_local_review.py": "a758175d694e1b3ffadcdff5de7a7b3e2f5257d5e2da4d5e08636923a12e5d1a",
+        "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+        "mu/tests/tools/test_recovery_gate.py": "02f7d2e7174cc513f9766e9861cfa7bf6d4f5153c294a883c8c5a828182745e6",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b"
+      }
+    },
+    {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_recovery_gate.py --tb=short",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "0",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "-m",
+        "not slow and not fuzzer",
+        "mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_executor_dispatch.py",
+        "mu/tests/tools/test_recovery_gate.py",
+        "--tb=short"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "started_at": "2026-10-09T15:27:55.550827+00:00",
+      "before_sha256": {
+        "mu/tools/executors/commit_executor.py": "43ad71ada1275858539f2adb59000e482de0feb100dad647f0876da16685bef7",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/recovery_gate.py": "38da91330fe962729300f36e32bfdd5857501bad9dcceadee0238d3ecec0a906",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_commit_executor_local_review.py": "1b2af2910982aa27223ab5eb7b9a5f38b718f6c9554fc7a9786845467797457b",
+        "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+        "mu/tests/tools/test_recovery_gate.py": "02f7d2e7174cc513f9766e9861cfa7bf6d4f5153c294a883c8c5a828182745e6",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b"
+      },
+      "output_file": "r3-full-gate-2.log",
+      "status": "finished",
+      "exit_code": 0,
+      "finished_at": "2026-10-09T15:42:35.510390+00:00",
+      "elapsed_seconds": 879.9487866669951,
+      "after_sha256": {
+        "mu/tools/executors/commit_executor.py": "43ad71ada1275858539f2adb59000e482de0feb100dad647f0876da16685bef7",
+        "mu/tools/executors/executor_dispatch.py": "2ce34bb0d2d668a47b198e8f7331031ccd4fb8f98c9e7bdf920f4684ce6f3219",
+        "mu/tools/executors/recovery_gate.py": "38da91330fe962729300f36e32bfdd5857501bad9dcceadee0238d3ecec0a906",
+        "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+        "mu/tests/tools/test_commit_executor_local_review.py": "1b2af2910982aa27223ab5eb7b9a5f38b718f6c9554fc7a9786845467797457b",
+        "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+        "mu/tests/tools/test_recovery_gate.py": "02f7d2e7174cc513f9766e9861cfa7bf6d4f5153c294a883c8c5a828182745e6",
+        "mu/tests/tools/test_commit_executor_receipt.py": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "e2ae8196ddf3b5e1957d714df8d42cd2dc0e695fc826ccfc9c6d3ecf5792fd3b"
+      }
+    }
+  ],
+  "validation_summary": {
+    "first_full_gate": "2 failed, 3423 passed in 819.26 seconds; exit 1; source/test hashes stable.",
+    "first_failure_resolution": "Both new symlink controls initially created untracked target files and hit the existing dirty-worktree continuation guard. Targets now live in the ignored temporary scratch directory; the controls exercise native evidence admission.",
+    "additional_storage_correction": "An isolated directory-as-file probe returned a generic error. Explicit directory reads and parent validation now produce an evidence hold before external I/O; empty owner paths also hold.",
+    "focused_controls": "15 producer/corrected-candidate/interruption/concurrency/R3 packet controls passed. After storage correction, all 19 focused tamper/directory/write-failure/interrupted-approval controls passed.",
+    "final_full_gate": "3433 passed in 879.18 seconds; exit 0; exact command and before/after hashes recorded above."
+  },
+  "retained_R2_governance_sha256": {
+    "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09.md": "7b21d2f22e054e2f90d16220c9dc2498c9f02e895aaa9eb367b2f6905f3cede2",
+    "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09_implementation_evidence.json": "88f56342296570dc7e024c3b33c1c31f0839b3acbe8bfb144d3680d1c370d497",
+    "reports/l4_wave_indicators/workingrcx-local-review-terminal-r2-2026-10-09.json": "29e666f8ab4a79485d012db2f8f3b15e2ab4086df21031a5267ad22cfe829d96"
+  },
+  "protected_source_boundary": {
+    "existing_changed_functions": [
+      "_prior_local_review_stop",
+      "_run_local_quota_review",
+      "_run_post_commit_pipeline_impl"
+    ],
+    "new_functions_or_classes": [
+      "LocalQuotaReviewHeld",
+      "_local_review_admission_dir",
+      "_local_review_admission_lock",
+      "_local_review_attempt_proofs",
+      "_local_review_directory_entries",
+      "_local_review_evidence_hold",
+      "_local_review_owned_path",
+      "_run_admitted_local_quota_review"
+    ],
+    "removed_functions": [],
+    "review_prompt_ast_unchanged": true,
+    "historical_governance_sha256": {
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09.md": "7b21d2f22e054e2f90d16220c9dc2498c9f02e895aaa9eb367b2f6905f3cede2",
+      "reports/control_plane/workingrcx-local-review-terminal-r2-2026-10-09_2026-10-09_implementation_evidence.json": "88f56342296570dc7e024c3b33c1c31f0839b3acbe8bfb144d3680d1c370d497",
+      "reports/l4_wave_indicators/workingrcx-local-review-terminal-r2-2026-10-09.json": "29e666f8ab4a79485d012db2f8f3b15e2ab4086df21031a5267ad22cfe829d96"
+    },
+    "preserved_tests": {
+      "mu/tests/tools/test_commit_executor_local_review.py": {
+        "retained_top_level_definitions": 98,
+        "added_top_level_definitions": [
+          "_change_review_bus",
+          "test_cross_bus_concurrent_admission_lock_holds_without_provider_entry",
+          "test_cross_bus_damaged_owned_evidence_holds_before_external_effects",
+          "test_cross_bus_foreign_native_identity_never_owns_current_candidate",
+          "test_cross_bus_historical_approval_requires_fresh_native_review",
+          "test_cross_bus_interrupted_approval_keeps_started_admission",
+          "test_cross_bus_new_request_cannot_clear_failed_input",
+          "test_cross_bus_owner_persistence_failure_cannot_repeat_review",
+          "test_cross_bus_retains_compatible_unindexed_native_stops",
+          "test_cross_bus_started_admission_stops_concurrent_entry",
+          "test_damaged_review_directory_holds_before_external_effects"
+        ],
+        "removed_definitions": []
+      },
+      "mu/tests/tools/test_executor_dispatch.py": {
+        "retained_top_level_definitions": 110,
+        "added_top_level_definitions": [],
+        "removed_definitions": []
+      },
+      "mu/tests/tools/test_recovery_gate.py": {
+        "retained_top_level_definitions": 141,
+        "added_top_level_definitions": [],
+        "removed_definitions": []
+      }
+    },
+    "index_diff_unchanged": true,
+    "runtime_substrate_delta": 0,
+    "limits": "Implementation boundary comparison to retained staged R2 candidate; this is not generated governance or approval authority."
+  },
+  "retained_negative_and_supervisor_evidence": [
+    {
+      "path": ".agent_bus-targeted-gate-budget-r2-20261009/meta/local_pr_reviews/local-pr-review-a92850a15e6f4411992770ace160cdaf/receipt.json",
+      "sha256": "57bc2129a98e471de4ea162fb8e5b60695cc1627b03fefcb60afa5208289d70e",
+      "status": "ERROR",
+      "version": 1
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/.agent_bus-local-review-terminal-r2-20261009/meta/raw/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-0256e425--r1-meta.txt",
+      "sha256": "9cd3546d9d4bb1a077958fe2ea0dfb1a8a721c6d279a318deb13df1a3185d344",
+      "bytes": 2753024
+    },
+    {
+      "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008/.agent_bus-local-review-terminal-r2-20261009/meta/prompts/meta-[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]-0256e425--r1-meta.txt",
+      "sha256": "a9a03849ab8fc7228bd21bcf7c98f683dda51656bbfb4789dcc6a1e7f0f0201c",
+      "bytes": 16789
+    }
+  ],
+  "tracker_reconciliation": {
+    "PRIMARY_checkpoint_sha256": "bbdfc59052379befdcdd956f97b3bdef4029c2fd894247b509a13e6499bc87a6",
+    "canonical_task_ids": 268,
+    "ordered_queue_owners": 44,
+    "candidate_history_preserved": true,
+    "PRIMARY_modified": false,
+    "row38": "Correction, landing, remaining PR/folder work and retention.",
+    "row40": "Existing envelope, branch/packet admission, wait/adjudication, delegation, lifecycle/checkpoint and postmerge routing follow-ups."
+  },
+  "indexed_authority_before_final_gate": {
+    "head": "f36b982b8b45774cf68fc621acf0d9727d72e6d5",
+    "target_branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "base_branch": "dev",
+    "errors": [],
+    "indexed_packet_sha256": "f7c900e49a5d472964e8c024d1e5f4897cedef07dbff400d5775ad6b02eaef9c",
+    "tracker_note_sha256": "7ec89b7b1f55c2261760eba5665f6807aa037594ce9c54e1c71ed77cc040dbc6",
+    "elapsed_seconds": 0.4695277499849908,
+    "limits": "Read-only actual indexed reader, real Phase B selector and in-memory commit builder. No handoff, receipt, index mutation or executor/commit launch."
+  },
+  "post_reporting_authority_check_ref": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-final-reporting-checks.json",
+  "comparison_ancestry": {
+    "observed_utc": "2026-10-09T15:31:58.115799+00:00",
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "head": "f36b982b8b45774cf68fc621acf0d9727d72e6d5",
+    "dev": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+    "origin_dev": "35f7c225a25025aec893230c072754cf7d7c76fc",
+    "merge_base_dev": "146ca4955dca1c56111fc482876290ee1c0b12e2",
+    "merge_base_origin_dev": "35f7c225a25025aec893230c072754cf7d7c76fc",
+    "locked_review_base": "35f7c225a25025aec893230c072754cf7d7c76fc",
+    "locked_base_matches_origin_and_head_merge_base": true,
+    "local_dev_is_older_primary_checkpoint": true,
+    "initial_probe_issue": "An initial ancillary assertion incorrectly required the unsynchronized local dev ref to equal origin/dev. Read-only inspection establishes that origin/dev and HEAD merge-base match the locked PR review base; no refs were changed.",
+    "limits": "Local refs only; no fetch or GitHub query. Native corrected-head CI/review, landing and separately verified PRIMARY synchronization remain outer-owned."
+  },
+  "implementation_time_worktree_sha256": {
+    "mu/tools/executors/commit_executor.py": "43ad71ada1275858539f2adb59000e482de0feb100dad647f0876da16685bef7",
+    "mu/tests/tools/test_commit_executor_local_review.py": "1b2af2910982aa27223ab5eb7b9a5f38b718f6c9554fc7a9786845467797457b",
+    "mu/tests/tools/test_executor_dispatch.py": "627358229d1572f6081d3190186a83eb1549874a5f964a1424350e0610eebddb",
+    "mu/tests/tools/test_recovery_gate.py": "02f7d2e7174cc513f9766e9861cfa7bf6d4f5153c294a883c8c5a828182745e6",
+    "TASKS.md": "cbcc672e356ebeedde500cdbf7c8fdc5908dd1d62a8d12424255165b34ccb85f",
+    "CHANGELOG.md": "995f829d1b59623bea814e8ca1cacd4bcb87ffaf820abd7d33a628ed3db96b2f"
+  },
+  "snapshot_limit": "These worktree, tracker, packet and test hashes describe implementation-time observations. Subsequent native staging and generated caps/indicators/package receipts must establish final staged authority independently.",
+  "phase_b_boundary": {
+    "executed": "Declared full three-module pytest gate, bounded temporary native producer/public-continuation probes, read-only indexed authority/builder checks and documentation/hash observations.",
+    "not_executed": "Dispatcher/executor launches, startup/preflight or attestation flows, commit/push/PR/merge/closeout commands, broad pre-push/audit gates, live provider failure induction, live GitHub mutations or backup/retention operations."
+  },
+  "proof_limits": [
+    "Provider, GitHub and process effects are fixture-isolated. Tests prove the native production/public local boundaries; they do not establish live provider capacity, fresh GitHub CI, independent complete-PR approval or landing.",
+    "The retained version-1 PR1332 REQUEST_CHANGES receipt was also read through the real guard under old and R3 buses; both selected the same unchanged negative receipt hash without external effects.",
+    "R2 passed tests and Phase B review but had no accepted final supervisor receipt: two differing negative envelopes were correctly rejected. Neither advisory message was promoted to authority.",
+    "The original 3327-test candidate and all prior test definitions remain retained. Full final coverage adds controls without disabling original cases. No runtime, substrate, model, adapter, hook or Phase B source change.",
+    "The local dev ref remains at 146ca4955dca1c56111fc482876290ee1c0b12e2. origin/dev and the candidate merge-base match the locked 35f7c225a25025aec893230c072754cf7d7c76fc base. The first ancillary ancestry assertion incorrectly equated unsynchronized local dev with origin/dev; no refs were changed."
+  ],
+  "remaining_outer_owned_work": [
+    "Stage the corrected source/tests/docs and implementation evidence; generate this wave indicator and any required existing growth-cap refresh natively; run native final gates and obtain an exact new receipt for the preserved PR1332 branch.",
+    "Commit/push, fresh corrected-head seven-check CI, independent complete-PR review, aggregate clearance, protected landing and separately verified PRIMARY sync. Existing individual Bot resolutions are not full-PR approval.",
+    "After actual landing/sync, verify PR1331 disposition and PR1330 landed coverage/native disposition, then fresh-authority PR1329 folder work. Preserve paused PR1325 and all useful-work/physical/registration obligations.",
+    "Keep stopped R2 buses/receipts/raw outputs/budgets and escalated lifecycle f471c43a unchanged. Deduplicated recovery retention is a separate next scope on UUID93064AFA-816D-43E3-BCC9-8A514F8F3D7D; no old APPLY replay, archive purge, relocation or backup-setting change."
+  ],
+  "external_artifacts": [
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-implementation-before.json",
+      "bytes": 3660,
+      "sha256": "9a6c7ce08c57c26f8359a97b8cd63f7c635a802b6e4a28f9da2c0feb99a576c5"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-before-probe.py",
+      "bytes": 1623,
+      "sha256": "03a0b7080161f5ff1f0187c1ed1fc5580cdb0ed3fff5b4e4c3d44f29e5df915a"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-before-probe.log",
+      "bytes": 311,
+      "sha256": "19bcbe6834f645ea1e73c4d14eea3dffd5e19fdfb1a279e414a4c2e81ce09e5b"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-before-probe-result.json",
+      "bytes": 1934,
+      "sha256": "d5ca069afae897a39dac9c577b68b7107cd2fe3ca8c3f15b8ff02b7f654c8b90"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-focused-controls.py",
+      "bytes": 1856,
+      "sha256": "dd0fde88b7da1adb8d616167771ba919e6ddb5b0a72c0dd212be7ce1e5507cc1"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-focused-controls.log",
+      "bytes": 427,
+      "sha256": "cf8d909da3a3c0e7f247741d8a629d76f2f8aaaf00af4606e32297fd60141f5e"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-focused-controls-result.json",
+      "bytes": 2089,
+      "sha256": "ce26c03c1e9ee997038c7b03e045f4a5b2989beb1c952d0631075e34f0dc8f9d"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-damage-diagnosis.json",
+      "bytes": 954,
+      "sha256": "65740105b7204abdfcd1409265bc5b0fc1d9a9382c007b44c83e044fe598d31e"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-storage-controls.py",
+      "bytes": 1545,
+      "sha256": "79891ea3a1549b787da90fcf33de722a92d5b2fc7a04853858ccdf8d84ed28cb"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-storage-controls.log",
+      "bytes": 435,
+      "sha256": "a552367b8870eb3ff5a5a3390ba74f6ed6a7c141c636d828e6658e1f27c2d251"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-storage-controls-result.json",
+      "bytes": 2296,
+      "sha256": "d3033e71ea176ecf23c8a7c1a07a8f87e23bc4fef93d2f8b468421f4572eacda"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-full-gate-1.json",
+      "bytes": 3240,
+      "sha256": "326f07401579ce7edb68c05c8ce699d0841abde4061136cf2c72039f64c6db27"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-full-gate-1.log",
+      "bytes": 5273,
+      "sha256": "243705709524c04bf415f625740047f0885d9cca89fa91e7c125eac91114f1cb"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-full-gate-2.json",
+      "bytes": 3240,
+      "sha256": "9eb300b234a29e43ddbf4b054feaa6c64e73a209139a4d0cd1992b3997ea635c"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-full-gate-2.log",
+      "bytes": 3873,
+      "sha256": "4af27fa3c43d4566711dc5f18f2a835b7378515223a38997de2fd4561f270150"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-final-source-boundary.json",
+      "bytes": 2586,
+      "sha256": "35fdb45ab5ef411fda10e3d39c76c2d24deb807e2f7461331ed2baf4a0e047d4"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-tracker-checkpoint-sync.json",
+      "bytes": 21498,
+      "sha256": "0986c583f787401b06679ce6116aa70633a3840a20da64cd1e3f60d991241c02"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-tracker-final-reporting.json",
+      "bytes": 3871,
+      "sha256": "a594cc31a559ed993eab41a4757a5877fd9ca24865cb498894c10de972ffd73d"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-indexed-builder-before-final-gate.json",
+      "bytes": 565,
+      "sha256": "1a72f5972ddddf2b0dc0edd324ccfcdf0bc0673207395cab43efd409f47f6749"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-comparison-ancestry.json",
+      "bytes": 1028,
+      "sha256": "4ff85c2bd2c3b4c89061819e853bf6b3b52dd140a22361634c35521fb8d228ab"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-retained-negative-cross-bus.json",
+      "bytes": 1388,
+      "sha256": "8dd28c2c890203c2907ca92f4597b6e44b5238d6236b58d38150b26bf48f49c2"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261009/local-review-terminal-r3-validation/r3-preserved-native-negative-observation.json",
+      "bytes": 2291,
+      "sha256": "8e4b01ef5f50ec609f7f11a54b1c0bcc7d9977fc36f97ab9ac87b88b9f7aeb88"
+    }
+  ]
+}

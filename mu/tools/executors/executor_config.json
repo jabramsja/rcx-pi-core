@@ -79,6 +79,9 @@
     }
   },
   "agent_review_enabled": false,
+  "github_review_quota_fallback": {
+    "enabled": true
+  },
   "review_depths": {
     "phase_a": "quick",
     "phase_b": "quick"

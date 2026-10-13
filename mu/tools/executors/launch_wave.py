@@ -3701,6 +3701,7 @@ def build_phase_b_dispatch_command(
         config.task_id,
         "--routing-record-path",
         str(routing_path),
+        "--json",
     ]
     if bus_dir is not None:
         cmd.extend(["--bus-dir", str(bus_dir)])

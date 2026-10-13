@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "wave_id": "workingrcx-prompt-checkout-test-r2-2026-10-07",
+  "phase": "Phase B local implementation",
+  "generated_at_utc": "2026-10-07T20:30:59.700305+00:00",
+  "proof_scope": "Preservation verification and exact source/test execution in this implementation phase. Native final approval owns the complete staged-candidate binding.",
+  "checkout": {
+    "root": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/prompt-checkout-r2-20261007",
+    "parent_commit": "bed1639685bb62bfcbc64265aa837360296be280",
+    "current_commit_before_validation": "bed1639685bb62bfcbc64265aa837360296be280",
+    "current_commit_after_validation": "bed1639685bb62bfcbc64265aa837360296be280",
+    "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "remote_observation": {
+      "phase": "Before Phase B test restoration",
+      "observed_at_utc": "2026-10-07T20:28:03.307369+00:00",
+      "command": "git ls-remote origin refs/pull/1332/head refs/heads/jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+      "refs": {
+        "refs/heads/jabramsja/workingrcx-local-review-quota-r3-2026-10-05": "d978fcff7b984b1739b3ae2ca88627276a16d5bc",
+        "refs/pull/1332/head": "d978fcff7b984b1739b3ae2ca88627276a16d5bc"
+      }
+    }
+  },
+  "preservation": {
+    "recovery_volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+    "manifest": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-r1-preserved/preservation.json",
+      "sha256": "52955cf4f093682d9dda5e798223687effce0ed6e6b7cfeccbed3b8e2db49e39"
+    },
+    "snapshot": "2e8701b97ac443e4fd884a8b2e6a5e7c927db99cb1307575c9bf22ad01ee4fb2",
+    "verified_files": 74,
+    "verification_method": "SHA256, size and mode checked for every restored manifest path; no predecessor metadata copied",
+    "selected_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-r1-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/prompt-checkout-r1-20261007/mu/tests/tools/test_agent_prompt_contract_injection.py",
+    "restored_path": "mu/tests/tools/test_agent_prompt_contract_injection.py",
+    "selected_sha256": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+    "restoration_verification": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-checkout-r2-phase-b-20261007T202803Z/restoration_verification.json",
+      "sha256": "247e4645aeb88e6e3588a7bccfdffe493697e6e57f140c1a0c08f29edcbe5986"
+    },
+    "historical_evidence": {
+      "classification": "Immutable predecessor evidence only; no R2 execution or approval authority",
+      "original_failure_directory": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-contract-reproduction",
+      "r1_passing_run_directory": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-checkout-phase-b-20261007T193923Z",
+      "r1_final_approval_hold": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-governance-approval-hold.json",
+        "sha256": "0cd7a5540bfd8cea4beaa3d421ad54bc7db13922805d8f338075bbbd53d94a03"
+      },
+      "r1_terminal_launch_output": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/native-prompt-repair-launch.log",
+        "sha256": "02e861d83bc85f0c2997fbc6f2603cbfd80c43c8a35eca84f6b71b13fc319a3c"
+      },
+      "r1_outcome": "255 passed, 1 skipped; native Phase B code-review GO. Final supervisor NEEDS_PHASE_B on outdated governance hashes; recovery entered Phase A and failed packet skeleton/status/authorization validation, requiring a fresh wave. No R1 commit, push or merge."
+    }
+  },
+  "source_test_execution": {
+    "phase": "Phase B local validation",
+    "started_at_utc": "2026-10-07T20:28:26.586783+00:00",
+    "finished_at_utc": "2026-10-07T20:28:47.705794+00:00",
+    "sha256": {
+      "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8",
+      "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+      "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+      "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py": "020cbc84901d6c48db3fd54defe773c72b8fb231a0deb40d08140c6542011fda",
+      "mu/tests/l4_gates/test_w3_crash_guards_gate.py": "f20887581bda9108d34a33439b86c2501a24330601ba4f2456736991f3445567",
+      "mu/tools/runners/shared_agent_utils.py": "b3e9821d1d81cb3a88201d22077ea428355a1e12687c7dff7a46e458a558a43f",
+      "mu/tools/agents/_contract_redteam.md": "9a0deb3a247a094b9e28fb85df4b22dbea01debf6bef9535968616a3e5316ae5",
+      "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+      "mu/tools/agents/verifier_prompt.md": "1f40d77d93ba05b1c15363cd557d583a255b03c4b2c0f2cdec37fd8cf3869eba",
+      "mu/tools/agents/adversary_prompt.md": "45f8044018b24852430d6f6c7e7638b73bae5f3d2a5642a8db3d0ea4c9228b34",
+      "mu/tools/agents/expert_prompt.md": "8dc3ea9351d917b6dd3b77f2954e239001785cea3e5045454d2179d1d5561d7d",
+      "mu/tools/agents/structural_proof_prompt.md": "d5d6af126f668cbcecacf632d6375441ea20f1e51da9b14cf2378c494963d176",
+      "mu/tools/agents/grounding_prompt.md": "219ed143a82d0040c2a696a5fdbbd17e419fa7e192bf6b78be2d3a630b2b543f",
+      "mu/tools/agents/fuzzer_prompt.md": "81551cdef79913568fe41e51915deb9921cdcea4c6455e9997a75f7fb892a1d5",
+      "mu/tools/agents/translator_prompt.md": "d795eb2dc8dc1d17f16dd1bea3cc1b39785b146fb0b38d4e99be61ca88bb91df",
+      "mu/tools/agents/visualizer_prompt.md": "4180a5c55805bcb44026a16f21ea70b272784d279af66d80a89ed5f9ce7f4f1c",
+      "mu/tools/agents/advisor_prompt.md": "aff9adb90ee586bfa15a47c1d4bc1a2c9593364592e5c7538896259158196f4d"
+    },
+    "identical_before_and_after_execution": true,
+    "preserved_isolation_files_match_parent": {
+      "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+      "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f"
+    },
+    "controls": {
+      "actual_checkout_assertion": true,
+      "runtime_agents": 9,
+      "valid_root_combinations": 27,
+      "stale_reference_controls": 12,
+      "injection_rule": "Exactly one current-root injection is verified and removed once before the stale-path check over all remaining contract/template text."
+    }
+  },
+  "validation": {
+    "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_agent_prompt_contract_injection.py mu/tests/engine/test_mu_type.py mu/tests/l4_gates/test_stage0_vm_cutover.py mu/tests/l4_gates/test_trusted_mutation_removal_gate.py mu/tests/l4_gates/test_w3_crash_guards_gate.py --tb=short",
+    "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/prompt-checkout-r2-20261007",
+    "runs": 1,
+    "exit_code": 0,
+    "result": "255 passed, 1 skipped in 20.68s",
+    "wall_duration_seconds": 21.114,
+    "raw_log": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-checkout-r2-phase-b-20261007T202803Z/five_module_gate.log",
+      "sha256": "994804245e6f5144ad3f5ac597f4849fe74171f40d0dfb82f3bbafe514a87028"
+    },
+    "execution_record": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/prompt-checkout-r2-phase-b-20261007T202803Z/test_execution.json",
+      "sha256": "b93b6e7952de1ad6d8c7fe645a0aab8f8b164648ae02ae127550a0704af91b8c"
+    },
+    "unchanged_skip": {
+      "test": "mu/tests/l4_gates/test_trusted_mutation_removal_gate.py::TestRatchetEvidence::test_total_decreased",
+      "reason": "Before-snapshot not found at /tmp/cp_s1a_before.json",
+      "before_snapshot_exists_at_execution_start": false,
+      "scope": "Existing parent test; no skip added or modified."
+    }
+  },
+  "read_only_identity_commands": [
+    "git rev-parse HEAD",
+    "git branch --show-current",
+    "git ls-remote origin refs/pull/1332/head refs/heads/jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+    "diskutil info -plist '/Volumes/RCX Recovery'"
+  ],
+  "limits": [
+    "Source/test hashes describe only the recorded execution interval. No implementation-time TASKS, packet, tracker-note or indicator hash is asserted to bind future governance bytes.",
+    "Native Phase A owns the packet; native governance owns tracker fields, the indicator and mechanical growth-cap updates. Phase B stages its commit-ready packet and invokes a fresh supervisor; commit_executor obtains fresh final approval and verifies the validated candidate before committing. Those receipts bind the complete final package without a circular rewrite of this evidence.",
+    "An unexplained source or candidate mismatch remains a stop condition. No receipt/hash check is weakened; no predecessor approval, lifecycle claim or spent budget is reused.",
+    "This implementer restored only the selected test and updated row38 narrative, CHANGELOG and this evidence. Production, loader/templates, executors, recovery, hooks and review policy were not edited. Native review, hooks, required CI, protected merge and PRIMARY sync are pending outside Phase B-local validation.",
+    "PRIMARY WIP, prior recovery evidence and storage mappings were not modified; new execution logs were added only under the UUID-verified recovery review directory. The locked plan records prior verified PRIMARY snapshot 7f27a69ac11933fa793a7a27054d4dd92feab6fb706bb4e2c41bf270d3a60b20 with 919 restored files; this phase did not reverify that separate snapshot. Deduplicated-store producer integration remains pending.",
+    "Existing row40 retains governance-observation lifetime and NEEDS_PHASE_B-to-Phase-A recovery defects, structured-result transport and missing raw-stream retention. No new prerequisite or automation-completion claim.",
+    "This auxiliary repair produces no physical APPLY plan. No retirement, PR1331/1330/1329 disposition, paused PR1325 resumption or useful-work completion is claimed. Any later task-ID-only APPLY-plan hold is distinct from actual merge and PRIMARY-sync receipts."
+  ]
+}

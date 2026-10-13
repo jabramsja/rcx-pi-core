@@ -7,7 +7,9 @@ and cross-substrate parity.
 L4_STRUCTURAL gate: G2 (first-match-wins / structural forward motion).
 """
 
-import importlib
+import json
+import subprocess
+import sys
 
 import pytest
 from rcx_pi.selfhost.step_mu import (
@@ -37,12 +39,25 @@ ONE = {"_num": {"xH": None}}
 
 def _stage0_match_bootstrap_marker_reason():
     """Return Stage0 marker reason from public bootstrap registry evidence."""
-    import rcx_pi.selfhost.eval_seed as eval_mod
-
     registry = get_bootstrap_registry()
     if not registry:
-        importlib.reload(eval_mod)
-        registry = get_bootstrap_registry()
+        # Read actual import-time markers without reloading the live runtime:
+        # eval_seed reload would replace NO_MATCH held by already-imported users.
+        output = subprocess.check_output(
+            [
+                sys.executable,
+                "-c",
+                "import json, sys\n"
+                "sys.path[:] = json.loads(sys.argv[1])\n"
+                "import rcx_pi.selfhost.eval_seed\n"
+                "from rcx_pi.selfhost.mu_type import get_bootstrap_registry\n"
+                "print(json.dumps(get_bootstrap_registry()))\n",
+                json.dumps(sys.path),
+            ],
+            text=True,
+            timeout=30,
+        )
+        registry = json.loads(output)
 
     marker_entries = [
         entry
@@ -54,6 +69,45 @@ def _stage0_match_bootstrap_marker_reason():
         f"registry={registry!r}"
     )
     return marker_entries[0][len(_STAGE0_MATCH_BOOTSTRAP_PREFIX):]
+
+
+class TestBootstrapMarkerIsolation:
+    @pytest.mark.parametrize("empty_registry", [False, True], ids=["populated", "empty"])
+    def test_marker_read_preserves_registry_and_sentinel(self, empty_registry):
+        from rcx_pi.selfhost import eval_seed, mu_type
+
+        registry = mu_type.BOOTSTRAP_REGISTRY
+        original = get_bootstrap_registry()
+        expected_reason = _stage0_match_bootstrap_marker_reason()
+        try:
+            if empty_registry:
+                registry.clear()
+            before = get_bootstrap_registry()
+            assert eval_seed.match({"var": ""}, 42) is NO_MATCH
+            assert _stage0_match_bootstrap_marker_reason() == expected_reason
+            assert mu_type.BOOTSTRAP_REGISTRY is registry
+            assert get_bootstrap_registry() == before
+            assert eval_seed.NO_MATCH is NO_MATCH
+            assert eval_seed.match({"var": ""}, 42) is NO_MATCH
+            assert eval_seed.match([{"var": "x"}, {"var": "x"}], [1, 2]) is NO_MATCH
+        finally:
+            registry[:] = original
+
+    def test_missing_marker_in_populated_registry_is_rejected(self):
+        from rcx_pi.selfhost import mu_type
+
+        registry = mu_type.BOOTSTRAP_REGISTRY
+        original = get_bootstrap_registry()
+        try:
+            registry.clear()
+            mu_type.mark_bootstrap("isolation_regression", "unrelated marker")
+            before = get_bootstrap_registry()
+            with pytest.raises(AssertionError, match="expected public bootstrap registry marker"):
+                _stage0_match_bootstrap_marker_reason()
+            assert mu_type.BOOTSTRAP_REGISTRY is registry
+            assert get_bootstrap_registry() == before
+        finally:
+            registry[:] = original
 
 
 # ---------------------------------------------------------------------------

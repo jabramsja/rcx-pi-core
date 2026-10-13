@@ -157,6 +157,7 @@ class FailureClass(Enum):
     # Tier 4 -- escalate (never recover)
     NEEDS_PHASE_A = "needs_phase_a"
     CODEX_PROVIDER_SAFETY_REFUSAL = "codex_provider_safety_refusal"
+    LOCAL_REVIEW_TERMINAL = "local_review_terminal"
     TERMINAL_POLICY = "terminal_policy"
     UNCLASSIFIED = "unclassified"
 
@@ -202,6 +203,7 @@ _TIER_MAP: dict[FailureClass, int] = {
     FailureClass.PHASE_B_L4_STRUCTURAL_TRACKER_NOTE_GAP: 2,
     FailureClass.NEEDS_PHASE_A: 4,
     FailureClass.CODEX_PROVIDER_SAFETY_REFUSAL: 4,
+    FailureClass.LOCAL_REVIEW_TERMINAL: 4,
     FailureClass.TERMINAL_POLICY: 4, FailureClass.UNCLASSIFIED: 4,
 }
 
@@ -563,8 +565,115 @@ def _canonical_reviewer_refusal(result: dict[str, Any]) -> bool:
     )
 
 
+def local_review_terminal_payload(result: dict[str, Any]) -> dict[str, Any] | None:
+    """Admit only a native commit result bound to its complete immutable receipt.
+
+    Text, stderr, provider events and nested examples grant no producer authority.
+    Reuse the dispatcher's strict standalone parser lazily to keep import-time
+    recovery dependencies unchanged and the Phase B parser contract intact.
+    """
+    if result.get("executor") != "commit_executor":
+        return None
+    payload = result
+    if result.get("failure_class") != "local_review_terminal":
+        if result.get("status") != "failed" or type(result.get("exit_code")) is not int:
+            return None
+        from executor_dispatch import _extract_structured_stdout_payload
+        payload = _extract_structured_stdout_payload(result.get("stdout", ""))
+    if (not isinstance(payload, dict) or payload.get("status") != "error"
+            or payload.get("executor") != "commit_executor"
+            or payload.get("step") != "ensure_review_clear_and_merge"
+            or payload.get("failure_class") != "local_review_terminal"
+            or payload.get("terminal_decision") != "REPAIR_REQUIRED"
+            or payload.get("retry_allowed") is not False):
+        return None
+
+    def digest(value: Any) -> bool:
+        return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+    proof = payload.get("local_pr_review")
+    if not isinstance(proof, dict) or proof.get("source") != "commit_executor":
+        return None
+    receipt = proof.get("receipt")
+    if not isinstance(receipt, dict) or not digest(proof.get("receipt_sha256")):
+        return None
+    try:
+        receipt_digest = hashlib.sha256((json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
+    except (TypeError, ValueError, RecursionError):
+        return None
+    if receipt_digest != proof["receipt_sha256"]:
+        return None
+    identity, reviewer, request = (receipt.get(k) for k in ("identity", "reviewer", "request_comment"))
+    job, turn, path = receipt.get("job_id"), receipt.get("turn_id"), proof.get("receipt_path")
+    if (type(receipt.get("version")) is not int or receipt["version"] not in (1, 2)
+            or receipt.get("receipt_type") != "github_quota_local_review"
+            or receipt.get("status") not in ("ERROR", "STARTED")
+            or not isinstance(job, str) or re.fullmatch(r"local-pr-review-[0-9a-f]{32}", job) is None
+            or turn != job + "--reviewer" or not isinstance(path, str)
+            or not isinstance(identity, dict) or not isinstance(reviewer, dict) or not isinstance(request, dict)
+            or not receipt.get("wave_id") or receipt["wave_id"] != payload.get("wave_id")
+            or not digest(receipt.get("source_sha256"))):
+        return None
+    parts = Path(path).parts
+    if (len(parts) != 5 or not parts[0].startswith(".agent_bus")
+            or parts[1:4] != ("meta", "local_pr_reviews", job)
+            or parts[4] != ("attempt.json" if receipt["status"] == "STARTED" else "receipt.json")):
+        return None
+    if (any(not isinstance(identity.get(k), str) or re.fullmatch(r"[0-9a-f]{40}", identity[k]) is None
+            for k in ("head_sha", "base_sha", "merge_base_sha"))
+            or not digest(identity.get("diff_sha256"))
+            or type(identity.get("pr_number")) is not int or identity["pr_number"] <= 0
+            or payload.get("pr_number") != str(identity["pr_number"])
+            or payload.get("commit_sha") != identity["head_sha"]
+            or any(not isinstance(identity.get(k), str) or not identity[k]
+                   for k in ("repository", "repo_root", "head_branch", "base_branch", "url"))
+            or type(request.get("databaseId")) is not int or request["databaseId"] <= 0
+            or not isinstance(request.get("author"), dict) or request["author"].get("__typename") != "User"
+            or reviewer.get("selected_agent") != "codex" or reviewer.get("model") != "gpt-6-astra"
+            or reviewer.get("effort") != "max" or reviewer.get("sandbox") != "read-only"
+            or any(not digest(reviewer.get(k)) for k in
+                   ("command_sha256", "bridge_config_sha256", "executor_config_sha256"))):
+        return None
+    artifacts = receipt.get("artifacts")
+    if (not isinstance(artifacts, dict) or not artifacts
+            or any(not isinstance(p, str) or Path(p).parent != Path(path).parent or not digest(h)
+                   for p, h in artifacts.items())
+            or artifacts.get(str(Path(path).with_name("pr.diff"))) != identity["diff_sha256"]
+            or not digest(artifacts.get(str(Path(path).with_name("prompt.md"))))):
+        return None
+    for key in ("output", "raw_stdout", "raw_stderr"):
+        if key + "_sha256" in receipt and (
+                not isinstance(receipt.get(key), str)
+                or hashlib.sha256(receipt[key].encode()).hexdigest() != receipt[key + "_sha256"]):
+            return None
+    refusal = receipt.get("provider_refusal")
+    if refusal is not None and (
+            not isinstance(refusal, dict) or refusal.get("job_id") != job or refusal.get("turn_id") != turn
+            or refusal.get("provider") != "codex" or refusal.get("agent_role") != "reviewer"
+            or type(refusal.get("returncode")) is not int or refusal["returncode"] == 0
+            or refusal["returncode"] != receipt.get("process_exit_code")
+            or refusal.get("raw_stdout") != receipt.get("raw_stdout")
+            or refusal.get("raw_stderr") != (receipt.get("raw_stderr") or "")
+            or type(refusal.get("error_line")) is not int or refusal["error_line"] < 1
+            or type(refusal.get("failed_line")) is not int or refusal["failed_line"] <= refusal["error_line"]):
+        return None
+    return payload
+
+
 def classify_failure(result: dict[str, Any]) -> FailureClass:
     """Classify an executor failure result into a FailureClass."""
+    if local_review_terminal_payload(result) is not None:
+        return FailureClass.LOCAL_REVIEW_TERMINAL
+    # Preserve the existing exact Phase A terminal fence before tracker repair.
+    if _looks_like_structured_pre_commit_needs_phase_a(result):
+        return FailureClass.NEEDS_PHASE_A
+    supervisor, authority_error = _commit_supervisor_failure_context(result)
+    if authority_error:
+        return FailureClass.UNCLASSIFIED
+    if supervisor is not None:
+        # Classify the current failure, not source/docs printed by its reviewer.
+        # Keep the caller's complete result intact for diagnostics and re-entry.
+        result = supervisor
     status = result.get("status", "")
     stderr = result.get("stderr", "")
     exit_code = result.get("exit_code")
@@ -606,12 +715,6 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     reason_lower = reason_text.lower()
     step_lower = " ".join(part for part in (step, embedded_step) if part).lower()
     status_failed = status in ("error", "failed") or embedded_status in ("error", "failed")
-
-    # Tier 4: an exact pre-commit NEEDS_PHASE_A rejection is terminal.  Keep
-    # status, decision, and commit provenance bound to one structured candidate;
-    # an outer failure must not borrow a decision from unrelated embedded JSON.
-    if _looks_like_structured_pre_commit_needs_phase_a(result):
-        return FailureClass.NEEDS_PHASE_A
 
     # Narrow exception before terminal policy: a pre-commit supervisor rejection
     # caused by package-local wave identity or staged-scope loss is recoverable
@@ -1678,36 +1781,115 @@ def _has_unnegated_out_of_scope_marker(
     return False
 
 
+_COMMIT_SUPERVISOR_STEPS = frozenset({
+    "build_and_run_supervisor", "commit_ready_status_supervisor",
+})
+_SUPERVISOR_FAILURE_TEXT_FIELDS = (
+    "error", "detail", "reason", "message", "pre_commit_summary",
+)
+
+
+def _commit_supervisor_failure_context(
+    result: dict[str, Any],
+) -> tuple[dict[str, Any] | None, bool]:
+    """Select one bounded supervisor failure without borrowing transcript fields.
+
+    The native standalone parser consumes provider/tool events as whole values
+    and rejects duplicate keys, multiple results and trailing/malformed output.
+    Its refusal is never repaired by the permissive diagnostic JSON parser.
+    The bool flags conflicting or malformed supervisor authority (a safe hold).
+    Other executor failures retain their existing classification policy.
+    """
+    direct = isinstance(result.get("step"), str) and result["step"] in _COMMIT_SUPERVISOR_STEPS
+    if result.get("type") is not None or (
+        isinstance(result.get("status"), str) and result["status"] in _TERMINAL_STATUSES
+    ):
+        return None, False
+    if not direct and result.get("executor") != "commit_executor":
+        return None, False
+    from executor_dispatch import _extract_structured_stdout_payload
+
+    stdout = result.get("stdout", "")
+    child = _extract_structured_stdout_payload(stdout)
+    # A supervisor claim in a rejected transport only causes a hold. It cannot
+    # provide any authority, including when it is inside a tool/source example.
+    rejected_claim = child is None and isinstance(stdout, str) and "needs_phase_b" in stdout.lower() and re.search(
+        r'"step"\s*:\s*"(?:build_and_run_supervisor|commit_ready_status_supervisor)"',
+        stdout,
+    ) is not None
+    child_claim = child is not None and (
+        "pre_commit_decision" in child
+        or (isinstance(child.get("step"), str) and child["step"] in _COMMIT_SUPERVISOR_STEPS)
+    )
+    if not direct and not rejected_claim and not child_claim:
+        return None, False
+    if rejected_claim:
+        return None, True
+    candidate = child if child is not None else result
+    # This boundary owns Phase B supervisor/tracker recovery only. In
+    # particular, the existing exact/nonexact Phase A policy stays unchanged.
+    finding_texts = [candidate.get(key, "") for key in _SUPERVISOR_FAILURE_TEXT_FIELDS]
+    if isinstance(candidate.get("errors"), list):
+        finding_texts.extend(candidate["errors"])
+    if (candidate.get("status") != "needs_phase_b"
+            and candidate.get("pre_commit_decision") != "NEEDS_PHASE_B"
+            and candidate.get("failure_class") != "needs_phase_b"
+            and not any(isinstance(part, str) and part.startswith("Supervisor returned NEEDS_PHASE_B:")
+                        for part in finding_texts)):
+        return None, False
+    if (candidate.get("type") is not None
+            or not isinstance(candidate.get("step"), str)
+            or candidate.get("step") not in _COMMIT_SUPERVISOR_STEPS
+            or candidate.get("status") not in ("error", "failed", "needs_phase_b")
+            or candidate.get("executor", "commit_executor") != "commit_executor"):
+        return None, True
+    # stderr is diagnostic-only; a second result there is conflicting authority.
+    if _extract_structured_stdout_payload(result.get("stderr", "")) is not None:
+        return None, True
+    if child is not None:
+        if (result.get("status") not in ("error", "failed", "needs_phase_b")
+                or result.get("executor", "commit_executor") != "commit_executor"
+                or result.get("step") not in (None, "", "commit", "commit_executor", candidate["step"])):
+            return None, True
+        for key in ("pre_commit_decision", "failure_class", "wave_id", "plan_path", "tracked_packet"):
+            if key in result and result[key] != candidate.get(key):
+                return None, True
+
+    fields = ("status", "step", "executor", "pre_commit_decision", "failure_class",
+              "wave_id", "plan_path", "tracked_packet", "resume_after",
+              *_SUPERVISOR_FAILURE_TEXT_FIELDS)
+    context = {key: candidate[key] for key in fields if key in candidate}
+    if any(not isinstance(value, str) for value in context.values()):
+        return None, True
+    errors = candidate.get("errors", [])
+    if not isinstance(errors, list) or len(errors) > 64 or any(not isinstance(e, str) for e in errors):
+        return None, True
+    if sum(len(value) for value in [*context.values(), *errors]) > 65536:
+        return None, True
+    context["errors"] = list(errors)
+    decision = context.get("pre_commit_decision")
+    if decision is not None and decision not in ("NEEDS_PHASE_A", "NEEDS_PHASE_B"):
+        return None, True
+    if context.get("status") == "needs_phase_b" and decision not in (None, "NEEDS_PHASE_B"):
+        return None, True
+    if decision is not None and context.get("failure_class", decision.lower()) != decision.lower():
+        return None, True
+    return context, False
+
+
 def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[str, Any]) -> bool:
-    candidates = _extract_result_candidates(result)
-    steps = {
-        str(candidate.get("step", "") or "").strip().lower()
-        for candidate in candidates
-        if str(candidate.get("step", "") or "").strip()
-    }
-    executors = {
-        str(candidate.get("executor", "") or "").strip().lower()
-        for candidate in candidates
-        if str(candidate.get("executor", "") or "").strip()
-    }
-    commit_supervisor_steps = {
-        "build_and_run_supervisor",
-        "commit_ready_status_supervisor",
-    }
-    if not (steps & commit_supervisor_steps):
+    candidate, authority_error = _commit_supervisor_failure_context(result)
+    if authority_error or candidate is None:
         return False
-    text_parts = [
-        _summarize_result_reason(result),
-        _extract_classifier_signal(result),
-        *(_summarize_json_value(candidate) for candidate in candidates),
-    ]
-    signal = " ".join(part for part in text_parts if part).lower()
-    statuses = {
-        str(candidate.get("status", "") or "").strip().lower()
-        for candidate in candidates
-        if str(candidate.get("status", "") or "").strip()
-    }
-    if "needs_phase_b" not in statuses and "needs_phase_b" not in signal:
+    text_parts = [candidate.get(key, "") for key in _SUPERVISOR_FAILURE_TEXT_FIELDS]
+    text_parts.extend(candidate["errors"])
+    if candidate.get("pre_commit_decision") not in (None, "NEEDS_PHASE_B"):
+        return False
+    if candidate.get("failure_class") not in (None, "needs_phase_b"):
+        return False
+    if (candidate["status"] != "needs_phase_b"
+            and candidate.get("pre_commit_decision") != "NEEDS_PHASE_B"
+            and not any(part.startswith("Supervisor returned NEEDS_PHASE_B:") for part in text_parts)):
         return False
     out_of_scope_markers = (
         "out-of-wave",
@@ -1719,8 +1901,6 @@ def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[st
         "scope drift",
         "unrelated structural tracker note",
     )
-    if "tasks.md" not in signal:
-        return False
     # Anchored negation (not a blanket aggregate veto): an out-of-scope marker
     # counts as genuine evidence only when it is NOT governed by a negation cue
     # in a bounded preceding window, judged per text-part. A favorable
@@ -1729,8 +1909,6 @@ def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[st
     # un-negated out-of-wave addition still classifies positive even if a negated
     # absence phrase co-occurs elsewhere in the aggregate. Return False only when
     # every out-of-scope occurrence is negated.
-    if not _has_unnegated_out_of_scope_marker(text_parts, out_of_scope_markers):
-        return False
     tracker_markers = (
         "tracker note",
         "tracker-note",
@@ -1738,10 +1916,15 @@ def _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result: dict[st
         "tracker follow-up",
         "tracker sync follow-up",
     )
-    if not any(marker in signal for marker in tracker_markers):
-        return False
     staged_markers = ("staged", "git diff --cached", "added")
-    return any(marker in signal for marker in staged_markers)
+    # Require one explicit finding, not markers assembled from unrelated fields.
+    return any(
+        "tasks.md" in part.lower()
+        and _has_unnegated_out_of_scope_marker([part], out_of_scope_markers)
+        and any(marker in part.lower() for marker in tracker_markers)
+        and any(marker in part.lower() for marker in staged_markers)
+        for part in text_parts
+    )
 
 
 def _looks_like_upstream_connectivity_failure(detail: str) -> bool:
@@ -4751,7 +4934,12 @@ def fix_commit_supervisor_out_of_wave_tasks_tracker_note(repo_root: Path, **kw: 
     if not isinstance(result, dict):
         result = {}
     detect_only = bool(kw.get("detect_only", False))
-    active_wave_id = _resolve_active_recovery_wave_id(result, kw.get("wave_id"))
+    authority, authority_error = _commit_supervisor_failure_context(result)
+    if authority_error or authority is None:
+        return _fix_result(False, "tracker_repair_not_authorized", "missing or conflicting supervisor failure authority")
+    active_wave_id = _resolve_active_recovery_wave_id(authority, kw.get("wave_id"))
+    if authority.get("wave_id") and normalize_wave_id(authority["wave_id"]) != active_wave_id:
+        return _fix_result(False, "tracker_repair_not_authorized", "supervisor failure belongs to another recovery wave")
     if not active_wave_id:
         return _fix_result(
             False,
@@ -4809,7 +4997,7 @@ def fix_commit_supervisor_out_of_wave_tasks_tracker_note(repo_root: Path, **kw: 
         # only when a re-entry target (plan_path) is resolvable from the same
         # result the classifier consumed. Without a target, re-entry cannot be
         # armed, so keep the explicit fail-closed no-op as the fallback.
-        has_reentry_target = bool(_extract_plan_path(_merge_result_candidates(result)))
+        has_reentry_target = bool(_extract_plan_path(authority))
         if detect_only:
             # Side-effect-free probe outcome. Only the true no-op (no resolvable
             # re-entry target) is the strand attempt_recovery re-routes to
@@ -4834,13 +5022,16 @@ def fix_commit_supervisor_out_of_wave_tasks_tracker_note(repo_root: Path, **kw: 
             # SAME single-date wave_id the Tier-1 entry does -- the delegate would
             # otherwise fall back to the doubled-date plan stem (bridge round 3).
             return fix_post_reentry_needs_phase_b(
-                repo_root, wave_id=kw.get("wave_id", ""), result=result
+                repo_root, wave_id=kw.get("wave_id", ""), result=authority
             )
         return _fix_result(
             False,
             "no_out_of_wave_tasks_tracker_addition",
             "staged TASKS.md diff contains no proven out-of-wave tracker-note additions",
         )
+
+    if not _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result):
+        return _fix_result(False, "tracker_repair_not_authorized", "current supervisor failure does not request tracker repair")
 
     if detect_only:
         # Proven out-of-wave additions exist -- the normal Tier 2 auto-fix will
@@ -8710,8 +8901,11 @@ def _run_pytest_targeted_validator(
     # The canonical fleet module exceeded both the 300s recovery and 900s
     # commit serial gates on 2026-09-27. Its declared four-worker suite passed
     # in 281.30s. Match commit's bounded workers and full-module budget here;
-    # leave unrelated targets and node selectors on their caller's policy.
+    # The full local-review module also uses four workers, including its mixed
+    # history-recovery invocation, while retaining the finite caller deadline.
+    # Exact module membership excludes foreign paths and node selectors.
     full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in targets
+    parallel = full_fleet or "mu/tests/tools/test_commit_executor_local_review.py" in targets
     effective_timeout = max(timeout, 900 + 240 * (len(targets) - 1)) if full_fleet else timeout
     command = [
         sys.executable,
@@ -8721,7 +8915,7 @@ def _run_pytest_targeted_validator(
         "--tb=short",
         "-p",
         "no:cacheprovider",
-        *(["-n", "4", "--dist", "worksteal"] if full_fleet else []),
+        *(["-n", "4", "--dist", "worksteal"] if parallel else []),
     ]
     with tempfile.TemporaryDirectory(prefix="rcx-recovery-tmp-") as tmp_root, tempfile.TemporaryDirectory(prefix="rcx-recovery-cache-") as cache_root:
         # Pytest clears basetemp on first tmp_path use. Give it a child so
@@ -8969,8 +9163,13 @@ def _run_delegate_implementer_action(
             "validator": "pytest_targeted",
             "command": command,
             "targets": validator_targets,
-            "stdout": "",
-            "stderr": f"hybrid validator timed out after {exc.timeout}s",
+            # TimeoutExpired may retain bytes even with text=True. Preserve
+            # bounded progress/failure evidence for the next diagnosis turn.
+            "stdout": _bounded_command_output(exc.stdout),
+            "stderr": "\n".join(part for part in (
+                f"hybrid validator timed out after {exc.timeout}s",
+                _bounded_command_output(exc.stderr),
+            ) if part),
             "exit_code": 124,
             "passed": False,
             "timed_out": True,
@@ -11987,6 +12186,11 @@ def attempt_recovery(
         finally:
             _ACTIVE_BUS_DIR.reset(token)
     t0 = time.monotonic()
+    if local_review_terminal_payload(result) is not None:
+        # No learning lookup, remediation, backoff, budget consumption or retry.
+        return _make_result(False, "local_review_requires_correction", 4,
+                            FailureClass.LOCAL_REVIEW_TERMINAL,
+                            "Native local-review evidence is terminal for this candidate/request", False)
     # This exact structured terminal fence precedes learned matching.  A learned
     # incidental-text route (for example historical index.lock prose) cannot
     # authorize another attempt after the commit supervisor requests Phase A.
@@ -12089,6 +12293,13 @@ def attempt_recovery(
     #     seed runs (Bridge R4 Finding).
     # A proven removal (removal-pending) keeps the tracker-note class and runs
     # through the Tier 2 fix unchanged.
+    if (fc == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE
+            and not _looks_like_commit_supervisor_out_of_wave_tasks_tracker_note(result)):
+        # Learned routes remain useful, but cannot grant a destructive action
+        # authority absent from this failure. The action checks again at entry.
+        fc = classify_failure(result)
+        tier = tier_for(fc)
+        learned = None
     if fc == FailureClass.COMMIT_SUPERVISOR_OUT_OF_WAVE_TASKS_TRACKER_NOTE:
         _tracker_note_probe = fix_commit_supervisor_out_of_wave_tasks_tracker_note(
             repo_root, wave_id=wave_id, result=result, detect_only=True

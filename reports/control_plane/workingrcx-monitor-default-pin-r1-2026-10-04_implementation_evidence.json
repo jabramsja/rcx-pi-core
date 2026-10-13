@@ -1,0 +1,112 @@
+{
+  "wave_id": "workingrcx-monitor-default-pin-r1-2026-10-04",
+  "task_id": "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+  "status": "PHASE_B_LOCAL_VALIDATION_PASSED_NATIVE_GATES_PENDING",
+  "tracker_authority": "TASKS.md: 2026-10-04 tracker sync note for workingrcx-monitor-default-pin-r1-2026-10-04; packet derives its L4 fields from that note.",
+  "carrier_start_commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+  "implementation": {
+    "production_path": "mu/tools/observability/pipeline_monitor.sh",
+    "test_path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+    "correction": "ensure_owner_running forwards --bus-dir when EXPLICIT_PIN=1 or BUS_DIR is nondefault; unpinned default selection remains unpinned.",
+    "deterministic_owner_proof": "The isolated fake tmux reports healthy panes to the foreground while the actual spawned owner sees a missing session. Capture waits for the fourth pane title, checks the recorded new-session caller PID against the live owner PID, and requires exactly one command for each of four panes. No monitor source is mocked or rewritten by the fixture.",
+    "isolation": "Disposable repo, fake git/tmux, per-test state and a test-process-specific tmux session; explicitly selected sessions still override the fixture default. Ambient bus/lane values are cleared to the intended default.",
+    "preserved_assertion": "assert \"RCX_OBS_AUTOFOLLOW_BUS\" not in command, command",
+    "coverage": "Existing ordinary-start cases remain; four owner cases cover unpinned default, named bus, lane and explicit default bus. Existing session/orchestrator and other module tests also pass."
+  },
+  "original_source": {
+    "provenance": "git show 35f7c225a25025aec893230c072754cf7d7c76fc:mu/tools/observability/pipeline_monitor.sh",
+    "sha256": "96a1030621c7824f3d020e7e0c72af2f2ffc681e0416a98e523300326991d0ca",
+    "worktree_matched_HEAD_before_fix": true
+  },
+  "validated_source_sha256": {
+    "mu/tools/observability/pipeline_monitor.sh": "0092f12619c507cc3d41bd6029540e88346ef446ff706dd3732b80d62cdd4ffe",
+    "mu/tests/tools/test_pipeline_monitor_autofollow.py": "109ac16244c02e351b82a7b49ae29a700ec35b9a0ae121e5c1a79bb3f9c9c96e"
+  },
+  "runs": [
+    {
+      "source": "Original production monitor; extended deterministic tests",
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -x --tb=short --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_pipeline_monitor_autofollow.py",
+      "exit_code": 1,
+      "result": "1 failed, 23 passed in 65.81s",
+      "collected": 45,
+      "passed": 23,
+      "failed": 1,
+      "skipped": 0,
+      "not_run_after_x_stop": 21,
+      "failure_node": "mu/tests/tools/test_pipeline_monitor_autofollow.py::test_b2_pinned_monitor_panes_have_no_autofollow_signal[owner-default-bus-pin]",
+      "failure": "Original no-autofollow assertion found RCX_OBS_AUTOFOLLOW_BUS=1 in a real owner-generated explicit-default pane command.",
+      "pane_observation": {
+        "fixture_directory": "/private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/pytest-of-jeffabrams/pytest-890/test_b2_pinned_monitor_panes_h2",
+        "builder_pid": "94858",
+        "pane_command_count": 4,
+        "autofollow_signal_count": 4,
+        "fixed_default_bus_count": 4,
+        "foreground_and_owner_health_checks": 4
+      }
+    },
+    {
+      "source": "Minimal production correction; identical extended tests",
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -x --tb=short --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_pipeline_monitor_autofollow.py",
+      "exit_code": 0,
+      "result": "45 passed in 96.28s",
+      "collected": 45,
+      "passed": 45,
+      "failed": 0,
+      "skipped": 0,
+      "pane_observation": {
+        "fixture_directory": "/private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/pytest-of-jeffabrams/pytest-891/test_b2_pinned_monitor_panes_h2",
+        "builder_pid": "73786",
+        "pane_command_count": 4,
+        "autofollow_signal_count": 0,
+        "fixed_default_bus_count": 4,
+        "installed_monitor_sha256": "0092f12619c507cc3d41bd6029540e88346ef446ff706dd3732b80d62cdd4ffe"
+      }
+    }
+  ],
+  "historical_diagnosis_only": {
+    "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/archive/control_plane/fleet-real-retirement-r1-evidence-2026-09-26/budget_pr1330_ci_stop_diagnosis_20261004.json",
+    "pr1330_ci_run": 37198636016,
+    "ci_result": "12644 passed, 1 failed, 22 skipped",
+    "isolated_old_local_result": "1 passed in 3.24s; exit 0",
+    "qualification": "These archived results establish the original blocker and scheduling gap; current fix validation is exclusively the two runs above."
+  },
+  "preservation": {
+    "task_id_count_before": 268,
+    "task_id_count_after": 268,
+    "task_ids_identical": true,
+    "ordered_queue_rows_before": 44,
+    "ordered_queue_rows_after": 44,
+    "queue_row_numbers_identical": true,
+    "staged_paths": [],
+    "validated_sources_unchanged": true,
+    "scope": "Only this carrier's six implementation/tracker/packet/evidence paths were edited. No staging, commit, push, PR action, landing, closeout or APPLY was run.",
+    "protected_sources": "PR1330/R2/R1/alias worktrees, their indices/staged files/refs/receipts/recovery histories and private held PRIMARY transaction/stash were not modified. No cross-worktree byte audit is claimed.",
+    "runtime_host_substrate_delta": 0
+  },
+  "native_pending": {
+    "indicator_artifact": "reports/l4_wave_indicators/workingrcx-monitor-default-pin-r1-2026-10-04.json",
+    "bridge_nonblockers": "reports/deferred/non_blocking/workingrcx-monitor-default-pin-r1-2026-10-04_bridge_nonblockers.md",
+    "output_ownership": "Outer Phase B executor collects/stages the measured indicator and records actual independent bridge findings. Neither output is fabricated by this implementer.",
+    "remaining": [
+      "Native review and required governance gates",
+      "Fresh CI",
+      "Native merge and protected PRIMARY synchronization"
+    ],
+    "local_validation_boundary": "Only the locked plan's autofollow pytest command was run as a validation gate; startup/preflight, attestation, collector probes, governance and closeout commands were not run."
+  },
+  "working_order": [
+    "Land and synchronize this monitor correction after native required gates.",
+    "Native --land-stranded 1330 on its preserved original bus/receipt chain; bring current and pass fresh CI/review/merge.",
+    "Native preserved PR1329 corrective continuation using the then-landed 600-second runner.",
+    "Five exact-target APPLY/VERIFY with fresh authority and action-time holds.",
+    "PR1325 useful-work disposition.",
+    "Existing Mu production owner; separately paused runtime investigation remains paused."
+  ],
+  "completion_limits": {
+    "old_prs_closed": 0,
+    "physical_targets_retired": 0,
+    "fleet_completion_claimed": false,
+    "quota_telemetry": "No quota observation tool is exposed to this implementer; no remaining percentage is inferred.",
+    "existing_row40_diagnostics": "Remain owned after physical cleanup; no new numbered queue row."
+  }
+}

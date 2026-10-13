@@ -1,0 +1,412 @@
+{
+  "wave_id": "workingrcx-merge-queue-review-r3-2026-10-08",
+  "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+  "phase": "Phase B implementation observations only; not staged-candidate or final approval",
+  "observed_at": "2026-10-08T02:05:45.621414+00:00",
+  "parent_head": "bb837df21e053ce5ad577e36550cb1126dc97055",
+  "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+  "pr_number": 1332,
+  "recovery": {
+    "snapshot": "337faf8fc20d6d0b4493d4c31e49c2f1302157b122b2b37b7c1eb10c5ea0cd4d",
+    "restored_from": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-stopped-preserved/restore-verify/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-queue-review-r2-20261008",
+    "source_sha256": {
+      "mu/tools/executors/commit_executor.py": "58ed6299ec30ccbe6d7852ba9550ba5f43f47c86bda4da014579fb0dfd0bf596",
+      "mu/tests/tools/test_commit_executor_local_review.py": "de154df8a86a55699f1989a627c62ee8b2c83609dccc4a7d85d378e197eceb4c",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "ce96be34c45be313898e4cbc8cc8eab9209df65d2e633cb5d9cfdd13618f9e7e"
+    },
+    "source_churn_after_restore": false,
+    "guarded_public_seams": [
+      "handoff_sha",
+      "write_continuation_record"
+    ],
+    "historical_r2_entries_verified": 113,
+    "historical_r1_entries_verified": 87,
+    "old_authority_transferred": false
+  },
+  "final_validation": {
+    "phase": "Fresh R3 Phase B-local validation; not final staged authority",
+    "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-queue-review-r3-20261008",
+    "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_commit_executor_local_review.py mu/tests/tools/test_commit_executor_step14_autoresolve.py --tb=short",
+    "argv": [
+      "python3",
+      "-m",
+      "pytest",
+      "-q",
+      "-n",
+      "0",
+      "-p",
+      "no:cacheprovider",
+      "--import-mode=importlib",
+      "-m",
+      "not slow and not fuzzer",
+      "mu/tests/tools/test_commit_executor_local_review.py",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py",
+      "--tb=short"
+    ],
+    "source_sha256": {
+      "mu/tools/executors/commit_executor.py": "58ed6299ec30ccbe6d7852ba9550ba5f43f47c86bda4da014579fb0dfd0bf596",
+      "mu/tests/tools/test_commit_executor_local_review.py": "de154df8a86a55699f1989a627c62ee8b2c83609dccc4a7d85d378e197eceb4c",
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "ce96be34c45be313898e4cbc8cc8eab9209df65d2e633cb5d9cfdd13618f9e7e"
+    },
+    "started_at": "2026-10-08T01:56:18.413175+00:00",
+    "log": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r3-validation/gate.log",
+    "exit_code": 0,
+    "finished_at": "2026-10-08T01:59:59.155159+00:00",
+    "source_unchanged": true,
+    "summary": "855 passed in 216.10s (0:03:36)",
+    "log_sha256": "c489c66124e3c78b1a5a2c191546a80c1b105142454f2ac256403bb8a150e479"
+  },
+  "historical_before_after": {
+    "original_parent": {
+      "source_sha256": {
+        "mu/tools/executors/commit_executor.py": "1b153ee68c736df67b25ebf6ecd8e5a4b7f93bee944b84bc0b6b5a94f059ad2e",
+        "mu/tests/tools/test_commit_executor_local_review.py": "86ebcc3ec98480a97f0803b4b108c3f25d16614027ec8a541d2dd0f3962fb8db",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "3eb6f2d6307395b2c8831831e35ec7b43030a3e8bac0f8919e5b19d3c3802c63"
+      },
+      "summary": "7 failed, 2 passed, 792 deselected in 2.73s",
+      "exit_code": 1,
+      "immediate_merge_controls": "Both queued_reads=0 local/cloud cases pass; queued_reads=2 fail. Formal-wrapper and duplicate completion cases fail. Historical isolated proof, not a fresh R3 test execution."
+    },
+    "r1_real_reload": {
+      "source_sha256": "00f67dd8c77059e09d4c32c376ebf6a695d1e82db74dcc77ea09610deaaa3a06",
+      "merge_requests_by_invocation": [
+        1,
+        2
+      ],
+      "continuation_bytes_unchanged_by_invocation": [
+        false,
+        false
+      ],
+      "boundary": "production Step15 with real continuation reload, fake remote/model I/O; modeled native envelope; pure dispatcher/recovery classifiers; no live recovery",
+      "modeled_recovery_class": "transient_rate_limit",
+      "live_recovery_executed": false
+    },
+    "isolated_corrected_r2": {
+      "source_sha256": {
+        "mu/tools/executors/commit_executor.py": "65574812efc3540127f203014801cd0f0361b657aad18d39cefb13e2d847c571",
+        "mu/tests/tools/test_commit_executor_local_review.py": "4b156b0aa1ad7b0c3d3d92e0e69bafcdc38079acf8d4333985fc45638caef48d",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "ce96be34c45be313898e4cbc8cc8eab9209df65d2e633cb5d9cfdd13618f9e7e"
+      },
+      "summary": "13 passed, 842 deselected in 13.66s",
+      "exit_code": 0
+    },
+    "operator_boundary": {
+      "source_sha256": {
+        "mu/tools/executors/commit_executor.py": "9eae560c96b566bad4d08f0637b4e3618b8e22bf24a3c5b6de47832e0699f192",
+        "mu/tests/tools/test_commit_executor_local_review.py": "3456217396e7cfe88e7eda573a4379ee87a20ad6d62d295676a1150064c9f44c"
+      },
+      "runs": [
+        {
+          "stage": "initial bounded observation",
+          "status": "held",
+          "merge_requests_total": 1,
+          "completion_entries": 0
+        },
+        {
+          "stage": "fresh production continuation reload",
+          "status": "held",
+          "merge_requests_total": 1,
+          "completion_entries": 0
+        },
+        {
+          "stage": "modeled exact-head landing",
+          "status": "success",
+          "merge_requests_total": 1,
+          "completion_entries": 1
+        },
+        {
+          "stage": "completion already entered",
+          "status": "held",
+          "merge_requests_total": 1,
+          "completion_entries": 1
+        }
+      ],
+      "cli_exit_code": 0,
+      "classification": [
+        "held",
+        "COMMIT_HELD"
+      ],
+      "limits": "Existing test Carrier intercepts external I/O and captures post-merge completion entry. Actual native continuation producer/loader/driver/main and dispatcher classifier executed. No real merge, recovery, PRIMARY synchronization, cleanup, receipt approval or GitHub disposition occurred."
+    },
+    "native_cli_dispatch_boundary": {
+      "source_sha256": "65574812efc3540127f203014801cd0f0361b657aad18d39cefb13e2d847c571",
+      "test_sha256": {
+        "mu/tests/tools/test_commit_executor_local_review.py": "4b156b0aa1ad7b0c3d3d92e0e69bafcdc38079acf8d4333985fc45638caef48d",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "ce96be34c45be313898e4cbc8cc8eab9209df65d2e633cb5d9cfdd13618f9e7e"
+      },
+      "held_envelopes": 4,
+      "merge_requests_total": 1,
+      "verified_completion_entries": 1,
+      "recovery_calls": [],
+      "boundary": "isolated actual main, driver, continuation loader, dispatcher classifier and recoverable surface; subprocess boundary modeled; fake remote/model I/O; completion sink captured; no live GitHub/recovery/retirement",
+      "fresh_candidate_claim": false
+    },
+    "final_recovered_r2_gate": {
+      "source_sha256": {
+        "mu/tools/executors/commit_executor.py": "58ed6299ec30ccbe6d7852ba9550ba5f43f47c86bda4da014579fb0dfd0bf596",
+        "mu/tests/tools/test_commit_executor_local_review.py": "de154df8a86a55699f1989a627c62ee8b2c83609dccc4a7d85d378e197eceb4c",
+        "mu/tests/tools/test_commit_executor_step14_autoresolve.py": "ce96be34c45be313898e4cbc8cc8eab9209df65d2e633cb5d9cfdd13618f9e7e"
+      },
+      "summary": "855 passed in 218.78s (0:03:38)",
+      "exit_code": 0,
+      "fresh_r3_receipt": false
+    },
+    "reconciliation": "Historical diagnostics exercised their recorded source versions (00f67dd8, 9eae560c or 65574812). Fresh R3 validation exercises the exact recovered 58ed6299 source and public seams; no historical approval is reused."
+  },
+  "fresh_behavior_coverage": {
+    "continuation": "test_protected_continuation_resumes_without_new_merge: real write/read/load and fresh production driver results in local/cloud lanes and COMMIT_GO/COMMIT_GO_HOLD_PUSH decisions; repeated holds, one request, one verified completion and unchanged original receipts.",
+    "interruptions": "test_protected_continuation_interruption_spends_request and test_protected_continuation_write_failure_prevents_mutation: before/after durable write and side effect, timeout/failure/OSError, fsync failure before/after replace; no replay.",
+    "authority": "test_protected_continuation_invalid_authority_holds_without_cleanup and test_protected_continuation_checkpoint_cannot_drop_or_rebind_intent: corrupt/mismatched records, owner/wave/handoff/PR/head/branch/base/repository, changed receipt/request, missing local receipt and public guarded checkpoints.",
+    "fresh_evidence": "test_protected_continuation_resume_checks_fresh_evidence plus bounded polling cases: closed state, changed identity, real threads, CHANGES_REQUESTED, incomplete pages, stale clearance, transient/persistent query errors and deadline.",
+    "output": "test_protected_held_cli_dispatch_boundary_never_recovers: actual public main and standalone recovery predicate, JSON/normal output with/without diagnostic prefix and invalid record; actual dispatcher classifier, chain envelope and recoverable surface. Held/COMMIT_HELD, exit0, zero recovery/remediation, modeled child subprocess.",
+    "landing": "test_protected_queue_observes_exact_head_landing_once and test_protected_merge_completion_failure_is_not_reentered: immediate/queued local/cloud success, exactly one verified completion and closeout-exception guard.",
+    "findings": "test_pr1332_formal_metadata_retains_exact_unresolved_queue_finding and complete wrapper negative controls: metadata only, exact saved Bot finding retained; unknown/mixed/quoted/badged/substantive bodies, invalid author/state, human findings and wrong-head clearance stay blocking.",
+    "carrier": "test_protected_held_carrier_native_lifecycle_retains_and_resumes: real linked worktree, register/publish/request/complete_pending and successor admission; held carrier/continuation and old evidence retained, one spent attempt preserved; worker/retirement launch captured only."
+  },
+  "read_only_code_observations": [
+    {
+      "path": "mu/tools/executors/executor_dispatch.py",
+      "lines": [
+        2244,
+        2529,
+        3228
+      ],
+      "observation": "Actual commit output classifier distinguishes held/COMMIT_HELD; successful child handling returns before recovery for held and preserves raw stdout/stderr in the chain envelope."
+    },
+    {
+      "path": "mu/tools/executors/recovery_gate.py",
+      "lines": [
+        2947,
+        2957,
+        2963
+      ],
+      "observation": "Existing continuation validator accepts version1 post_commit_pending with COMMIT_GO or COMMIT_GO_HOLD_PUSH plus native Git identity; no protected-hold recovery action is needed or added."
+    },
+    {
+      "path": "mu/tools/executors/worktree_lifecycle.py",
+      "lines": [
+        445,
+        630,
+        645,
+        708
+      ],
+      "observation": "Commit-owned closeout with non-success escalates while retaining source/config; same-head successor binds immutable prior evidence and consumed attempts."
+    },
+    {
+      "path": "mu/tools/executors/phase_b_executor.py",
+      "lines": [
+        7937,
+        9839,
+        9929,
+        10522
+      ],
+      "observation": "Supplied preparation inventory can retain an absent optional report; index snapshot distinguishes staged deletion from absent non-staged path; unprepared resume refuses missing authority. Read-only context."
+    }
+  ],
+  "blocking_github_finding": {
+    "thread_id": "PRRT_kwDOQvy8bs6qI-5e",
+    "comment_id": "PRRC_kwDOQvy8bs77IAg6",
+    "body_sha256": "ff2c6b22b5f36ec3b2347da074a3be12739fe0643a6748f3cffb1fc883860fbc",
+    "saved_reviewed_head": "bb837df21e053ce5ad577e36550cb1126dc97055",
+    "saved_is_resolved": false,
+    "complete_fixture_equals_saved_payload": true,
+    "formal_wrapper_body_sha256": "d29bea6ce5fa7c2a6810f71ad9f37c44833e0fc88541c8d4030cfa5f87340832",
+    "disposition": "Retain unresolved/blocking; implementation performs no GitHub action.",
+    "required_sequence": [
+      "Verify actual fix, before/after evidence and fresh native final approval.",
+      "Require corrected-head CI and an independent authenticated corrected-head GitHub review signal while the old thread remains unresolved; wrapper metadata cannot satisfy this.",
+      "Operator/pipeline may resolve only the exact unchanged addressed Bot-only thread; changed/new content requires renewed assessment.",
+      "Re-fetch complete reviews/threads and require aggregate current-head clearance before protected merge."
+    ],
+    "unavailable_native_disposition_owner": "Existing TASKS row40 conditional finding-disposition automation; retain the hold."
+  },
+  "checkpoint_failure": {
+    "state": "private_attr_remediation_pending_review",
+    "ghost_path": "reports/deferred/non_blocking/workingrcx-merge-queue-review-r2-2026-10-08_bridge_nonblockers.md",
+    "unprepared_resume": "error / private_attr_prepared_resume / authority_error=unprepared",
+    "owner": "Existing TASKS row40; no new numbered prerequisite",
+    "future_correction": "Reconcile actual staged inventory after native preparation while retaining real staged deletions, exact scope, index/worktree bytes and modes, prepared-authority binding and fresh review.",
+    "required_tests": [
+      "Generated optional report added then deleted",
+      "Genuine tracked deletion",
+      "Unstaged/index drift",
+      "Out-of-scope drift",
+      "Interrupted preparation retains owed-review hold"
+    ],
+    "old_state_rearmed": false,
+    "phase_b_or_launcher_modified": false
+  },
+  "preservation": {
+    "protected_test_sha256": {
+      "mu/tests/engine/test_mu_type.py": "7e18fdba00fa23fdcbd2a0556ef77d34e40ad1f8301dde2854863843454d07da",
+      "mu/tests/l4_gates/test_stage0_vm_cutover.py": "32c3349b6837ad90491cc0643a1393a49d3c202fc9551a6560839e83514b353f",
+      "mu/tests/tools/test_agent_prompt_contract_injection.py": "51c8c2eebc8796f372e34188c86172de919db747e19f009f38879aac8861f0e8"
+    },
+    "read_only_sha256": {
+      "mu/tools/executors/executor_dispatch.py": "71324e12eabf66ba31beb31ea7a15bce01041830df3e2ece6239edc1d81bf994",
+      "mu/tools/executors/recovery_gate.py": "afd42173a5fd15f558800ac160e34cb1f5ed2d39bababc4ba650eb77a2b33a2e",
+      "mu/tools/executors/worktree_lifecycle.py": "7ec609743ae9977a4cceee0628e178f925bb58e4de3d09310e8e14cc3cfb2eec",
+      "mu/tools/executors/phase_b_executor.py": "34908b76fe6c635130910321233ac4fd4799212355c4983953a8ebf420f61dd7",
+      "mu/tools/executors/launch_wave.py": "a43c3069fb662688f74559c39e348bb354d460a5fad6333dca3f6aa74172107f",
+      "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+      "mu/tests/docs/test_growth_caps.py": "ba9964c72588ab7a8be6decd44ffc037e34e6f679ff53e89cb237b82c239e955"
+    },
+    "retained_test_functions": {
+      "mu/tests/tools/test_commit_executor_local_review.py": {
+        "parent_test_functions": 58,
+        "candidate_test_functions": 73,
+        "removed_test_functions": []
+      },
+      "mu/tests/tools/test_commit_executor_step14_autoresolve.py": {
+        "parent_test_functions": 55,
+        "candidate_test_functions": 58,
+        "removed_test_functions": []
+      }
+    },
+    "task_ids_preserved": true,
+    "ordered_numbered_rows_preserved": true,
+    "prior_tracker_notes_preserved": true,
+    "locked_packet_rewritten": false,
+    "final_observation": [
+      {
+        "generation": "r1",
+        "entries": 87,
+        "original_and_restored_hashes_and_modes_unchanged": true,
+        "index_unchanged": true,
+        "manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r1-stopped-preserved/preservation.json",
+        "manifest_sha256": "25824594bc066958a1d696cfffa1620b09471e80eeb1c6addf05763cc01a3795"
+      },
+      {
+        "generation": "r2",
+        "entries": 113,
+        "original_and_restored_hashes_and_modes_unchanged": true,
+        "index_unchanged": true,
+        "manifest": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-stopped-preserved/preservation.json",
+        "manifest_sha256": "2160fcd628d468c05104884038e3939b318c8ac9804aad3db36b2995112eee94"
+      }
+    ],
+    "current_index_bytes_unchanged": true,
+    "source_hashes_unchanged_after_gate_and_governance": true,
+    "final_scope_exact": true
+  },
+  "governance": {
+    "canonical_l4_source": "TASKS.md tracker sync note (2026-10-08, workingrcx-merge-queue-review-r3-2026-10-08)",
+    "locked_packet": "reports/control_plane/workingrcx-merge-queue-review-r3-2026-10-08_2026-10-08.md",
+    "indicator_artifact_ref": "reports/l4_wave_indicators/workingrcx-merge-queue-review-r3-2026-10-08.json",
+    "native_generation": "Outer Phase B _prepare_phase_b_pre_review_package / _collect_and_stage_l4_indicator_artifact owns fresh staged governance and indicator collection. Collector invokes host/parity probes and staging outside the sole Phase B-local gate; no manual indicator or growth-cap fabrication.",
+    "final_staged_authority": false,
+    "fresh_final_approval": false,
+    "implementation_governance_hashes_bound_as_final": false
+  },
+  "invariants": {
+    "runtime_host_seed_delta": 0,
+    "dispatcher_recovery_lifecycle_delta": 0,
+    "previous_three_repaired_tests_unchanged": true,
+    "new_numbered_prerequisites": 0,
+    "physical_apply_plans_created": 0,
+    "retired_folder_actions_replayed": 0,
+    "github_mutations": 0,
+    "ratchets": "Not run in this Phase B implementer; unchanged source surfaces do not assert new measured debt/host scores."
+  },
+  "remaining_obligations": [
+    "Fresh native prepared/staged governance, indicator, review/final approval and normal hooks",
+    "Corrected-head CI and independent authenticated GitHub review",
+    "Conditional exact addressed P1 disposition then complete aggregate clearance",
+    "Protected landing and separately verified PRIMARY sync",
+    "Existing row40 checkpoint-inventory correction, pending-review wait/re-request/no_action, recovery feedback/scope, broad structured transport/raw streams, governance phase binding, CI snapshot quiescence, conditional finding disposition and task-ID-only APPLY routing",
+    "PR1331/1330/1329 and paused PR1325/useful-work obligations",
+    "Preservation-producer dedup integration"
+  ],
+  "issues_encountered": [
+    "No fresh gate failure or source mismatch. The stopped R2 unprepared-checkpoint defect remains read-only and assigned to row40.",
+    "Indicator generation, staging, startup/attestation, full governance checks and pipeline/commit/PR/closeout execution remain outer-pipeline owned under the explicit Phase B boundary."
+  ],
+  "proof_limits": [
+    "GitHub/model I/O is deterministic/fake. Public main/dispatcher run in-process with modeled subprocess envelopes; no executor launch or live recovery/merge/review/disposition/PRIMARY sync/retirement is claimed.",
+    "Fresh source/test hashes and test results are implementation-time observations; later native receipts must bind the actual staged governance."
+  ],
+  "historical_artifacts": [
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-stopped-preserved/preservation.json",
+      "sha256": "2160fcd628d468c05104884038e3939b318c8ac9804aad3db36b2995112eee94"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r1-stopped-preserved/preservation.json",
+      "sha256": "25824594bc066958a1d696cfffa1620b09471e80eeb1c6addf05763cc01a3795"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-checkpoint-diagnostic/checkpoint-reproduction.json",
+      "sha256": "7cc2e52429b2903bc9b6e0591d2f936fa5a481a9a84b32472fa93a4c976bd114"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r3-launch-baseline.json",
+      "sha256": "c10ec3a5255a5111b3533668cc81be781fc35bba002c40583e9c8b0d8c7bc4f8"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-validation/parent-original-defects.json",
+      "sha256": "626f380831680744656f134a774fe1433c02152dafe825634d077c2fadc1c2d1"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-validation/parent-original-defects.log",
+      "sha256": "a3673c4e46448f1c1b85882c5d53950218d6a364a9332b08f2c6ad53e9b8b0b1"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-validation/r1-before-intent-integration.json",
+      "sha256": "2cddac612b24e8e34b0dbd05b4801fe807bcfee5b27baafb43e25d4b0ffed2cb"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-validation/operator-durable-continuation-check.json",
+      "sha256": "80dc8a4f9776faf9bc7547cc23371e49239f5589d14b4236ac311cfee0c9c1a5"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-validation/candidate-held-native-command-final-3.json",
+      "sha256": "6a0060b20e49c72182805821d0dd650fcea29a09ebc8648ee4fe2e8c502b3749"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-validation/candidate-held-native-envelopes-final-3.json",
+      "sha256": "f09382812a25a4f60d1cdc2e0cf763b8dcea2e22ee2cbb6e045fc333248b23a9"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-validation/candidate-isolated-final-3.json",
+      "sha256": "6ca6d5db7ec0bd0a1380c763ab61f8a4a91920520d3bd59199d9ce67b1a46751"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-validation/private-attr-repair-20261008T013405Z/gate.json",
+      "sha256": "ec9a3846dbaf4387c6e84dd0bc36899666fb0291df17b18eacbc1a830e541db2"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-validation/private-attr-repair-20261008T013405Z/gate.log",
+      "sha256": "114c897446d3b438c3aa4d70b32e3f7e2f2aeb2b5d9b598af5f632cf966305e0"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/review-control-r1-review-wait-diagnostic/review-state-235009Z.json",
+      "sha256": "f1e1a50b14ce0f06eb230bc675d72f61fc1e2009282f522736a52b7cb1eb9cf4"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r2-stopped-preserved/restore-verify/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-queue-review-r2-20261008/reports/control_plane/workingrcx-merge-queue-review-r2-2026-10-08_2026-10-08_implementation_evidence.json",
+      "sha256": "8930db0a71f59455681f0f29064ac81e89f96f829da017e90e34a674b29b02dd"
+    }
+  ],
+  "fresh_validation_artifacts": [
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r3-validation/restore-observation.json",
+      "sha256": "c09794f4495e5d197d3081d090a3616a9109c200bac157afde1db96f8ab4e7ae"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r3-validation/gate.json",
+      "sha256": "ad512d856976468028d8da0ecc95700e0cb2a293fc256c3f3a6ff7868532ce99"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r3-validation/gate.log",
+      "sha256": "c489c66124e3c78b1a5a2c191546a80c1b105142454f2ac256403bb8a150e479"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r3-validation/tracker-preservation.json",
+      "sha256": "9727b98e0c0aee183f92fe9ecf433e6bc708ba3ee510d44b577c311fa276c8f4"
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/local-review-r3-20261007T161738Z/merge-queue-review-r3-validation/final-phase-b-scope.json",
+      "sha256": "b3c1695e40930d50b32bd5a39999608aad37078c515bbf6035848de1de9b8c95"
+    }
+  ]
+}

@@ -1,0 +1,583 @@
+{
+  "wave_id": "workingrcx-local-review-legacy-history-r6-2026-10-12",
+  "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+  "role": "Phase B implementer",
+  "observed_utc": "2026-10-12T08:14:43.082481+00:00",
+  "status": "HELD_FRESH_CAP_AUTHORITY_ADMISSION_REQUIRED",
+  "implementation_complete": false,
+  "summary": "Both reproduced fixture defects are corrected and the entire declared native-context tools/growth gate passes. The frozen mandatory R6 generated-cap requirement cannot be met by the unchanged native generator at the required committed parent; completion remains held.",
+  "changed_files": [
+    "mu/tests/tools/test_executor_dispatch.py",
+    "mu/tests/tools/test_commit_executor_local_review.py",
+    "TASKS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12_implementation_evidence.json"
+  ],
+  "source_and_document_sha256": {
+    "mu/tests/tools/test_executor_dispatch.py": "fc6cbe681161802ad87a2d7fb0d83a735d0139412d1adb344293dff8dbbba90f",
+    "mu/tests/tools/test_commit_executor_local_review.py": "5c4ffcf83e3167779fb9a7bb4e934b2681fa417b8572f79737d0a0e4f6771035",
+    "TASKS.md": "576730c9513cba296d2cc379e7f6e2334a70ea4987414532fc542eac002dab0b",
+    "CHANGELOG.md": "a29c7b7f58401a10a8bbc04c24c984f1ccfa41bd475b1c741b082534950e6869"
+  },
+  "admission": {
+    "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-admission/initial-facts.json",
+    "sha256": "584ce21f3574d030bc575b2468e84bb520fe2a235eac5ba18bfa7eaa568039be",
+    "bytes": 73926
+  },
+  "frozen_config": {
+    "path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_wave_config.json",
+    "sha256": "9a840bf01a66d4ffbb27aeba4ec1c482b621ef0bf91b4d93899ff59d61a2a459",
+    "bytes": 14907
+  },
+  "head": "85d02749642d704776e21eea332ceeb2e27a30f6",
+  "branch": "jabramsja/workingrcx-local-review-quota-r3-2026-10-05",
+  "canonical_tracker_authority": {
+    "path": "TASKS.md",
+    "note": "2026-10-12 tracker sync note for workingrcx-local-review-legacy-history-r6-2026-10-12",
+    "note_sha256": "e4c51177d521eeafe2a42b77e0e183acfbd2ed8411b567b3682440dc97b0bb91",
+    "note_unchanged": true
+  },
+  "changes": [
+    {
+      "path": "mu/tests/tools/test_executor_dispatch.py",
+      "change": "Import carrier_repository with carrier and local_terminal_attempt so the actual consumer can resolve the shared dependency. Recovery and history fixture consumers already import it; other consumers use constants or explicitly construct Carrier. All72dispatcher negative cases and all578original test functions remain unchanged."
+    },
+    {
+      "path": "mu/tests/tools/test_commit_executor_local_review.py",
+      "change": "Replace the failing mutable module-cache lookup with explicit fixture-bound helper references for the existing public History consumer. Add test_explicit_legacy_recovery_survives_collected_module_cache_eviction, which evicts the actual collected module entry and executes every original recovery assertion. All114original functions and policy assertions remain;115test functions now exist."
+    },
+    {
+      "path": "TASKS.md and CHANGELOG.md",
+      "change": "Reconcile current R6 held status, actual R5 commit/publication and later pre-push failure, retaining R3 operator-error correction, R4 hold,268canonical IDs,44ordered owners and every historical tracker note. Keep folder/retention/disposition obligations under existing owners."
+    }
+  ],
+  "broad_failure_disposition": {
+    "r5_limit": "The preserved R5 lastfailed cache identifies a candidate only; the original detailed traceback is not reconstructed or invented. Narrow prior passes do not approve the candidate.",
+    "fresh_reproduction": "The complete R6 gate reproduces the named failure as KeyError: 'tools.test_commit_executor_local_review' at support=sys.modules[__name__]. Full stdout, stderr and source hashes are retained.",
+    "evidence_supported_cause": "The collected test and its fixtures outlive their tools.* sys.modules registration. An existing tooling-smoke helper clears shadowing tools.* aliases; no per-worker event trace attributes the exact clearing call in this run.",
+    "correction_scope": "Only test fixture helper lifetime; production, module loader, tooling-smoke tests and all policy assertions remain unchanged.",
+    "regression": "Explicit cache eviction followed by the same real Git/public history plan/apply/resume operations and every original negative assertion; verifies no cache registration is required or fabricated.",
+    "validation": "The full fresh declared default-import/native-alias/four-worker gate passes9411tests with1skip. No flaky label, production defect, inherited approval or pre-push/landing claim."
+  },
+  "test_integrity": {
+    "mu/tests/tools/test_executor_dispatch.py": {
+      "original_count": 578,
+      "current_count": 578,
+      "added": [],
+      "changed_existing_functions": [],
+      "all_original_assertions_unchanged": true
+    },
+    "mu/tests/tools/test_commit_executor_local_review.py": {
+      "original_count": 114,
+      "current_count": 115,
+      "added": [
+        "test_explicit_legacy_recovery_survives_collected_module_cache_eviction"
+      ],
+      "changed_existing_functions": [
+        "test_explicit_legacy_recovery_never_fabricates_native_terminal_receipt"
+      ],
+      "all_original_assertions_unchanged": true
+    },
+    "mu/tests/tools/test_local_review_history_recovery.py": {
+      "original_count": 22,
+      "current_count": 22,
+      "added": [],
+      "changed_existing_functions": [],
+      "all_original_assertions_unchanged": true
+    }
+  },
+  "validation_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider -m 'not slow and not fuzzer' tests/tools tests/docs/test_growth_caps.py --tb=long",
+  "validation_results": [
+    {
+      "result": "Expected setup error reproduced before edits: fixture carrier_repository not found; exit1.",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "mu/tests/tools/test_executor_dispatch.py::test_local_terminal_claims_require_one_bound_producer_result[noisy]",
+        "--tb=long"
+      ],
+      "exit_code": 1,
+      "elapsed_seconds": 1.9900584170245565,
+      "metadata": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/dispatcher-before.json",
+        "sha256": "c64436fb9b91a2d2cddc24b9551d2a4611c3b2d7f5d5015f728ed9fa263a7c9f",
+        "bytes": 2898
+      }
+    },
+    {
+      "result": "Same actual consumer passes after fixture import;1passed/2.34s, exit0. This selected result is not a substitute for the full gate.",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "mu/tests/tools/test_executor_dispatch.py::test_local_terminal_claims_require_one_bound_producer_result[noisy]",
+        "--tb=long"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2.7970827919780277,
+      "metadata": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/dispatcher-after.json",
+        "sha256": "23becb73a247efc3cee3eba5f482b02c58dd130245f89b94545e076bd1615019",
+        "bytes": 2823
+      }
+    },
+    {
+      "result": "Unchanged scoped checker after import correction; exit0.",
+      "argv": [
+        "python3",
+        "tools/checks/linters/check_private_attr_access.py",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+        "mu/tests/tools/test_executor_dispatch.py",
+        "mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_local_review_history_recovery.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.1757941659889184,
+      "metadata": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/private-attribute-check.json",
+        "sha256": "52802f99fc348734c9ea825b1e01daaea70cd5aad8c7c1d51a2148d987cfd6b8",
+        "bytes": 530
+      }
+    },
+    {
+      "result": "First full declared native-context gate:1failed/9409passed/1skipped in951.14s; actual module-cache KeyError captured, exit1.",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "4",
+        "--dist",
+        "worksteal",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow and not fuzzer",
+        "tests/tools",
+        "tests/docs/test_growth_caps.py",
+        "--tb=long"
+      ],
+      "exit_code": 1,
+      "elapsed_seconds": 951.6224849999999,
+      "metadata": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate.json",
+        "sha256": "dbaf29fdb7050492b23b476b121a2a0a26edea24de54e159192cf110b307d4d5",
+        "bytes": 4067
+      }
+    },
+    {
+      "result": "Unchanged scoped checker after lifetime correction and regression; exit0.",
+      "argv": [
+        "python3",
+        "tools/checks/linters/check_private_attr_access.py",
+        "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/merge-base-binding-r2-20261008",
+        "mu/tests/tools/test_executor_dispatch.py",
+        "mu/tests/tools/test_commit_executor_local_review.py",
+        "mu/tests/tools/test_local_review_history_recovery.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.16704379103612155,
+      "metadata": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/private-attribute-check-after-isolation.json",
+        "sha256": "1bd30a54c028338bab336a978ae2391ac1a40a116bea6e06f207b058fe824aa5",
+        "bytes": 531
+      }
+    },
+    {
+      "result": "Repeated identical full declared gate:9411passed/1skipped in980.24s; exit0, stable sources and raw index.",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "4",
+        "--dist",
+        "worksteal",
+        "-p",
+        "no:cacheprovider",
+        "-m",
+        "not slow and not fuzzer",
+        "tests/tools",
+        "tests/docs/test_growth_caps.py",
+        "--tb=long"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 980.7456780000357,
+      "metadata": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate-after-isolation.json",
+        "sha256": "d9dba4b5e757bb5243dca36cb0e36f51e3b80a5c2228ace54f3c266f4831e65c",
+        "bytes": 4280
+      }
+    }
+  ],
+  "validation_environment": {
+    "pins": {
+      "PYTHONHASHSEED": "0",
+      "RCX_CI": "1",
+      "HYPOTHESIS_PROFILE": "ci_fast",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTEST_XDIST_AUTO_NUM_WORKERS": "4"
+    },
+    "builder": "unchanged commit_executor._commit_validation_env; native pre-push Git-local environment removal",
+    "protected_live_lane_keys_absent": true,
+    "pytest_environment": {
+      "HYPOTHESIS_PROFILE": "ci_fast",
+      "PYTEST_XDIST_AUTO_NUM_WORKERS": "4"
+    },
+    "import_mode": "No command-line override; repository default from unchanged pyproject.toml.",
+    "paths": "tests/tools and tests/docs/test_growth_caps.py, exactly as declared.",
+    "argv_equal_between_full_runs": true,
+    "source_hashes_stable": true,
+    "raw_index_stable": true
+  },
+  "actual_native_packet": {
+    "predicate": "launch_wave._native_post_commit_packet_matches_config(actual_repo_root, load_wave_config(actual_frozen_config_path))",
+    "result": true,
+    "packet_path": "reports/control_plane/workingrcx-local-review-legacy-history-r6-2026-10-12_2026-10-12.md",
+    "packet_sha256": "0a48df253a3d1d71410deced9aae8895bb99d3a086f0e587f2becca8390842a9",
+    "packet_unchanged": true,
+    "config_sha256": "9a840bf01a66d4ffbb27aeba4ec1c482b621ef0bf91b4d93899ff59d61a2a459",
+    "after_outer_staging": "Not available in implementer; outer staging was not performed. Must repeat against actual authority after an admitted continuation."
+  },
+  "mandatory_blocker": {
+    "stable": true,
+    "candidate_state": "preimage",
+    "has_expected_postimage": false,
+    "new_governed_files": {
+      "new_test_files": [],
+      "new_tool_scripts": [],
+      "new_core_docs": []
+    },
+    "head_target": {
+      "path": "mu/tests/docs/test_growth_caps.py",
+      "mode": "100644",
+      "blob_oid": "41e4d69a8c5a8be1ba6ff07acd2e2bafdcea5a4e"
+    },
+    "actual_index_target": {
+      "path": "mu/tests/docs/test_growth_caps.py",
+      "mode": "100644",
+      "blob_oid": "41e4d69a8c5a8be1ba6ff07acd2e2bafdcea5a4e"
+    },
+    "head_and_worktree_bytes_equal": true,
+    "sha256": "5846267bf35abb4f0c04415af8a2d87f1df9982d79d7c5dec48721f5cdb8234d",
+    "verifier_error": "growth-cap generated candidate no longer has one reproducible postimage",
+    "numeric_caps": {
+      "CAP_TEST_FILES": 175,
+      "CAP_TOOL_SCRIPTS": 64
+    },
+    "status": "HOLD_FRESH_ADMISSION_REQUIRED",
+    "classification": "LOCKED_PLAN_NATIVE_AUTHORITY_CONFLICT",
+    "reason": "At exact required parent85d0274, R5 already committed the governed files. Actual native HEAD/index recomputation sees no new test/tool/core-doc files, returns a clean preimage and emits no expected postimage. The exact generated-candidate verifier rejects it.",
+    "source_evidence": [
+      "mu/tools/executors/commit_executor.py:20209",
+      "mu/tools/executors/commit_executor.py:20248",
+      "mu/tools/executors/commit_executor.py:20290",
+      "mu/tools/executors/commit_executor.py:20462"
+    ],
+    "fresh_admission_required": "Owner must reconcile packet/config requirements with native no-new-files behavior: explicitly admit the unchanged committed cap baseline for this existing-file-only wave, or separately admit a precise generated-governance change. This implementer cannot edit the locked packet/config or production.",
+    "not_performed": [
+      "handwritten R6 provenance",
+      "fake governed additions",
+      "old-parent/index projection presented as authority",
+      "self-staging",
+      "guard changes",
+      "old approval/budget/plan replay"
+    ],
+    "old_r5_cap_claimed_as_generated_r6_authority": false
+  },
+  "preservation": {
+    "protected_paths": 44,
+    "old_authority_records": 102,
+    "all_admission_hashes_match": true,
+    "r5_native_packet_demotion_sha256": "18af283d9c2cc565c35c9b57145cb923c14b40d65a64fce7b0a0f73e99416f66",
+    "original_a705_artifacts_bytes_modes_match": true,
+    "a928_negative_receipt_sha256": "57bc2129a98e471de4ea162fb8e5b60695cc1627b03fefcb60afa5208289d70e",
+    "published_intent_sha256": "9bc42fa40dc0d07d5c628b47a59fd143f494a5fcc67e1a80e437cc842cdc15f5",
+    "published_intent_and_plan_approval": false,
+    "publication_replayed": false,
+    "raw_index_sha256": "f15be7f26068af28d858a7bd3d171efc6c4308d717e6fd8cddcd999f107aa5a9",
+    "raw_index_unchanged": true,
+    "refs_unchanged": true,
+    "outer_staged_paths_retained": [
+      "reports/control_plane/workingrcx-local-review-legacy-history-r5-2026-10-12_2026-10-12.md",
+      "reports/l4_wave_indicators/workingrcx-local-review-legacy-history-r6-2026-10-12.json"
+    ]
+  },
+  "tracker_reconciliation": {
+    "observed_utc": "2026-10-12T08:11:48.136991+00:00",
+    "changes": {
+      "TASKS.md": {
+        "before_sha256": "70d731a86cec5cf38e66596f3a97a9d386a860b51e63e786c46feabc5eb59096",
+        "after_sha256": "576730c9513cba296d2cc379e7f6e2334a70ea4987414532fc542eac002dab0b"
+      },
+      "CHANGELOG.md": {
+        "before_sha256": "2886dd39a3fc1418cee1c94eaf53241acda21c71bf53121c1c54a7ebdc45e1ba",
+        "after_sha256": "a29c7b7f58401a10a8bbc04c24c984f1ccfa41bd475b1c741b082534950e6869"
+      }
+    },
+    "primary_admission_baseline_sha256": "2105ea7691b1e209369ce9ab784bf476c3272dc5edc2f7a16945b51cec69aebe",
+    "primary_observed_final_sha256": "a54c0d455d0ce8c0d763d1483873d78ed8a751f77f0894c822e7484bbb12b2a5",
+    "subsequent_primary_edits_are_phase_specific_observations": true,
+    "primary_written_by_implementer": false,
+    "canonical_ids": 268,
+    "ordered_owners": 44,
+    "ids_and_owner_order_preserved": true,
+    "all_historical_tracker_lines_retained": true,
+    "all_existing_historical_checkpoint_lines_retained": true,
+    "own_canonical_l4_tracker_note_sha256": "e4c51177d521eeafe2a42b77e0e183acfbd2ed8411b567b3682440dc97b0bb91",
+    "own_canonical_l4_tracker_note_unchanged": true,
+    "row38_current_wave": "workingrcx-local-review-legacy-history-r6-2026-10-12",
+    "new_numbered_prerequisites": 0
+  },
+  "invariant_tuple": {
+    "production_delta": 0,
+    "runtime_substrate_delta": 0,
+    "host_semantics_delta": 0,
+    "debt_marker_delta": 0,
+    "basis": "Only the two declared test modules, tracker/changelog and own evidence change. Protected production hashes and source-only diff remain exact; no fresh L4/ratchet approval is claimed."
+  },
+  "outer_owned_pending": [
+    "fresh cap-authority admission before completion",
+    "native staging and actual indexed verification",
+    "native review/supervision/commit",
+    "push, current-head CI and authenticated complete-PR current-request review/aggregate clearance",
+    "protected ordered-parent PR1332 landing and verified PRIMARY synchronization",
+    "PR1331 disposition",
+    "prepared useful folder wave: folder-wave-launch-preparation-20261012.json",
+    "separate retention wave: retention-wave-launch-preparation-20261012.json",
+    "final coverage/native disposition and fresh physical/registration/useful-work obligations"
+  ],
+  "boundaries": {
+    "no_pipeline_launch_staging_commit_push_pr_merge_or_closeout_commands": true,
+    "no_production_loader_checker_hook_config_or_old_authority_edits": true,
+    "no_skips_xfails_assertion_removal_or_new_checker_exemptions": true,
+    "primary_written_by_implementer": false,
+    "quota_and_startup_docs_limits": "Existing quota-stop policy, startup binary/cache-canary and PRIMARY docs-registry limitations remain. PausedPR1325 remains protected.",
+    "l4_staged_check": "Outer-owned; not run in the Phase B-local command boundary."
+  },
+  "evidence_root": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b",
+  "evidence_volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+  "artifacts": [
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/initial-observation.json",
+      "sha256": "512da6c3149022b6eff94c3149fad4dc09688372dec6c05f5391213a7f922513",
+      "bytes": 47564,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/dispatcher-before.json",
+      "sha256": "c64436fb9b91a2d2cddc24b9551d2a4611c3b2d7f5d5015f728ed9fa263a7c9f",
+      "bytes": 2898,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/dispatcher-before.stdout",
+      "sha256": "4f315d7e0fed83fed31d4520987881160038db468093125fb645e8b069e090ce",
+      "bytes": 2575,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/dispatcher-before.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/dispatcher-after.json",
+      "sha256": "23becb73a247efc3cee3eba5f482b02c58dd130245f89b94545e076bd1615019",
+      "bytes": 2823,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/dispatcher-after.stdout",
+      "sha256": "2b38bea586f6566a5ace012e1477ba7dd3e599443b5ab807077223fc7fd49484",
+      "bytes": 98,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/dispatcher-after.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/private-attribute-check.json",
+      "sha256": "52802f99fc348734c9ea825b1e01daaea70cd5aad8c7c1d51a2148d987cfd6b8",
+      "bytes": 530,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/private-attribute-check.stdout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/private-attribute-check.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/private-attribute-check-after-isolation.json",
+      "sha256": "1bd30a54c028338bab336a978ae2391ac1a40a116bea6e06f207b058fe824aa5",
+      "bytes": 531,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/private-attribute-check-after-isolation.stdout",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/private-attribute-check-after-isolation.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate.start.json",
+      "sha256": "682c8ee03227efab7de69896da01a134ed331a4862b2820f2243c052c883453a",
+      "bytes": 2282,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate.json",
+      "sha256": "dbaf29fdb7050492b23b476b121a2a0a26edea24de54e159192cf110b307d4d5",
+      "bytes": 4067,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate.stdout",
+      "sha256": "c253a9e0c3675a2cc9c2cb1b95ad08f7f0b0c19ff9d10d71c4d3634d4c656142",
+      "bytes": 12787,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate-after-isolation.start.json",
+      "sha256": "0a5597fd45fe070ab9198e275ff33503e00919b596907473e580f4fe57c71b38",
+      "bytes": 2463,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate-after-isolation.json",
+      "sha256": "d9dba4b5e757bb5243dca36cb0e36f51e3b80a5c2228ace54f3c266f4831e65c",
+      "bytes": 4280,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate-after-isolation.stdout",
+      "sha256": "4a7eab5431d43ecc1bfcbb68ac52b88f26cc2795543ad1f42f4fd8f736ab62e3",
+      "bytes": 10567,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/declared-gate-after-isolation.stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/broad-failure-traceback.txt",
+      "sha256": "225ed1d48b2d2dd01bb8c49ec60ab7af6d7a632e92d31f16231cf1ff037666c8",
+      "bytes": 2184,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/fixture-consumer-audit.json",
+      "sha256": "0fcd3f25ba4a1cf50440f29607ae8648f4c663680c4ffada6d59c3976db20f56",
+      "bytes": 2291,
+      "phase": "After dispatcher import correction; before the broad-run module-lifetime correction."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/original-test-integrity.json",
+      "sha256": "d1b2c0f1665c8867409398913d1c00f77d4f1ad53c042b912c8362fb59c7a0cb",
+      "bytes": 9792,
+      "phase": "After dispatcher-only correction; before the module-lifetime correction."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/test-integrity-after-isolation.json",
+      "sha256": "cfe7cec3886ac57f1871451ad551efec643897974d1dcb353bc35ed2acd472b6",
+      "bytes": 813,
+      "phase": "Final test code: all original policy assertions retained, one added eviction regression."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/module-lifetime-diagnosis.json",
+      "sha256": "aeb4f8fcf2a63313079898d9654bd145ff3268600587476d14fb87a2d3068a08",
+      "bytes": 1395,
+      "phase": "Diagnosis before the second full run; completed validation is recorded separately."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/cap-authority-blocker.json",
+      "sha256": "e68ab4427f30fc34f253273bee2658d7bb320b1e015c48cbf50997c5593a6389",
+      "bytes": 1873,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/original-history-observation.json",
+      "sha256": "0fa48f294fc4dfae27dba865a78dc03bdb5acfb696a776ac469b2818c976928d",
+      "bytes": 1945,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/tracker-reconciliation-final.json",
+      "sha256": "a05054eeb4c558eef3ce5f09c488818d67e766a9e74ead90c33af9a623703f5f",
+      "bytes": 1286,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/final-verification.json",
+      "sha256": "633360a3f5323aa18f96101a54dd83fb688c842951c9b3a99c83f2942b06c983",
+      "bytes": 51305,
+      "phase": "Final source, docs, original history, packet and actual index verification; mandatory cap hold persists."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/TASKS-worktree-before.md",
+      "sha256": "70d731a86cec5cf38e66596f3a97a9d386a860b51e63e786c46feabc5eb59096",
+      "bytes": 2219322,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/TASKS-primary-observed-start.md",
+      "sha256": "e5dc1d0bb257256e56530b59ed8c58bf441f76dc051c6c6ef53516438c118fd4",
+      "bytes": 2073338,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/TASKS-primary-observed-during-validation.md",
+      "sha256": "a54c0d455d0ce8c0d763d1483873d78ed8a751f77f0894c822e7484bbb12b2a5",
+      "bytes": 2075037,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/TASKS-primary-observed-final.md",
+      "sha256": "a54c0d455d0ce8c0d763d1483873d78ed8a751f77f0894c822e7484bbb12b2a5",
+      "bytes": 2075037,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    },
+    {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/local-review-legacy-history-r6-phase-b/CHANGELOG-before.md",
+      "sha256": "2886dd39a3fc1418cee1c94eaf53241acda21c71bf53121c1c54a7ebdc45e1ba",
+      "bytes": 236058,
+      "phase": "Phase-specific observation or validation; see file name, timestamps and source hashes."
+    }
+  ]
+}
