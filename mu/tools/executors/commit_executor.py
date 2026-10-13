@@ -17656,31 +17656,71 @@ def _refresh_post_merge_package_for_next_open_queue(
     except (TypeError, ValueError):
         merged_pr = 0
 
-    residual_wave = "workingrcx-fleet-residual-completion-r1-2026-09-13"
+    fresh_wave = str(handoff.get("wave_id") or "")
+    cleanup_enabler = (str(handoff.get("task_id") or "").strip("[]")
+                       == "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION")
+    legacy_plan_owners = {
+        "workingrcx-fleet-residual-completion-r1-2026-09-13",
+        "workingrcx-fleet-transaction-landing-r1-2026-09-15",
+        "workingrcx-fleet-transaction-landing-r2-2026-09-15",
+    }
     # This recovery enabler repaired transaction R2; it never produced a new
     # fleet plan. Keep the original committed owner, including consumed claims.
     recovery_plan_owner = {
         "workingrcx-fleet-live-recovery-r3-2026-09-16":
             "workingrcx-fleet-transaction-landing-r2-2026-09-15",
-    }.get(str(handoff.get("wave_id") or ""))
-    if str(handoff.get("task_id") or "").strip("[]") == "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION":
-        fresh_wave = str(handoff.get("wave_id") or "")
+    }.get(fresh_wave)
+    fleet_plan = None
+    if cleanup_enabler or recovery_plan_owner or fresh_wave in legacy_plan_owners:
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,160}", fresh_wave):
             raise QueueCommitAuthorityError("Fleet live-action handoff requires an exact safe wave identity")
         residual_wave = recovery_plan_owner or fresh_wave
-    if handoff.get("wave_id") == residual_wave or recovery_plan_owner:
-        # This code merge cannot witness future foreground directory outcomes.
-        # Carry the same task's committed operations through the existing stop.
         plan_path = f"reports/control_plane/{residual_wave}_apply_plan.json"
         if not _FULL_QUEUE_COMMIT_SHA_RE.fullmatch(str(merge_sha or "")):
             raise QueueCommitAuthorityError("Fleet live-action handoff requires exact merge authority")
+        # The task owns both control enablers and physical-action producers.
+        # Presence is observed only in the landed tree, never index/worktree.
+        # A declared or legacy producer cannot turn a missing plan into an
+        # ordinary enabler. Recovery enablers retain their original plan owner.
+        declared = bool(recovery_plan_owner or residual_wave in legacy_plan_owners)
+        declared_paths: set[str] = set()
+        for field in ("files_to_stage", "force_add_files", "scope_items", "candidate_allowlist"):
+            items = handoff.get(field) or []
+            if not isinstance(items, list) or any(not isinstance(item, str) for item in items):
+                raise QueueCommitAuthorityError(f"Fleet plan declaration has malformed {field}")
+            declared_paths.update(item.strip().split(" -- ", 1)[0].strip("`") for item in items)
+        packet_path = _handoff_plan_path(handoff)
+        if packet_path:
+            packet = _queue_commit_blob_text(repo_root, packet_path,
+                queue_commit_sha=merge_sha, required=True)
+            scope = re.search(r"(?ms)^## Scope\s*\n(.*?)(?=^## |\Z)", packet or "")
+            if scope:
+                declared_paths.update(re.findall(r"(?m)^-\s+`?([^\s`]+)`?(?:\s|$)", scope[1]))
+        declared_plans = {path for path in declared_paths if path.endswith("_apply_plan.json")}
+        if declared_plans - {plan_path}:
+            raise QueueCommitAuthorityError(
+                "Fleet plan declaration names a foreign or ambiguous owner: "
+                + ", ".join(sorted(declared_plans - {plan_path})))
+        declared = declared or plan_path in declared_plans
+        raw_plan = _queue_commit_blob_text(repo_root, plan_path,
+            queue_commit_sha=merge_sha, required=declared)
+        # An optional read distinguishes true absence from an object/read
+        # failure; malformed committed bytes always remain an authority HOLD.
         try:
-            raw_plan = _run(["git", "show", f"{merge_sha}:{plan_path}"], cwd=repo_root).stdout
-            fleet_plan = json.loads(raw_plan)
-            if fleet_plan["wave_id"] != residual_wave or fleet_plan["schema_version"] != 2:
-                raise ValueError("wrong residual plan identity")
-        except (subprocess.SubprocessError, ValueError, KeyError) as exc:
+            if raw_plan is not None:
+                fleet_plan = json.loads(raw_plan)
+                if (not isinstance(fleet_plan, dict)
+                        or fleet_plan.get("wave_id") != residual_wave
+                        or type(fleet_plan.get("schema_version")) is not int
+                        or fleet_plan["schema_version"] != 2
+                        or not isinstance(fleet_plan.get("command_template"), str)
+                        or not fleet_plan["command_template"].strip()):
+                    raise ValueError("wrong residual plan identity, schema or commands")
+        except (ValueError, KeyError) as exc:
             raise QueueCommitAuthorityError(f"Committed residual action plan unavailable: {exc}") from exc
+    if fleet_plan is not None:
+        # This code merge cannot witness future foreground directory outcomes.
+        # Carry the same task's committed operations through the existing stop.
         request = (
             "Fleet remains CURRENT under [FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]. "
             "From synchronized surviving PRIMARY, foreground runs each committed "
@@ -17787,6 +17827,49 @@ def _refresh_post_merge_package_for_next_open_queue(
                       post_merge_next_wave=lifecycle_wave,
                       post_merge_next_hard_stop=True, post_merge_queue_empty=False)
         log("Live PR disposition remains CURRENT; committed commands and target owners retained")
+        return package
+
+    if cleanup_enabler:
+        # Neither implementation landing nor PRIMARY sync completes other
+        # owners' cleanup. Route fresh planning with the landed packet only
+        # as owner context; never select it again or silently advance to Mu.
+        next_wave = fresh_wave + "-next-bounded-action"
+        # Step15b publishes primary_worktree_sync, including its HELD
+        # transaction. Preserve that exact result alongside any legacy context.
+        context = {key: copy.deepcopy(result[key]) for key in (
+            "primary_worktree_sync", "primary_sync", "base_worktree_sync",
+            "worktree_completion", "post_merge_cleanup")
+            if key in result}
+        request = (
+            "Cleanup remains CURRENT under [FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]. "
+            "The control enabler landed without a declared physical action plan. "
+            "Read exact landed TASKS and fresh ownership/inventory evidence to prepare "
+            "the next bounded action under the existing owner. Retain unresolved "
+            "cleanup, held transactions, source preservation and useful-work owners; "
+            "never replay the landed packet or consumed claims. A pending lifecycle "
+            "or other-owner HOLD is not completion. No directory retirement, PR "
+            "disposition or advancement to Mu is authorized by this package. "
+            f"Authority commit: {merge_sha}. Observed closeout outcomes:\n"
+            + json.dumps(context, indent=2)
+        )
+        candidate = dict(candidate=next_wave, bounded=True, tracked_packet=None,
+            owner=dict(task_id=handoff["task_id"], wave_id=fresh_wave,
+                       packet=_handoff_plan_path(handoff)),
+            authority_commit=merge_sha, repo_root=str(repo_root),
+            summary="Control enabler landed; cleanup outcomes remain pending",
+            request_for_agent=request, request_for_claude=request, **context)
+        package = dict(task_id=handoff["task_id"], merged_pr=merged_pr, merge_sha=merge_sha,
+            wave_name=next_wave, lane="cleanup action planning pending",
+            next_candidates=[candidate], deferred_items=[], blocker_report_paths=[],
+            rollout_packet_path=_handoff_plan_path(handoff),
+            tracker_state_summary="Control enabler landed; unresolved cleanup retains its existing owner.")
+        package_path = agent_bus_path(repo_root, _active_bus_dir(), "meta", "post_merge_package.json")
+        package_path.parent.mkdir(parents=True, exist_ok=True)
+        package_path.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
+        result.update(post_merge_package_path=str(package_path.relative_to(repo_root)),
+            post_merge_next_wave=next_wave, post_merge_next_hard_stop=True,
+            post_merge_queue_empty=False)
+        log("Cleanup enabler landed; fresh bounded action required under the existing owner")
         return package
 
     entry = _next_open_founder_ordered_queue_entry(

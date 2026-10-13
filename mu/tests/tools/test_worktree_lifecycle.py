@@ -1,6 +1,7 @@
 """Native completion in real disposable repositories, with surviving owners."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -8,6 +9,7 @@ from pathlib import Path
 import select
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -193,6 +195,138 @@ def register_from_exited_owner(lane, env, *, status="stopped", result=None,
     return Path(result.stdout.strip())
 
 
+@contextmanager
+def live_log_tail(log, primary, env):
+    """Wait for a real tail to open the exact literal filename, then reap it."""
+    log.write_text("reader ready\n")
+    reader = subprocess.Popen(["tail", "-f", str(log)], cwd=primary, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert select.select([reader.stdout], [], [], 10)[0]
+        assert reader.stdout.readline().strip() == "reader ready"
+        assert reader.poll() is None
+        yield reader
+    finally:
+        reader.terminate()
+        reader.communicate(timeout=10)
+
+
+def observed_process_identity(pid):
+    """Independent OS evidence for public completion and persisted adoption."""
+    observation = subprocess.run(
+        ["ps", "-ww", "-p", str(pid), "-o", "pid=,ppid=,lstart=,command="],
+        check=True, capture_output=True, text=True, env=os.environ | {"LC_ALL": "C"})
+    assert observation.stderr == ""
+    fields = observation.stdout.rstrip("\n").split(None, 7)
+    assert len(fields) == 8 and int(fields[0]) == pid
+    return dict(pid=pid, ppid=int(fields[1]), started=" ".join(fields[2:7]), command=fields[7])
+
+
+@pytest.mark.parametrize("filename", ["neighbor's.log", "neighbor live.log", "neighbor's live.log"])
+def test_unrelated_literal_log_filename_does_not_hold_discovery_or_completion(native_lane, tmp_path, filename):
+    primary, lane, _, env = native_lane
+    log = tmp_path / filename
+    with live_log_tail(log, primary, env) as reader:
+        observed = observed_process_identity(reader.pid)
+        assert observed["command"].endswith("-f " + str(log))
+        assert observed["ppid"] == os.getpid()
+        assert not log.is_relative_to(lane)
+
+        directory = register_from_exited_owner(lane, env, status="success")
+        authority = {p: p.read_bytes() for p in directory.glob("*.json")}
+        result = lifecycle.complete_pending(directory, delay=0)
+        assert result["state"] == "COMPLETE", result
+        assert len(list(directory.glob("attempt-*/claim.json"))) == 1
+        release = json.loads((directory / "reader-release.json").read_text())
+        assert release["state"] == "RELEASED"
+        assert release["watcher_adoptions"] == []
+        assert not lane.exists()
+        assert reader.poll() is None
+        assert observed_process_identity(reader.pid) == observed
+        assert log.read_text() == "reader ready\n"
+        assert all(p.read_bytes() == raw for p, raw in authority.items())
+        receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+        assert lifecycle.complete_pending(directory, delay=0) == result
+        assert {p: p.read_bytes() for p in directory.rglob("*.json")} == receipts
+
+
+@pytest.mark.parametrize("filename", ["owner's.log", "owner live.log", "owner's live.log"])
+def test_related_literal_log_filename_retains_hold_and_claim_evidence(native_lane, filename):
+    primary, lane, _, env = native_lane
+    log = lane / ".agent_bus" / filename
+    with live_log_tail(log, primary, env) as reader:
+        observed = observed_process_identity(reader.pid)
+        assert observed["command"].endswith("-f " + str(log))
+        assert observed["ppid"] == os.getpid()
+        assert log.is_relative_to(lane)
+        directory = register_from_exited_owner(lane, env, status="success")
+        authority = {p: p.read_bytes() for p in directory.glob("*.json")}
+        result = lifecycle.complete_pending(directory, delay=0)
+        assert result["state"] == "ESCALATED", result
+        assert lane.exists() and reader.poll() is None
+        assert observed_process_identity(reader.pid) == observed
+        assert log.read_text() == "reader ready\n"
+        assert all(p.read_bytes() == raw for p, raw in authority.items())
+        if " " in filename:
+            assert "Owned log reader arguments are ambiguous" in result["reason"]
+            assert not list(directory.glob("attempt-*"))
+            assert not (directory / "reader-release.json").exists()
+        else:
+            assert "Active process references target identity" in result["reason"]
+            assert result["attempts_exhausted"] == lifecycle.MAX_ATTEMPTS
+            assert len(list(directory.glob("attempt-*/claim.json"))) == lifecycle.MAX_ATTEMPTS
+            release = json.loads((directory / "reader-release.json").read_text())
+            assert release["state"] == "RELEASED"
+            assert release["watcher_adoptions"] == []
+        receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+    # Removing the reader does not reopen a sealed escalation or reset claims.
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert {p: p.read_bytes() for p in directory.rglob("*.json")} == receipts
+    assert lane.exists()
+
+
+@pytest.mark.parametrize("folder", ["watcher's", "watcher folder", "watcher's folder"])
+def test_literal_watcher_path_requires_unambiguous_live_owner(native_lane, tmp_path, monkeypatch, folder):
+    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher, _watcher_tails
+    primary, lane, _, env = native_lane
+    watcher_root = tmp_path / folder
+    watcher_root.mkdir()
+    with stale_live_watcher(watcher_root, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
+        observed = observed_process_identity(old.pid)
+        assert observed["command"].endswith(str(watcher_root / "rcx_log_watcher.sh"))
+        assert lifecycle.monitor_reader_protocol("reader-test") is False
+        directory = register_from_exited_owner(lane, env, status="success")
+        authority = {p: p.read_bytes() for p in directory.glob("*.json")}
+        result = lifecycle.complete_pending(directory, delay=0)
+        assert result["state"] == ("ESCALATED" if " " in folder else "COMPLETE"), result.get("reason", result)
+        release = json.loads((directory / "reader-release.json").read_text())
+        if " " in folder:
+            assert result["state"] == "ESCALATED", result
+            assert "Active process references target identity" in result["reason"]
+            assert result["attempts_exhausted"] == lifecycle.MAX_ATTEMPTS
+            assert len(list(directory.glob("attempt-*/claim.json"))) == lifecycle.MAX_ATTEMPTS
+            assert release["watcher_adoptions"] == []
+            assert lane.exists() and _watcher_tails(old, log) == tails
+            assert observed_process_identity(old.pid) == observed
+            assert lifecycle.monitor_reader_protocol("reader-test") is False
+        else:
+            assert result["state"] == "COMPLETE", result
+            assert len(list(directory.glob("attempt-*/claim.json"))) == 1
+            assert len(release["watcher_adoptions"]) == 1
+            assert release["watcher_adoptions"][0]["previous"] == observed
+            assert release["watcher_adoptions"][0]["current"]["pid"] != old.pid
+            assert lifecycle.monitor_reader_protocol("reader-test") is True
+            assert not lane.exists()
+            assert (Path(result["destination"]) / log.relative_to(lane)).read_text() == "retained live log\n"
+            for pid in [old.pid, *tails]:
+                with pytest.raises(ProcessLookupError):
+                    os.kill(pid, 0)
+        assert all(p.read_bytes() == raw for p, raw in authority.items())
+        receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert {p: p.read_bytes() for p in directory.rglob("*.json")} == receipts
+
+
 @pytest.mark.parametrize("obstruction", [None, "writer", "unknown-reader"],
                          ids=["reader-retires", "writer-holds", "unknown-reader-holds"])
 def test_finished_generated_reader_releases_within_native_completion_budget(native_lane, tmp_path, obstruction):
@@ -248,6 +382,162 @@ def test_finished_generated_reader_releases_within_native_completion_budget(nati
             process.communicate(input="exit\n", timeout=10)
     assert lifecycle.complete_pending(directory, delay=0) == result
     assert all(p.read_bytes() == data for p, data in receipts.items())
+
+
+@pytest.mark.parametrize("obstruction", [None, "writer", "unknown-reader"])
+def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_path, monkeypatch, obstruction):
+    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher
+    primary, lane, _, env = native_lane
+    blocker = None
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
+        if obstruction:
+            blocker = subprocess.Popen([sys.executable, "-c",
+                "import json,os,sys; f=open(os.environ['READER_TEST_PATH'],os.environ['READER_TEST_MODE']); "
+                "s=os.fstat(f.fileno()); "
+                "print(json.dumps(dict(pid=os.getpid(),fd=f.fileno(),device=s.st_dev,inode=s.st_ino)),flush=True); "
+                "sys.stdin.readline()"], cwd=primary,
+                env=env | {"READER_TEST_PATH": str(log),
+                           "READER_TEST_MODE": "a" if obstruction == "writer" else "r"},
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            assert select.select([blocker.stdout], [], [], 10)[0]
+            descriptor = json.loads(blocker.stdout.readline())
+            assert descriptor["pid"] == blocker.pid
+            # PR1328 isolates lsof evidence in every disposable native lane.
+            # Bind this response to the real blocker descriptor instead of
+            # letting the fixture's default empty response conceal that owner.
+            access = "w" if obstruction == "writer" else "r"
+            Path(env["RCX_TEST_LSOF_RESPONSE"]).write_text(json.dumps(dict(
+                returncode=0, stderr="", stdout=(
+                    f"p{blocker.pid}\ncPython\nf{descriptor['fd']}\na{access}\ntREG\n"
+                    f"D{descriptor['device']:x}\ni{descriptor['inode']}\nn{log}\n"))))
+        try:
+            directory = register_from_exited_owner(lane, env, status="success")
+            result = lifecycle.complete_pending(directory, delay=0)
+            if obstruction is None:
+                references = []
+                if result["state"] != "COMPLETE":
+                    ps = subprocess.run(["ps", "-A", "-ww", "-o", "pid=,ppid=,command="],
+                                        capture_output=True, text=True, check=True)
+                    references = [line for line in ps.stdout.splitlines() if str(lane) in line]
+                assert result["state"] == "COMPLETE", f"{result.get('reason', result)}\nTarget references: {references}"
+            if obstruction:
+                assert result["state"] == "ESCALATED", result
+                assert result.get("attempts_exhausted") == 3, result.get("reason", result)
+                assert "Open target files/processes or uncertain lsof evidence" in result["reason"], result
+                assert lane.exists() and blocker.poll() is None
+            else:
+                assert result["state"] == "COMPLETE", result
+                assert len(list(directory.glob("attempt-*/claim.json"))) == 1
+                assert not lane.exists()
+                assert (Path(result["destination"]) / ".scratch/commit_executor_live.log").read_text() == "retained live log\n"
+            release = json.loads((directory / "reader-release.json").read_text())
+            assert release["state"] == "RELEASED", release
+            assert len(release["watcher_adoptions"]) == 1, release
+            adoption = release["watcher_adoptions"][0]
+            assert adoption["previous"]["pid"] == old.pid, adoption
+            assert adoption["current"]["pid"] != old.pid, adoption
+            for pid in [old.pid, *tails]:
+                with pytest.raises(ProcessLookupError):
+                    os.kill(pid, 0)
+            receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+        finally:
+            if blocker is not None:
+                blocker.communicate(input="done\n", timeout=10)
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert all(p.read_bytes() == raw for p, raw in receipts.items())
+
+
+@pytest.mark.parametrize("unobservable", ["ps-present", "still-present", "permission-denied"])
+def test_reader_adoption_requires_pid_absence_before_respawn(tmp_path, monkeypatch, unobservable):
+    """A disappearing ps row alone cannot authorize a public monitor respawn."""
+    script = tmp_path.resolve() / "rcx_log_watcher.sh"
+    original = "legacy watcher bytes\n"
+    script.write_text(original)
+    command = "bash " + shlex.quote(str(script))
+    pid, started = 123, "Sun Oct 4 00:00:00 2026"
+    pane_row = f"%1\t{pid}\tPANE 1 · LIVE PIPELINE LOG\t{command}\t\n"
+    signals, commands = [], []
+
+    def kill(observed_pid, signum):
+        signals.append((observed_pid, signum))
+        if signum == 0 and unobservable == "permission-denied":
+            raise PermissionError("PID still cannot be proven absent")
+
+    def run(argv, **kwargs):
+        commands.append(argv)
+        if argv[:2] == ["tmux", "list-panes"]:
+            return subprocess.CompletedProcess(argv, 0, pane_row, "")
+        if argv[:2] == ["ps", "-ww"]:
+            missing = bool(signals) and unobservable != "ps-present"
+            return subprocess.CompletedProcess(argv, 1 if missing else 0,
+                "" if missing else f"{pid} 100 {started} {command}\n", "")
+        assert argv == ["tmux", "set-option", "-p", "-t", "%1", "remain-on-exit", "on"]
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(lifecycle.tempfile, "gettempdir", lambda: str(script.parent))
+    monkeypatch.setattr(os, "kill", kill)
+    monkeypatch.setattr(subprocess, "run", run)
+    ticks = iter((0.0, 0.0, lifecycle.READER_RELEASE_SECONDS))
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+
+    with pytest.raises(fleet.Hold, match="Old log watcher exit not acknowledged") as held:
+        lifecycle.monitor_reader_protocol("reader-test", adopt=True)
+    expected = dict(pid=pid, ppid=100, started=started, command=command)
+    assert json.loads(str(held.value).split("; evidence=", 1)[1]) == dict(
+        expected=expected, last_process=expected if unobservable == "ps-present" else None,
+        pid_absent=None if unobservable == "ps-present" else False)
+    assert signals == ([(pid, signal.SIGTERM)] if unobservable == "ps-present"
+                       else [(pid, signal.SIGTERM), (pid, 0), (pid, 0)])
+    mutations = [c for c in commands if c[:2] == ["tmux", "set-option"] or "respawn-pane" in c]
+    assert mutations == [["tmux", "set-option", "-p", "-t", "%1", "remain-on-exit", "on"]]
+    assert script.read_text() == original
+
+
+@pytest.mark.parametrize("fault", ["missing-pane", "changed-start", "changed-ppid", "changed-command"])
+def test_stale_reader_adoption_refuses_unknown_or_changed_owner_before_claim(native_lane, tmp_path, monkeypatch, fault):
+    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher, _watcher_tails
+    primary, lane, _, env = native_lane
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (run, pane, old, tails, log):
+        observations = 0
+        if fault == "missing-pane":
+            run("select-pane", "-t", pane, "-T", "unowned live reader")
+        else:
+            # Change the OS observation through the public subprocess seam;
+            # keep the real lifecycle parser and identity comparison active.
+            original = subprocess.run
+            def changed_start(command, *args, **kwargs):
+                nonlocal observations
+                result = original(command, *args, **kwargs)
+                if command == ["ps", "-ww", "-p", str(old.pid), "-o", "pid=,ppid=,lstart=,command="]:
+                    assert result.returncode == 0 and not result.stderr
+                    observations += 1
+                    if observations > 1:
+                        fields = result.stdout.strip().split(None, 7)
+                        assert len(fields) == 8
+                        if fault == "changed-start":
+                            fields[6] = str(int(fields[6]) + 1)
+                        elif fault == "changed-ppid":
+                            fields[1] = str(int(fields[1]) + 1)
+                        else:
+                            fields[7] += " --foreign"
+                        return subprocess.CompletedProcess(result.args, result.returncode,
+                            " ".join(fields) + "\n", result.stderr)
+                return result
+            monkeypatch.setattr(subprocess, "run", changed_start)
+        directory = register_from_exited_owner(lane, env, status="success")
+        result = lifecycle.complete_pending(directory, delay=0)
+        assert result["state"] == "ESCALATED", result
+        if fault != "missing-pane":
+            assert observations >= 2
+            assert "Old log watcher identity changed or is unknown" in result["reason"]
+        assert not list(directory.glob("attempt-*"))
+        assert not (directory / "reader-release.json").exists()
+        assert _watcher_tails(old, log) == tails
+        assert lane.exists()
+        receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+    assert lifecycle.complete_pending(directory, delay=0) == result
+    assert all(p.read_bytes() == raw for p, raw in receipts.items())
 
 
 def test_unacknowledged_owned_reader_consumes_no_claim_and_cannot_replay(native_lane):

@@ -26,13 +26,19 @@ STAMP = "2026-09-11T18:34:09+00:00"
 ZERO_COUNTS = dict(entries=0, tracked=0, untracked=0, staged=0, unstaged=0, unmerged=0)
 
 
-def test_fresh_retirement_admits_detached_but_keeps_exact_locks_and_protected_owners(retirement_fleet):
+@pytest.mark.parametrize("archived_protected_source", [False, True])
+def test_fresh_retirement_admits_detached_but_keeps_exact_locks_and_protected_owners(
+    retirement_fleet, archived_protected_source,
+):
     import workingrcx_fleet_census as census_tool
     import workingrcx_fleet_classification as classifier
     f = retirement_fleet
     retirement_git(f, f.targets[0], "checkout", "--detach")
     retirement_git(f, f.repo, "worktree", "lock", str(f.targets[2]))
     observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    if archived_protected_source:
+        protected_source = next(r for r in observed["entries"] if r["path"] == str(f.targets[1]))
+        protected_source["retirement_evidence"]["preserved_operation"] = {"lifecycle_completion": True}
     options = dict(source_sha256=hashlib.sha256(json.dumps(observed).encode()).hexdigest(),
         base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True,
         wave_id="fixture-retirement-classification", protected=(str(f.targets[1]),))
@@ -45,6 +51,34 @@ def test_fresh_retirement_admits_detached_but_keeps_exact_locks_and_protected_ow
     assert rows[str(f.repo)]["decision"] == "HOLD"
     legacy = classifier.classify(observed, **options)
     assert next(r for r in legacy["entries"] if r["path"] == str(f.targets[0]))["decision"] == "HOLD"
+
+
+@pytest.mark.parametrize("protection", ["exact", "parent"])
+def test_completed_archive_keeps_explicit_protection(retirement_fleet, protection):
+    from mu.tools.executors import worktree_lifecycle as lifecycle
+    from mu.tests.tools.test_worktree_lifecycle import register_from_exited_owner
+    import workingrcx_fleet_census as census_tool
+    import workingrcx_fleet_classification as classifier
+    f = retirement_fleet
+    record = register_from_exited_owner(f.targets[0], f.env | {"PYTHONPATH": str(REPO_ROOT)})
+    moved = lifecycle.complete_pending(record, delay=0)
+    assert moved["state"] == "COMPLETE", moved
+    archive = Path(moved["destination"])
+    receipt = (record / "completion.json").read_bytes()
+    claims = {p: p.read_bytes() for p in record.glob("attempt-*/claim.json")}
+    observed = census_tool.census(str(f.root), str(f.repo), comparison_commit=f.landed, retirement=True)
+    options = dict(source_sha256=hashlib.sha256(json.dumps(observed).encode()).hexdigest(),
+        base_commit=f.landed, carrier=str(f.repo), landed=False, residual=True,
+        retirement=True, wave_id="fixture-protected-completed-archive")
+    ordinary = classifier.classify(observed, **options)
+    assert next(r for r in ordinary["entries"] if r["path"] == str(archive))["proposed_action"] == "RETIRE_ARCHIVE"
+    protected = classifier.classify(observed, **options,
+        protected=(str(archive if protection == "exact" else archive.parent),))
+    row = next(r for r in protected["entries"] if r["path"] == str(archive))
+    assert row["decision"] == "HOLD" and row["proposed_action"] == "UNTOUCHED_HOLD"
+    assert "protected_evidence" in {r["code"] for r in row["reasons"]}
+    assert archive.exists() and (record / "completion.json").read_bytes() == receipt
+    assert {p: p.read_bytes() for p in record.glob("attempt-*/claim.json")} == claims
 
 
 def test_actual_fleet_successor_requires_explicit_observed_predecessor(retirement_fleet, monkeypatch):
@@ -148,11 +182,10 @@ def inventory(fixture, rows):
     }
 
 
-@pytest.fixture
-def fixture(tmp_path):
+def classification_context(tmp_path):
     root = tmp_path.resolve()
     home = root / "home"
-    home.mkdir()
+    home.mkdir(parents=True)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(HOME=str(home), XDG_CONFIG_HOME=str(home), GIT_CONFIG_NOSYSTEM="1",
                GIT_CONFIG_GLOBAL=os.devnull, PYTHONDONTWRITEBYTECODE="1", LC_ALL="C")
@@ -160,6 +193,14 @@ def fixture(tmp_path):
                         carrier=root / "carrier", env=env, git=shutil.which("git"),
                         census=root / "census.json", output=root / "classification.json")
     assert f.git
+    return f
+
+
+@pytest.fixture(scope="module")
+def classification_base(tmp_path_factory):
+    # Reuse only initial history. Each case still owns independent objects,
+    # configuration, indexes, homes and newly registered linked worktrees.
+    f = classification_context(tmp_path_factory.mktemp("classification-base"))
     f.primary.mkdir(parents=True)
     git(f, f.primary, "init", "-q")
     (f.primary / "tracked.txt").write_text("valuable tracked evidence\n")
@@ -167,12 +208,56 @@ def fixture(tmp_path):
     git(f, f.primary, "add", "tracked.txt", ".gitignore")
     git(f, f.primary, "commit", "-qm", "disposable base")
     f.base = git(f, f.primary, "rev-parse", "HEAD")
+    return f
+
+
+def make_classification_fixture(tmp_path, base):
+    f = classification_context(tmp_path)
+    # Never hard-link or use alternates: corruption and promisor-config cases
+    # must not alter the template or leak state into another classifier case.
+    shutil.copytree(base.primary, f.primary)
+    f.base = base.base
     git(f, f.primary, "worktree", "add", "-qb", "fixture/carrier", str(f.carrier), f.base)
     f.target = f.fleet / "WorkingRCX-merged"
     git(f, f.primary, "worktree", "add", "-qb", "fixture/WorkingRCX-merged", str(f.target), f.base)
     (f.target / "ignored-evidence.txt").write_text("ignored but valuable evidence\n")
     f.data = inventory(f, [row(f)])
     return f
+
+
+@pytest.fixture
+def fixture(tmp_path, classification_base):
+    return make_classification_fixture(tmp_path, classification_base)
+
+
+def test_classification_copies_keep_git_state_and_homes_independent(tmp_path, classification_base):
+    base = classification_base
+    original = snapshot(base.root)
+    first = make_classification_fixture(tmp_path / "first", base)
+    peer = make_classification_fixture(tmp_path / "peer", base)
+    for f in (first, peer):
+        assert f.env["HOME"] == f.env["XDG_CONFIG_HOME"] == str(f.root / "home")
+        assert git(f, f.carrier, "rev-parse", "--path-format=absolute", "--git-common-dir") == str(f.primary / ".git")
+        worktrees = git(f, f.primary, "worktree", "list", "--porcelain")
+        assert {line.removeprefix("worktree ") for line in worktrees.splitlines()
+                if line.startswith("worktree ")} == {str(f.primary), str(f.carrier), str(f.target)}
+        assert not (f.primary / ".git/objects/info/alternates").exists()
+        for source in (base.primary / ".git").rglob("*"):
+            if source.is_file():
+                assert not os.path.samefile(source, f.primary / source.relative_to(base.primary))
+    peer_before = snapshot(peer.root)
+    (first.target / "tracked.txt").write_text("private staged and committed change\n")
+    git(first, first.target, "add", "tracked.txt")
+    git(first, first.target, "commit", "-qm", "only first fixture")
+    git(first, first.carrier, "config", "remote.missing.promisor", "true")
+    (first.root / "home/.gitconfig").write_text("[alias]\n private = status\n")
+    object_path = first.primary / ".git/objects" / first.base[:2] / first.base[2:]
+    object_path.chmod(0o600)
+    object_path.write_bytes(b"corrupt only the private base object\n")
+    assert git(peer, peer.target, "rev-parse", "HEAD") == base.base
+    assert git(peer, peer.carrier, "cat-file", "-t", base.base) == "commit"
+    assert snapshot(peer.root) == peer_before
+    assert snapshot(base.root) == original
 
 
 def test_fresh_disposition_accounts_for_real_divergent_work_and_standalone_clone(fixture):

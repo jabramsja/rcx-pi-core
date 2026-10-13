@@ -508,7 +508,12 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,
             archive = evidence.get("preserved_operation")
             if archive and os.path.commonpath([path, census["fleet_root"]]) == census["fleet_root"]:
                 reasons = [r for r in reasons if r["code"] != "outside_direct_fleet"]
-                if archive.get("lifecycle_completion"):
+                # Completed archives may be nested under the default PRIMARY
+                # container. Preserve that existing route, but never release an
+                # exact default owner or an explicitly protected source/parent.
+                if (archive.get("lifecycle_completion")
+                        and path not in protected_paths
+                        and not any(path == p or path.startswith(p + "/") for p in protected)):
                     reasons = [r for r in reasons if r["code"] != "protected_evidence"]
             if evidence.get("status") != "OBSERVED" or evidence.get("errors") != []:
                 hold("retirement_ownership_unknown", "Fresh archive, native-bus and original journal evidence is required.")
