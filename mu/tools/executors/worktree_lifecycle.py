@@ -203,11 +203,12 @@ def _legacy_log_readers(identity: dict) -> list[dict]:
     return list(parents.values())
 
 
-def _adopt_terminal_log_readers(registration: dict, terminal: dict) -> list[dict]:
+def _adopt_terminal_log_readers(directory: Path, registration: dict, terminal: dict) -> list[dict]:
     readers = _legacy_log_readers(terminal["identity"])
     if not readers:
         return []
-    if terminal_log_record(Path(terminal["identity"]["path"]), registration["bus_dir"]) != terminal["record"]:
+    if terminal_log_record(Path(terminal["identity"]["path"]), registration["bus_dir"],
+                           record=directory) != terminal["record"]:
         raise fleet.Hold("Old log reader lacks exact exited terminal ownership")
     panes = _reader_panes()
     adoptions = []
@@ -371,12 +372,14 @@ def sync_landed_checkout_owners(primary: Path, base_branch: str) -> dict:
             "all_owners_current": primary_outcome["current"] and base_outcome["current"]}
 
 
-def terminal_log_record(repo: Path, bus_dir: str = ".agent_bus") -> str | None:
+def terminal_log_record(repo: Path, bus_dir: str = ".agent_bus", *, record: Path | None = None) -> str | None:
     """Read-only reader release; this grants no retirement or retry authority.
 
     Require an exact native terminal identity and exited registered owners.
     A live/restarted owner, changed HEAD, wrong bus or uncertain record keeps
     active monitoring. Generic process/writer checks still govern retirement.
+    When a record is supplied, validate only that registration; sibling waves
+    must not select or veto the terminal being adopted.
     """
     repo = repo.resolve(strict=True)
     if not (repo / ".git").is_file():
@@ -386,8 +389,15 @@ def terminal_log_record(repo: Path, bus_dir: str = ".agent_bus") -> str | None:
         bus = repo / bus
     with fleet.safe_git_environment():
         common = Path(fleet.line(fleet.git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")))
+        if record is not None:
+            if record.parent != common / REGISTRY:
+                return None
+            fleet.plain_directory(record)
+            paths = (record / "registration.json",)
+        else:
+            paths = (common / REGISTRY).glob("*/registration.json")
         matches = []
-        for path in (common / REGISTRY).glob("*/registration.json"):
+        for path in paths:
             registration = json.loads(fleet.read_plain(path))
             if registration.get("identity", {}).get("path") == str(repo) and registration.get("bus_dir") == str(bus):
                 matches.append((path.parent, registration))
@@ -489,7 +499,7 @@ def follow_terminal_log(repo: Path, bus_dir: str, log: Path) -> None:
 @contextmanager
 def _released_log_readers(directory: Path, registration: dict, terminal: dict):
     """Bounded acknowledgment before a new claim; never bypass process gates."""
-    adoptions = _adopt_terminal_log_readers(registration, terminal)
+    adoptions = _adopt_terminal_log_readers(directory, registration, terminal)
     with _log_reader_lock(terminal["identity"], registration["bus_dir"]) as lock:
         deadline = time.monotonic() + READER_RELEASE_SECONDS
         while True:
