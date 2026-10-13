@@ -5998,6 +5998,240 @@ def test_sync_preserves_observed_staged_deletions_with_mixed_wip(tmp_path, delet
 
 
 
+@pytest.fixture
+def cleanup_routing_repo(tmp_path):
+    """Commit queue and packet truth; route through the public package boundary."""
+    repo = _init_repo(tmp_path)
+    wave = "fixture-cleanup-control-enabler"
+    packet = f"reports/control_plane/{wave}_2026-10-13.md"
+    (repo / packet).parent.mkdir(parents=True)
+    (repo / packet).write_text("# Fixture\n\n## Scope\n\n- mu/tools/executors/commit_executor.py\n")
+    (repo / "TASKS.md").write_text(
+        "## PROGRAM QUEUE\n\n1. **[MU-SUCCESSOR] queued** Task: `[MU-SUCCESSOR]`. "
+        "Wave ID: `mu-successor`. Class: `L4_STRUCTURAL`. Category: PROGRAM QUEUE.\n")
+    _git(["add", packet, "TASKS.md"], cwd=repo)
+    _git(["commit", "-m", "committed cleanup enabler"], cwd=repo)
+    claim = repo / ".git/consumed-owner.json"
+    claim.write_text('{"consumed":true}\n')
+    handoff = dict(wave_id=wave, task_id="[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+        tracked_packet=packet, files_to_stage=[packet, "TASKS.md"])
+    return repo, handoff, claim
+
+
+@pytest.mark.parametrize("untracked_plan", [False, True])
+def test_ordinary_cleanup_enabler_routes_fresh_action_preserving_pending_owners(cleanup_routing_repo, untracked_plan):
+    repo, handoff, claim = cleanup_routing_repo
+    wave = handoff["wave_id"]
+    if untracked_plan:
+        (repo / f"reports/control_plane/{wave}_apply_plan.json").write_text(
+            json.dumps(dict(schema_version=2, wave_id=wave, command_template="untracked must not route")))
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    before = (_git(["show-ref"], cwd=repo).stdout, (repo / ".git/index").read_bytes(), claim.read_bytes())
+    pending = dict(state="PENDING", owner="FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION", record="retained-owner")
+    result = dict(pr_number="1400", primary_sync=dict(current=True, state="CURRENT_WITH_HELD_WIP",
+        primary_sync_transaction_state="HELD", all_owners_current=False),
+        base_worktree_sync=dict(state="HOLD", current=False), worktree_completion=pending,
+        post_merge_cleanup=dict(worktree_removed=False, branch_deleted=False, completion_state="PENDING"))
+    package = commit_mod.refresh_post_merge_package_for_next_open_queue(repo_root=repo, handoff=handoff,
+        result=result, merge_sha=head, queue_commit_sha=head, log=_noop_log)
+    candidate = package["next_candidates"][0]
+    assert candidate["candidate"] == wave + "-next-bounded-action"
+    assert candidate["tracked_packet"] is None and "manifest_path" not in candidate
+    assert candidate["owner"]["task_id"] == handoff["task_id"]
+    assert candidate["authority_commit"] == head
+    assert candidate["worktree_completion"] == pending
+    assert candidate["primary_sync"]["primary_sync_transaction_state"] == "HELD"
+    assert candidate["base_worktree_sync"]["state"] == "HOLD"
+    assert "fresh" in candidate["request_for_agent"]
+    assert "never replay" in candidate["request_for_agent"]
+    assert result["post_merge_next_hard_stop"] and not result["post_merge_queue_empty"]
+    assert package["merged_pr"] == 1400
+    assert repo.exists() and not result["post_merge_cleanup"]["worktree_removed"]
+    assert before == (_git(["show-ref"], cwd=repo).stdout, (repo / ".git/index").read_bytes(), claim.read_bytes())
+
+
+@pytest.mark.parametrize("completion_state", ["PENDING", "ESCALATED"])
+def test_cleanup_enabler_carries_native_primary_held_transaction_context(
+    cleanup_routing_repo, completion_state,
+):
+    """Use the production Step15b result shape, including the other-owner HOLD."""
+    repo, handoff, claim = cleanup_routing_repo
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    transaction_id = "069606b239704fe78436fb1e6ef56e67"
+    transaction = repo / ".git/rcx_primary_worktree_sync_transactions" / transaction_id / "manifest.json"
+    transaction.parent.mkdir(parents=True)
+    transaction.write_text(json.dumps(dict(transaction_id=transaction_id, state="HELD")))
+    source = repo / ".git/retained-source"
+    source.mkdir()
+    lifecycle = source / "completion.json"
+    lifecycle.write_text(json.dumps(dict(state=completion_state, attempts_exhausted=3)))
+    base_sync = dict(synced=False, skipped=True, current=False, state="HOLD",
+        primary=str(source), reason="error: Native ownership status is active or uncertain",
+        behind_count=17, ahead_count=0)
+    primary_sync = dict(synced=True, skipped=False, reason=None, primary=str(repo),
+        old_sha=_git(["rev-parse", "HEAD^"], cwd=repo).stdout.strip(), new_sha=head,
+        current=True, state="CURRENT_WITH_HELD_WIP", behind_count=0, ahead_count=0,
+        tracked_wip_restored=True, tracked_wip_left_stashed=True,
+        tracked_wip_overlap_paths=["TASKS.md"], tracked_wip_held_paths=["TASKS.md"],
+        primary_sync_transaction_id=transaction_id,
+        primary_sync_transaction_path=str(transaction), primary_sync_transaction_state="HELD",
+        base_worktree_sync=base_sync, all_owners_current=False, source_authority_commit=head)
+    result = dict(pr_number="1405", merge_sha=head, remote_pr_merged=True,
+        primary_worktree_sync=primary_sync, base_worktree_sync=base_sync,
+        worktree_completion=dict(state=completion_state,
+            owner="FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION", record=str(source)),
+        post_merge_cleanup=dict(branch_deleted=False, worktree_removed=False,
+            stashes_dropped=0, completion_state="PENDING", lifecycle_record=str(source)))
+    context = {key: json.loads(json.dumps(result[key])) for key in (
+        "primary_worktree_sync", "base_worktree_sync", "worktree_completion", "post_merge_cleanup")}
+    before = (_git(["show-ref"], cwd=repo).stdout, (repo / ".git/index").read_bytes(),
+              claim.read_bytes(), transaction.read_bytes(), lifecycle.read_bytes())
+
+    package = commit_mod.refresh_post_merge_package_for_next_open_queue(
+        repo_root=repo, handoff=handoff, result=result, merge_sha=head,
+        queue_commit_sha=head, log=_noop_log)
+
+    candidate = package["next_candidates"][0]
+    assert candidate["primary_worktree_sync"] == context["primary_worktree_sync"]
+    assert candidate["base_worktree_sync"] == context["base_worktree_sync"]
+    assert candidate["worktree_completion"] == context["worktree_completion"]
+    assert candidate["post_merge_cleanup"] == context["post_merge_cleanup"]
+    assert "primary_sync" not in candidate
+    for field in ("request_for_agent", "request_for_claude"):
+        assert json.loads(candidate[field].split("Observed closeout outcomes:\n", 1)[1]) == context
+    persisted = json.loads((repo / result["post_merge_package_path"]).read_text())
+    assert persisted == package
+    assert candidate["candidate"] == handoff["wave_id"] + "-next-bounded-action"
+    assert candidate["owner"]["wave_id"] == handoff["wave_id"]
+    assert candidate["authority_commit"] == head
+    assert candidate["tracked_packet"] is None and "manifest_path" not in candidate
+    assert result["post_merge_next_hard_stop"] is True
+    assert result["post_merge_queue_empty"] is False
+    assert source.exists() and repo.exists()
+    assert result["remote_pr_merged"] is True
+    assert result["primary_worktree_sync"]["current"] is True
+    assert result["base_worktree_sync"]["current"] is False
+    assert result["post_merge_cleanup"]["worktree_removed"] is False
+    assert before == (_git(["show-ref"], cwd=repo).stdout, (repo / ".git/index").read_bytes(),
+                      claim.read_bytes(), transaction.read_bytes(), lifecycle.read_bytes())
+    # Subsequent result mutation cannot rewrite the candidate's held context.
+    primary_sync["tracked_wip_held_paths"].append("later-result-only.txt")
+    base_sync["state"] = "later-result-only"
+    assert candidate["primary_worktree_sync"] == context["primary_worktree_sync"]
+    assert candidate["base_worktree_sync"] == context["base_worktree_sync"]
+
+
+@pytest.mark.parametrize("declaration", ["committed-scope", "handoff", "legacy", "recovery"])
+@pytest.mark.parametrize("fault", ["missing", "malformed", "foreign-wave", "schema", "list", "missing-command"])
+def test_declared_cleanup_plan_fails_closed_at_committed_authority(cleanup_routing_repo, declaration, fault):
+    repo, handoff, claim = cleanup_routing_repo
+    if declaration == "legacy":
+        handoff["wave_id"] = "workingrcx-fleet-transaction-landing-r1-2026-09-15"
+    elif declaration == "recovery":
+        handoff["wave_id"] = "workingrcx-fleet-live-recovery-r3-2026-09-16"
+    owner = ("workingrcx-fleet-transaction-landing-r2-2026-09-15"
+             if declaration == "recovery" else handoff["wave_id"])
+    plan_path = f"reports/control_plane/{owner}_apply_plan.json"
+    if declaration == "committed-scope":
+        with (repo / handoff["tracked_packet"]).open("a") as stream:
+            stream.write(f"- {plan_path} -- committed producer authority\n")
+    elif declaration == "handoff":
+        handoff["files_to_stage"].append(plan_path)
+    value = dict(schema_version=2, wave_id=owner, command_template="plan/apply/verify")
+    if fault == "foreign-wave":
+        value["wave_id"] = "foreign-owner"
+    elif fault == "schema":
+        value["schema_version"] = 1
+    elif fault == "missing-command":
+        del value["command_template"]
+    if fault != "missing":
+        (repo / plan_path).write_text("{" if fault == "malformed" else json.dumps([] if fault == "list" else value))
+    _git(["add", "."], cwd=repo)
+    _git(["commit", "--allow-empty", "-m", "producer declaration"], cwd=repo)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    # Even a valid worktree/index replacement cannot repair committed authority.
+    (repo / plan_path).write_text(json.dumps(dict(schema_version=2, wave_id=owner, command_template="forbidden local")))
+    _git(["add", plan_path], cwd=repo)
+    before = (claim.read_bytes(), (repo / ".git/index").read_bytes())
+    with pytest.raises(commit_mod.QueueCommitAuthorityError):
+        commit_mod.refresh_post_merge_package_for_next_open_queue(repo_root=repo, handoff=handoff,
+            result={"pr_number": "1401"}, merge_sha=head, queue_commit_sha=head, log=_noop_log)
+    assert not (repo / ".agent_bus/meta/post_merge_package.json").exists()
+    assert before == (claim.read_bytes(), (repo / ".git/index").read_bytes())
+    assert repo.exists()
+
+
+@pytest.mark.parametrize("declaration", ["committed-scope", "handoff"])
+@pytest.mark.parametrize("same_wave_plan", [False, True])
+def test_foreign_plan_declaration_cannot_downgrade_to_cleanup_enabler(
+    cleanup_routing_repo, declaration, same_wave_plan,
+):
+    repo, handoff, claim = cleanup_routing_repo
+    foreign = "reports/control_plane/foreign-owner_apply_plan.json"
+    (repo / foreign).write_text(json.dumps(dict(
+        schema_version=2, wave_id="foreign-owner", command_template="foreign claims")))
+    if declaration == "committed-scope":
+        with (repo / handoff["tracked_packet"]).open("a") as stream:
+            stream.write(f"- `{foreign}` -- explicit plan producer\n")
+    else:
+        handoff["files_to_stage"].append(foreign)
+    if same_wave_plan:
+        wave = handoff["wave_id"]
+        (repo / f"reports/control_plane/{wave}_apply_plan.json").write_text(
+            json.dumps(dict(schema_version=2, wave_id=wave, command_template="valid own plan")))
+    _git(["add", "."], cwd=repo)
+    _git(["commit", "-m", "foreign declared plan authority"], cwd=repo)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    before = (claim.read_bytes(), (repo / ".git/index").read_bytes())
+    with pytest.raises(commit_mod.QueueCommitAuthorityError, match="foreign or ambiguous owner"):
+        commit_mod.refresh_post_merge_package_for_next_open_queue(repo_root=repo, handoff=handoff,
+            result={"pr_number": "1404"}, merge_sha=head, queue_commit_sha=head, log=_noop_log)
+    assert not (repo / ".agent_bus/meta/post_merge_package.json").exists()
+    assert before == (claim.read_bytes(), (repo / ".git/index").read_bytes()) and repo.exists()
+
+
+def test_fresh_committed_cleanup_plan_routes_without_task_name_heuristic(cleanup_routing_repo):
+    repo, handoff, claim = cleanup_routing_repo
+    wave = handoff["wave_id"]
+    plan = f"reports/control_plane/{wave}_apply_plan.json"
+    (repo / plan).write_text(json.dumps(dict(schema_version=2, wave_id=wave, command_template="exact committed commands")))
+    _git(["add", plan], cwd=repo)
+    _git(["commit", "-m", "fresh committed action authority"], cwd=repo)
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    (repo / plan).write_text("uncommitted replacement")
+    result = {"pr_number": "1402"}
+    before = claim.read_bytes()
+    package = commit_mod.refresh_post_merge_package_for_next_open_queue(repo_root=repo, handoff=handoff,
+        result=result, merge_sha=head, queue_commit_sha=head, log=_noop_log)
+    candidate = package["next_candidates"][0]
+    assert candidate["manifest_path"] == plan and candidate["owner"]["wave_id"] == wave
+    assert "exact committed commands" in candidate["request_for_agent"]
+    assert "uncommitted replacement" not in candidate["request_for_agent"]
+    assert candidate["tracked_packet"] is None and result["post_merge_next_hard_stop"]
+    assert claim.read_bytes() == before and repo.exists()
+
+
+@pytest.mark.parametrize("hold", [False, True])
+def test_cleanup_enabler_preserves_live_disposition_before_next_action(cleanup_routing_repo, hold):
+    repo, handoff, claim = cleanup_routing_repo
+    head = _git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    pending = [{"status": "LIVE_DISPOSITION_PENDING", "owner": "original-pr-owner", "pr": 1325}]
+    result = {"pr_number": "1403"}
+    result.update({"pr_replacement_ownership_hold": "exact source mismatch"} if hold
+                  else {"pr_replacement_ownership": pending})
+    before = claim.read_bytes()
+    package = commit_mod.refresh_post_merge_package_for_next_open_queue(repo_root=repo, handoff=handoff,
+        result=result, merge_sha=head, queue_commit_sha=head, log=_noop_log)
+    candidate = package["next_candidates"][0]
+    assert candidate["candidate"] == handoff["wave_id"] + "-live-disposition"
+    assert candidate["tracked_packet"] is None and result["post_merge_next_hard_stop"]
+    if hold:
+        assert candidate["pr_lifecycle_hold"] == "exact source mismatch"
+    else:
+        assert candidate["pr_lifecycle_dispositions"] == pending
+    assert claim.read_bytes() == before and repo.exists()
+
+
 @pytest.mark.parametrize("wave", ["workingrcx-fleet-residual-completion-r1-2026-09-13",
                                  "workingrcx-fleet-transaction-landing-r1-2026-09-15",
                                  "workingrcx-fleet-transaction-landing-r2-2026-09-15"])

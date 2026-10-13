@@ -4,6 +4,41 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-13
+
+### Preserved folder recovery R4 (Phase B implementation)
+
+- Verify all ten restored donor hashes against comparison `27e35ed4` and carry
+  their reviewed patches: exact live reader adoption, literal process discovery,
+  explicitly protected sources, and committed-plan versus cleanup-enabler routing.
+  Preserve the landed monitor default-bus pin and actual `primary_worktree_sync`
+  held-transaction context. Merge, sync, package refresh and retirement stay distinct.
+- Reproduce all eight private test accesses with the unchanged checker, then
+  replace only the provisional private calls with public lifecycle completion,
+  monitor health, persisted claim/release evidence and independent OS observations.
+  Retain all nine literal-filename cases, writer/unknown-reader and identity-race
+  negatives, both PID-absence controls, and independent classification-copy isolation.
+  The five-module integrity check passes; 58 focused regressions pass in 17.11s.
+  The exact declared six-module gate passes 2,248 tests in 187.90s, exit 0
+  (188.175s process wall), with unchanged candidate hashes throughout execution.
+  The base ordinary-enabler defect first reproduced in two real-Git cases with
+  `git show` exit 128. Fresh complete six-module results, timings and hashes belong
+  in `reports/control_plane/workingrcx-fleet-folder-recovery-r4-2026-10-13_implementation_evidence.json`.
+- Reconcile current PRIMARY prose outside the byte-exact candidate Ra section,
+  retaining 268 canonical IDs, 44 ordered owners and all historical outcomes.
+  PR1332/1331 are merged; PRIMARY retains its HELD transaction and the older local
+  development owner retains its genuine closeout HOLD. R1/R2 remain preserved and
+  unmerged; R3 stopped before implementation. Keep both R2 300-second timeouts,
+  retry_requested without an invented final count/time, packet refusal and failed
+  continuation. Prior approvals do not approve this candidate.
+- Preserve complete original PR1329 20-path/62-hunk and PR1330 7-path/14-hunk
+  semantic provenance. Obsolete one-time physical authority is explicitly
+  superseded. Final source-unchanged coverage/native disposition follows actual
+  folder and separate retention landing; resumed PR1325 and useful work stay owned.
+  Native tracker restoration, staging, generated governance, independent review,
+  corrected-head CI, merge and separate PRIMARY sync remain outer-owned. No source
+  retirement, retention implementation or PR closure is claimed by this wave.
+
 ## 2026-10-12
 
 ### Bounded authenticated clearance wording (Phase B local validation PASS)

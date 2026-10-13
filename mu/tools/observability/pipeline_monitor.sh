@@ -218,6 +218,10 @@ write_log_watcher() {
 #!/usr/bin/env bash
 # Resilient: never exits on transient errors
 set +e  # Do not exit on error
+if [ "${1:-}" != "--rcx-log-reader-v2" ]; then
+  exec bash "$0" --rcx-log-reader-v2
+fi
+reader_acknowledged=0
 # Retain recent output, but a native terminal owner releases its live reader.
 IDLE_WINDOW_SECONDS=3600
 LOG_WATCHER_HEARTBEAT_SECONDS="${RCX_LOG_WATCHER_HEARTBEAT_SECONDS:-300}"
@@ -272,7 +276,7 @@ resolve_live_log() {
 INITIAL_REPO_ROOT="$(resolve_repo_root)"
 # A monitor launched in a linked carrier must not retain its cwd after tail
 # release. The common-directory owner survives native retirement.
-watcher_common="$(git -C "$INITIAL_REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+watcher_common="$(git -C "$INITIAL_REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
 if [ -n "$watcher_common" ] && [ -d "$watcher_common" ]; then
   cd "$(dirname "$watcher_common")" || exit 1
   case "${RCX_OBS_LIFECYCLE_HELPER:-$INITIAL_REPO_ROOT/}" in
@@ -534,6 +538,16 @@ while true; do
   if [ -n "$tail_pid" ] && ! kill -0 "$tail_pid" 2>/dev/null; then
     tail_pid=""
     current_log=""
+  fi
+  # A live startup acknowledgment binds protocol, PID and process birth. Merely
+  # replacing this file cannot make a pre-update in-memory watcher healthy.
+  if [ "$reader_acknowledged" -eq 0 ] && [ -n "${TMUX_PANE:-}" ] && \
+      [ "$(tmux display-message -p -t "$TMUX_PANE" '#{pane_pid}' 2>/dev/null)" = "$$" ]; then
+    reader_started="$(LC_ALL=C ps -p "$$" -o lstart= | xargs)"
+    if [ -n "$reader_started" ] && tmux set-option -p -t "$TMUX_PANE" \
+        @rcx_log_reader_protocol "$$|$reader_started|rcx-log-reader-v2" 2>/dev/null; then
+      reader_acknowledged=1
+    fi
   fi
   sleep 1
 done
@@ -888,6 +902,20 @@ release_owner_lock() {
   fi
 }
 
+log_reader_protocol() {
+  python3 -I -B - "$SCRIPT_DIR/../executors" "$SESSION" "${1:-check}" <<'READER_PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+import worktree_lifecycle as lifecycle
+try:
+    healthy = lifecycle.monitor_reader_protocol(sys.argv[2], adopt=sys.argv[3] == "adopt")
+except (OSError, ValueError, lifecycle.fleet.Hold, lifecycle.subprocess.SubprocessError) as exc:
+    print(str(exc), file=sys.stderr)
+    healthy = False
+raise SystemExit(0 if healthy else 1)
+READER_PY
+}
+
 tmux_session_health_detail() {
   local expected_root="$1"
   local panes="" count=0 title="" pane_path="" expected_root_real="" pane_path_real=""
@@ -945,6 +973,10 @@ tmux_session_health_detail() {
     return 1
   fi
 
+  if ! log_reader_protocol check; then
+    echo "live log watcher has not adopted coordinated reader protocol"
+    return 2
+  fi
   echo "session healthy at $expected_root_real"
   return 0
 }
@@ -1034,8 +1066,18 @@ rebuild_tmux_session() {
 
 ensure_tmux_session() {
   local repo_root="$1"
+  local health=0
   if tmux_session_health_detail "$repo_root" >/dev/null 2>&1; then
     return 0
+  else
+    health=$?
+  fi
+  if [ "$health" -eq 2 ]; then
+    # The four owned panes are structurally healthy. Adopt only the exact
+    # stale log watcher; unknown identity must not trigger a session-wide kill.
+    log_reader_protocol adopt || return 1
+    tmux_session_health_detail "$repo_root"
+    return $?
   fi
   rebuild_tmux_session "$repo_root"
 }

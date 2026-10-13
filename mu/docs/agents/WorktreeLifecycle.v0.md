@@ -1,10 +1,10 @@
 <!--
 DOC_STATUS
 TYPE: REFERENCE
-LAST_VERIFIED: 2026-10-01
+LAST_VERIFIED: 2026-10-13
 OWNER: RCX Core Team
 FOR_CURRENT_STATE: See STATUS.md and TASKS.md
-GROUNDING_TESTS: mu/tests/tools/test_worktree_lifecycle.py, mu/tests/tools/test_workingrcx_fleet_apply.py, mu/tests/tools/test_commit_executor_post_merge_cleanup.py, mu/tests/tools/test_pipeline_monitor_autofollow.py, mu/tests/tools/test_launch_wave.py, mu/tests/tools/test_recovery_gate.py
+GROUNDING_TESTS: mu/tests/tools/test_workingrcx_fleet_classification.py, mu/tests/tools/test_worktree_lifecycle.py, mu/tests/tools/test_workingrcx_fleet_apply.py, mu/tests/tools/test_commit_executor_post_merge_cleanup.py, mu/tests/tools/test_pipeline_monitor_autofollow.py, mu/tests/tools/test_launch_wave.py, mu/tests/tools/test_recovery_gate.py
 -->
 # Native worktree lifecycle
 
@@ -98,10 +98,29 @@ lock exclusively and retains it through its normal completion gates. This
 acknowledges follower exit and prevents heartbeat or cold-restart attachment
 during retirement. The rendezvous is bounded to two seconds; it changes neither
 the existing inter-attempt delay nor the three-attempt limit. An unacknowledged
-release seals an ESCALATED completion without a new claim. It does not signal
-the reader, reset a budget or retry automatically. `reader-release.json` binds
+release seals an ESCALATED completion without a new claim. It does not reset a
+budget or retry automatically. `reader-release.json` binds
 successful acknowledgment to the terminal bytes and exact identity; it grants
 no retirement authority.
+
+An old in-memory Bash watcher can still own a raw tail after its generated
+script changes. Monitor health requires a live `rcx-log-reader-v2`
+acknowledgment binding the PID and process birth to the exact log pane.
+Legacy adoption binds PID, PPID, birth, full command and pane command before
+sending TERM to that watcher. Its own trap reaps its tail. Both a missing
+`ps` row and OS PID absence are required before a dead-pane respawn; a live
+or permission-denied PID, changed identity or changed pane retains the hold.
+Respawn never uses `-k`. A protocol-v2 process still initializing must supply
+its own acknowledgment; replacing script bytes alone cannot make it healthy.
+Native completion adopts only an observed direct raw-tail child with exact
+exited terminal ownership, then acquires the reader fence before any new claim.
+An unknown or changed watcher pane, ambiguous reader arguments, or failed
+adoption consumes no new claim. Other live readers and writers remain subject
+to the generic process guards and existing attempt budget. Literal `ps` command
+text is scoped to the target before inspecting a tail's parent; unrelated log
+filenames containing apostrophes or spaces cannot hold this lane's completion.
+The monitor's
+explicit default-bus pin still propagates to its detached owner and all panes.
 
 The follower stops only the tail it created; it never exempts readers from the
 generic retirement guard. An open writer, unknown reader, live native owner or
@@ -159,6 +178,33 @@ leaves the original registration as incomplete evidence; registration alone
 does not authorize retirement.
 
 ## Fleet inventory and useful work
+
+Postmerge package routing distinguishes cleanup control enablers from committed
+fleet action-plan producers. The shared task ID alone does not declare an
+apply plan. A plan present in the exact merge tree, a plan declared in handoff
+scope or the committed packet's Scope, or a known legacy transaction owner
+requires valid committed schema-v2 bytes and exact wave identity. Missing,
+malformed or foreign plans hold; index/worktree files cannot supply authority.
+The existing recovery enabler keeps its original transaction plan and consumed
+claims. Pending PR dispositions retain their own route and target holds.
+
+An ordinary cleanup enabler routes a fresh bounded action under the existing
+cleanup owner, with no routable landed packet or invented apply plan. Merge,
+PRIMARY synchronization, held sibling owners, package refresh and retirement
+remain separate outcomes. The candidate and its requests retain the native
+`primary_worktree_sync` result, including the exact held transaction, alongside
+`base_worktree_sync`, lifecycle completion and cleanup results. Current PRIMARY
+with held WIP does not clear another owner's HOLD or authorize retirement.
+Neither a refreshed package nor a successful merge
+advances cleanup to Mu or removes a source. Final PR coverage follows actual
+folder and separate retention landing, with cited source unchanged during that
+governance pass.
+
+Lifecycle archive completion cannot clear an explicitly protected source or
+protected parent. Exact default protected owners remain held as well; completed
+archive children retain their existing fresh-authority route. This portable
+safeguard grants no one-time source release; historical census, classification,
+APPLY and retirement records remain bound to their original owners and bytes.
 
 Fresh census supports `--comparison-commit <exact-local-dev-commit>`. It records
 HEAD ancestry, local branch/history references, staged and unstaged patch
