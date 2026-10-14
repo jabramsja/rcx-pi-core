@@ -4,6 +4,34 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-14
+
+### Bounded native pytest execution (Phase B implementation)
+
+- Schedule the unchanged native test selection with four worksteal workers and
+  no worker restarts. Complete the selection after assertion failures; every
+  failed gate still blocks commit. Keep pytest/Hypothesis configuration,
+  deterministic hash seed, existing callers and timeout caps unchanged.
+- Drain both output streams with 64 KiB retained per stream, split between head
+  and tail. Return actual partial diagnostics, timeout duration and a distinct
+  timeout/nonzero outcome. Timeout and interruption use the existing owned
+  process releaser; uncertainty remains HOLD and preserves re-entry checkpoints.
+- Short real subprocess fixtures reproduce the old serial command and lost
+  timeout output. New disposable pytest fixtures compare every worker's full
+  ordered collection with serial collection, check all selected executions and
+  environment profiles, preserve failure details and verify owned worker/child
+  cancellation. Positive release fixtures use fresh coherent OS observations;
+  adverse raw-query controls retain HOLD. This is not arbitrary-process containment.
+- The unchanged complete module baseline passes 1,418 tests in 167.24s, exit 0.
+  Complete candidate and unchanged private-attribute integrity receipts, timings,
+  nonempty source hashes and all failed attempts are recorded in
+  `reports/control_plane/workingrcx-native-pytest-execution-r1-2026-10-14_implementation_evidence.json`.
+  Reconcile four captured PRIMARY changes outside byte-exact candidate Ra;
+  preserve 268 IDs, 44 ordered owners and all history. Outer native validation,
+  review, generated governance, CI, merge and PRIMARY sync remain pending.
+  Retention R2 stays unmerged; fresh R3, actual capacity sizing, Mu P1, monitor
+  v12 and original 52-path PR coverage/dispositions remain separate obligations.
+
 ## 2026-10-13
 
 ### Native timeout recovery R4 (Phase B implementation)

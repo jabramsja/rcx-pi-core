@@ -34,6 +34,7 @@ import importlib.util
 import json
 import os
 import re
+import selectors
 import signal
 import sqlite3
 import stat
@@ -68,6 +69,7 @@ try:
         EXECUTOR_PROCESS_OWNER_ENV,
         artifact_size_mtime_ns,
         terminate_process_tree,
+        terminate_owned_executor,
         ensure_not_agent_review_mode,
         run_bridge_subprocess,
         resolve_agent_bus_dir,
@@ -98,6 +100,7 @@ except ImportError:
     EXECUTOR_PROCESS_OWNER_ENV = _mod.EXECUTOR_PROCESS_OWNER_ENV
     artifact_size_mtime_ns = _mod.artifact_size_mtime_ns
     terminate_process_tree = _mod.terminate_process_tree
+    terminate_owned_executor = _mod.terminate_owned_executor
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     run_bridge_subprocess = _mod.run_bridge_subprocess
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
@@ -177,6 +180,8 @@ DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
 # final sweep. Keep a bounded cap while allowing the configured executor budget
 # to cover a full evidence-sized pytest run.
 MAX_PYTEST_GATE_TIMEOUT_S = 7200
+PYTEST_GATE_WORKERS = 4
+PYTEST_OUTPUT_BYTES_PER_STREAM = 65536
 _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/host/",
     "mu/substrate/",
@@ -1404,27 +1409,105 @@ def _run_pytest_on_files(
     *,
     timeout: int = 120,
 ) -> dict[str, Any]:
-    """Run pytest on specific test files. Returns exit_code and output."""
+    """Compatibility seam for all existing native gate callers."""
+    return run_pytest_on_files(repo_root, test_files, timeout=timeout)
+
+
+class _PytestOutputBuffer:
+    """Drain arbitrary subprocess output while retaining a finite head and tail."""
+
+    def __init__(self) -> None:
+        self.head = bytearray()
+        self.tail = bytearray()
+        self.total = 0
+
+    def append(self, chunk: bytes) -> None:
+        self.total += len(chunk)
+        half = PYTEST_OUTPUT_BYTES_PER_STREAM // 2
+        take = min(len(chunk), half - len(self.head))
+        self.head.extend(chunk[:take])
+        self.tail.extend(chunk[take:])
+        if len(self.tail) > half:
+            del self.tail[:-half]
+
+    def render(self) -> str:
+        omitted = self.total - len(self.head) - len(self.tail)
+        gap = f"\n... <{omitted} output bytes omitted> ...\n".encode() if omitted else b""
+        return (self.head + gap + self.tail).decode("utf-8", errors="replace")
+
+
+def run_pytest_on_files(
+    repo_root: Path,
+    test_files: list[str],
+    *,
+    timeout: int = 120,
+) -> dict[str, Any]:
+    """Run the complete selection with four workers and bounded diagnostics.
+
+    Scheduling does not change pytest configuration, markers or Hypothesis
+    profiles. Inherit the environment, forcing only the existing hash seed and
+    adding an inherited process-ownership marker. No fail-fast flag: failures
+    remain blocking while the rest of the selected tests still execute.
+
+    Timeout/cancellation uses the shared conservative owned-process releaser.
+    Uncertain cleanup is HOLD, never permission to replay or retire a source.
+    The retained output is bounded in memory; no unbounded spool or post-timeout
+    communicate() waits on pipes held open by unverified children.
+    """
     if not test_files:
         return {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
+    command = [sys.executable, "-u", "-m", "pytest", "-n", str(PYTEST_GATE_WORKERS),
+               "--dist", "worksteal", "--max-worker-restart=0", "--tb=short", *test_files]
+    owner = uuid.uuid4().hex
+    owners = os.environ.get(EXECUTOR_PROCESS_OWNER_ENV, "")
+    env = {**os.environ, "PYTHONHASHSEED": "0",
+           EXECUTOR_PROCESS_OWNER_ENV: f"{owners}:{owner}" if owners else owner}
+    output = {name: _PytestOutputBuffer() for name in ("stdout", "stderr")}
+    started = time.monotonic()
+    proc = subprocess.Popen(command, cwd=repo_root, env=env, start_new_session=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    timed_out = False
+    release = None
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", "-x", "--tb=short", *test_files],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-            env={**os.environ, "PYTHONHASHSEED": "0"},
-        )
-        return {
-            "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "passed": result.returncode == 0,
-        }
+        with selectors.DefaultSelector() as selector:
+            for name in output:
+                selector.register(getattr(proc, name), selectors.EVENT_READ, name)
+            while selector.get_map() or proc.poll() is None:
+                remaining = started + timeout - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                for key, _ in selector.select(min(0.1, remaining)):
+                    chunk = os.read(key.fd, 8192)
+                    if chunk:
+                        output[key.data].append(chunk)
+                    else:
+                        selector.unregister(key.fileobj)
     except subprocess.TimeoutExpired:
-        return {"exit_code": -1, "stdout": "", "stderr": "pytest timed out", "passed": False}
+        timed_out = True
+        release = terminate_owned_executor(proc, owner, cwd=repo_root)
+    except BaseException as exc:
+        if terminate_owned_executor(proc, owner, cwd=repo_root) is None:
+            raise PhaseBExecutorError("HOLD: interrupted pytest process release is unverified") from exc
+        raise
+    finally:
+        for name in output:
+            getattr(proc, name).close()
+    return {
+        "exit_code": -1 if timed_out else proc.returncode,
+        "stdout": output["stdout"].render(),
+        "stderr": output["stderr"].render(),
+        "passed": not timed_out and proc.returncode == 0,
+        "failure_kind": "timeout" if timed_out else ("nonzero_exit" if proc.returncode else "none"),
+        "timed_out": timed_out,
+        "timeout_seconds": timeout,
+        "elapsed_seconds": time.monotonic() - started,
+        "command": command,
+        "worker_count": PYTEST_GATE_WORKERS,
+        "output_bytes": {name: stream.total for name, stream in output.items()},
+        "output_limit_bytes_per_stream": PYTEST_OUTPUT_BYTES_PER_STREAM,
+        "cleanup_status": ("released" if release is not None else "HOLD") if timed_out else "not_needed",
+        "cleanup_release_evidence": release,
+    }
 
 
 def _resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
@@ -2122,6 +2205,10 @@ def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 100
     stdout = result.get("stdout") or ""
     stderr = result.get("stderr") or ""
     parts: list[str] = []
+    if result.get("timed_out"):
+        parts.append(f"pytest timed out after {result['timeout_seconds']}s")
+    if result.get("cleanup_status") == "HOLD":
+        parts.append("HOLD: owned pytest process release is unverified")
     parts.extend(_summarize_bounded_output("stdout", stdout, limit=stdout_limit))
     parts.extend(_summarize_bounded_output("stderr", stderr, limit=stderr_limit))
     return " ".join(parts) if parts else "no stdout/stderr captured"
@@ -8593,7 +8680,7 @@ def _resume_commit_ready_supervisor(
         tests = _run_pytest_on_files(repo_root, select_pytest_gate_files(files, repo_root),
                                     timeout=authority["pytest_gate_timeout"])
         if not tests.get("passed"):
-            raise PhaseBExecutorError("Commit-ready final tests failed")
+            raise PhaseBExecutorError("Commit-ready final tests failed: " + _summarize_pytest_failure(tests))
         if commit_ready_resume_authority(repo_root) != authority:
             raise PhaseBExecutorError("Candidate changed during continuation gates")
         review = run_pre_commit_supervisor(repo_root, package_path, verbose=verbose, bus_dir=_active_bus_dir())
@@ -13399,12 +13486,15 @@ def run_phase_b(
                     result["errors"] = [
                         f"Phase B pager emission failed after final pytest failure: {exc}"
                     ]
-                    _clear_state(repo_root)
+                    result["pytest_result"] = final_pytest
+                    if final_pytest.get("cleanup_status") != "HOLD":
+                        _clear_state(repo_root)
                     return result
                 return {
                     "status": "error",
                     "step": "final_pytest_gate",
                     "errors": [failure_summary],
+                    "pytest_result": final_pytest,
                 }
             log("Final pytest gate: PASSED")
             try:
@@ -14419,13 +14509,17 @@ def run_phase_b(
                     result["errors"] = [
                         f"Phase B pager emission failed after re-entry pytest failure: {exc}"
                     ]
-                    _clear_state(repo_root)
+                    result["pytest_result"] = reentry_pytest
+                    if reentry_pytest.get("cleanup_status") != "HOLD":
+                        _clear_state(repo_root)
                     return result
-                _clear_state(repo_root)
+                if reentry_pytest.get("cleanup_status") != "HOLD":
+                    _clear_state(repo_root)
                 return {
                     "status": "error",
                     "step": "reentry_pytest_gate",
                     "errors": [failure_summary],
+                    "pytest_result": reentry_pytest,
                 }
             log("Re-entry pytest gate: PASSED")
 

@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-native-pytest-execution-r1-2026-10-14",
+  "repeat_run_speedup_ratio": 0.965691,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.317435,
+  "repeat_run_raw_seconds": [
+    0.306544,
+    0.317435
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.306544
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.623979
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-10-14T09:21:15Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "b75972546901e3a09e08047f1a10c7684bf875bd"
+}
