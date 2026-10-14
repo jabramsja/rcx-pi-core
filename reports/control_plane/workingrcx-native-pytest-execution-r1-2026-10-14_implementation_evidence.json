@@ -1,0 +1,595 @@
+{
+  "version": 1,
+  "wave_id": "workingrcx-native-pytest-execution-r1-2026-10-14",
+  "task_id": "[NATIVE-STUB-PHASE-B-SAME-CONFIG-RELAUNCH-REPAIR]",
+  "observed_utc": "2026-10-14T08:46:01.424856+00:00",
+  "phase_b_local_result": "PASS: 1427 passed in 171.95s (0:02:51); unchanged scoped private-attribute integrity exit 0. Outer native governance pending.",
+  "execution_boundary": "Phase B implementation only. No dispatcher/executor launch, preflight/attestation, staging, commit/push/PR/merge, PRIMARY sync, cap generation or retention replay. Tests isolate remote/actor/governance effects in disposable fixtures.",
+  "comparison_commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+  "branch": "jabramsja/workingrcx-native-pytest-execution-r1-2026-10-14",
+  "recovery_directory": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b",
+  "volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+  "wrapper": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/RCX-Recovery-Access/rcx-recovery",
+  "recovery_access": "Existing wrapper where and diskutil UUID verification succeeded; no credentials inspected or production store mutations.",
+  "historical_timeout_evidence": {
+    "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/retention-r2-final-serial-timeout-native-diagnostic.json",
+    "sha256": "50c221e9a7dc7eb2c26de17955015eaab2f45f3df445ca7384bfa6b460ec60fb",
+    "observed": "Six selected retention files, serial final pytest, finite 7200s timeout, exit -1, no actual assertion output retained; native recovery exhausted.",
+    "limits": "No exhausted retention rerun and no estimate of its unobserved completion time; ci_fast parallel local success is not final full-profile equivalence proof.",
+    "retained_terminal_snapshot": "83347fba3974e195d4f0637991c84993148f9e90e6a4e043009b46291e5f740c"
+  },
+  "baseline_disposable_reproduction": {
+    "source_sha256": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+    "commands": [
+      {
+        "argv": [
+          "/opt/homebrew/opt/python@3.13/bin/python3.13",
+          "-m",
+          "pytest",
+          "-x",
+          "--tb=short",
+          "test_native.py"
+        ],
+        "timeout": 10,
+        "hash_seed": "0",
+        "exit_code": 0,
+        "stdout": "BASELINE_STDOUT\n============================= test session starts ==============================\nplatform darwin -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0\nrootdir: /private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-native-pytest-before-p0sxx_93\nplugins: cov-7.1.0, xdist-3.8.0, timeout-2.4.0, hypothesis-6.151.2, testmon-2.2.0, anyio-4.13.0\ncollected 6 items\n\ntest_native.py ......                                                    [100%]\n\n============================== 6 passed in 0.07s ===============================\n",
+        "stderr": "BASELINE_STDERR\n",
+        "wall_seconds": 0.349
+      },
+      {
+        "argv": [
+          "/opt/homebrew/opt/python@3.13/bin/python3.13",
+          "-m",
+          "pytest",
+          "-x",
+          "--tb=short",
+          "test_native.py"
+        ],
+        "timeout": 10,
+        "hash_seed": "0",
+        "exit_code": 1,
+        "stdout": "BASELINE_STDOUT\n============================= test session starts ==============================\nplatform darwin -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0\nrootdir: /private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-native-pytest-before-p0sxx_93\nplugins: cov-7.1.0, xdist-3.8.0, timeout-2.4.0, hypothesis-6.151.2, testmon-2.2.0, anyio-4.13.0\ncollected 1 item\n\ntest_native.py F\n\n=================================== FAILURES ===================================\n_________________________________ test_failure _________________________________\ntest_native.py:2: in test_failure\n    assert False, \"BASELINE_ASSERTION\"\nE   AssertionError: BASELINE_ASSERTION\nE   assert False\n=========================== short test summary info ============================\nFAILED test_native.py::test_failure - AssertionError: BASELINE_ASSERTION\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n============================== 1 failed in 0.06s ===============================\n",
+        "stderr": "BASELINE_STDERR\n",
+        "wall_seconds": 0.228
+      },
+      {
+        "argv": [
+          "/opt/homebrew/opt/python@3.13/bin/python3.13",
+          "-m",
+          "pytest",
+          "-x",
+          "--tb=short",
+          "test_native.py"
+        ],
+        "timeout": 2,
+        "hash_seed": "0",
+        "timeout_expired": 2,
+        "actual_partial_stdout": "BASELINE_STDOUT\n============================= test session starts ==============================\nplatform darwin -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0\nrootdir: /private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-native-pytest-before-p0sxx_93\nplugins: cov-7.1.0, xdist-3.8.0, timeout-2.4.0, hypothesis-6.151.2, testmon-2.2.0, anyio-4.13.0\ncollected 1 item\n\ntest_native.py ",
+        "actual_partial_stderr": "BASELINE_STDERR\n",
+        "wall_seconds": 2.008
+      }
+    ],
+    "success": {
+      "exit_code": 0,
+      "stdout": "BASELINE_STDOUT\n============================= test session starts ==============================\nplatform darwin -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0\nrootdir: /private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-native-pytest-before-p0sxx_93\nplugins: cov-7.1.0, xdist-3.8.0, timeout-2.4.0, hypothesis-6.151.2, testmon-2.2.0, anyio-4.13.0\ncollected 6 items\n\ntest_native.py ......                                                    [100%]\n\n============================== 6 passed in 0.07s ===============================\n",
+      "stderr": "BASELINE_STDERR\n",
+      "passed": true
+    },
+    "failure": {
+      "exit_code": 1,
+      "stdout": "BASELINE_STDOUT\n============================= test session starts ==============================\nplatform darwin -- Python 3.13.13, pytest-9.0.2, pluggy-1.6.0\nrootdir: /private/var/folders/gz/81n_gjh50yx__hk1ymgsq2qh0000gp/T/rcx-native-pytest-before-p0sxx_93\nplugins: cov-7.1.0, xdist-3.8.0, timeout-2.4.0, hypothesis-6.151.2, testmon-2.2.0, anyio-4.13.0\ncollected 1 item\n\ntest_native.py F\n\n=================================== FAILURES ===================================\n_________________________________ test_failure _________________________________\ntest_native.py:2: in test_failure\n    assert False, \"BASELINE_ASSERTION\"\nE   AssertionError: BASELINE_ASSERTION\nE   assert False\n=========================== short test summary info ============================\nFAILED test_native.py::test_failure - AssertionError: BASELINE_ASSERTION\n!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!\n============================== 1 failed in 0.06s ===============================\n",
+      "stderr": "BASELINE_STDERR\n",
+      "passed": false
+    },
+    "timeout": {
+      "exit_code": -1,
+      "stdout": "",
+      "stderr": "pytest timed out",
+      "passed": false
+    },
+    "result": "PASS: baseline serial argv, real assertion, and lost timeout diagnostics reproduced; no retention execution"
+  },
+  "resource_policy": {
+    "workers": 4,
+    "scheduler": "worksteal",
+    "worker_restarts": 0,
+    "retained_output_bytes_per_stream": 65536,
+    "stream_policy": "32 KiB head plus 32 KiB tail; omission byte count; continuous bounded pipe reads; no unbounded spool, capture_output buffer or post-timeout pipe wait.",
+    "unchanged_timeout_seconds": {
+      "helper_default": 120,
+      "native_floor": 300,
+      "native_cap": 7200
+    },
+    "environment": "Inherit pytest/Hypothesis/RCX_CI settings unchanged; preserve forced PYTHONHASHSEED=0; append only inherited process ownership marker. Python -u flushes diagnostic output.",
+    "selection": "No selector changes, marker exclusions, skip/xfail, collection narrowing or declared-gate substitution. Remove -x so assertion failures do not prevent remaining selected nodes executing.",
+    "failure": "Nonzero exit and timeout remain passed=false; returned failure_kind, exact timeout, command, elapsed time and actual bounded streams distinguish outcomes. Public Phase B failure returns pytest_result.",
+    "cleanup": "Reuse unchanged terminate_owned_executor. Failed or partial observation yields HOLD/no release proof. Preserve re-entry checkpoint on cleanup uncertainty, including failed pager emission. No cleanup result authorizes source retirement or prior launch replay."
+  },
+  "real_pytest_proofs": {
+    "collection_and_execution": "Four cases: success/failure crossed with unset/ci_fast profile. Each real serial collection has 18 nodes; all four real xdist worker ordered collections must exactly equal that list. Exactly one execution record for every selected node, including slow/fuzzer/property/negative cases; poison unselected module not collected.",
+    "environment": "Child workers observe hash seed 0, unchanged RCX_CI and HYPOTHESIS_PROFILE values, loaded Hypothesis max_examples 100/default or 7/fixture ci_fast, and equal actual hash values.",
+    "failure_details": "Real failing run contains test_native_a.py::test_negative and NATIVE_ASSERTION_DETAIL, with 1 failed/17 passed. Public run_phase_b with real failing pytest never reaches final staging, supervisor or commit handoff.",
+    "timeout": "Exact requested 5s timeout, real stdout/stderr each over 90000 bytes, bounded retained heads/tails, typed timeout result. Four real workers and four mutating child processes absent after return; no mutation for 0.3s afterwards.",
+    "cancellation": "Raise KeyboardInterrupt at selector boundary only after all four real workers/children are active; shared real cleanup removes controller, workers and children; OS absence and no later mutation asserted.",
+    "negative_observation": "Real subprocess timeout with failed/partial ps query must report HOLD and no release evidence. This fixture explicitly strips worker args only to avoid leaving unowned workers during adverse observation; its limit is an argv-contract/hold test, not parallel execution proof.",
+    "positive_cleanup_limit": "Uses the existing complete_process_observation test fixture: fresh real full OS snapshot per observation, graph derived from same snapshot. Real parser, inherited ownership, PID start identities, signals and absence checks; does not prove atomic production two-query census or containment of processes that discard ownership markers.",
+    "tests": [
+      "test_native_pytest_real_cancellation_releases_workers",
+      "test_native_pytest_real_collection_execution_and_profiles",
+      "test_native_pytest_real_timeout_keeps_bounded_output_and_releases_workers",
+      "test_native_pytest_uncertain_cleanup_is_hold",
+      "test_native_real_pytest_assertion_blocks_public_phase_b"
+    ]
+  },
+  "attempt_history": [
+    {
+      "name": "baseline-disposable",
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 '/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/baseline_disposable.py'",
+      "exit_code": 0,
+      "result": "Serial success/failure/2s timeout and discarded actual partial output reproduced before source edits."
+    },
+    {
+      "name": "baseline-complete",
+      "result": "1418 passed in 167.24s; exit 0"
+    },
+    {
+      "name": "candidate-complete-1",
+      "result": "1 failed, 1426 passed in 172.65s; exit 1",
+      "source_hashes_stable": true,
+      "failure": "new test_native_real_pytest_assertion_blocks_public_phase_b expected zero _stage_files calls",
+      "direct_evidence": "isolate_legacy_run_phase_b_pre_review_boundaries stages the selected files and packet before bridge review; production _prepare_phase_b_pre_review_package uses the same pre-review staging boundary",
+      "correction": "Assert exactly the one existing pre-review stage, no final staging, no supervisor, no commit handoff. Retain real pytest failure diagnostics and returned final_pytest_gate assertion. No production gate weakening.",
+      "all_new_real_collection_environment_timeout_cancellation_controls": "passed in this complete run"
+    },
+    {
+      "name": "candidate-complete-2",
+      "result": "1427 passed in 171.95s (0:02:51)",
+      "exit_code": 0
+    }
+  ],
+  "validation": [
+    {
+      "label": "baseline-integrity",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/native-pytest-execution-r1-20261014",
+      "argv": [
+        "python3",
+        "mu/tools/checks/linters/check_private_attr_access.py",
+        ".",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "mu/tests/docs/test_growth_caps.py"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "started_utc": "2026-10-14T08:30:42.410958+00:00",
+      "before_sha256": {
+        "TASKS.md": "c9c4ba1e1f8c8392dba9c9e22c0f0e442b11242e26dd808160c7d86f50e2f57b",
+        "CHANGELOG.md": "e40ddbac5d5b53a5019b770999a258f98502bc8bb71c26890b5771fd924dfbbe",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tests/tools/test_phase_b_executor.py": "e833cebdd07104a9be8d2db9bd48dea8dfd9403a61155f6eaf838cf47865682d",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "exit_code": 0,
+      "wall_seconds": 0.195,
+      "finished_utc": "2026-10-14T08:30:42.609071+00:00",
+      "after_sha256": {
+        "TASKS.md": "c9c4ba1e1f8c8392dba9c9e22c0f0e442b11242e26dd808160c7d86f50e2f57b",
+        "CHANGELOG.md": "e40ddbac5d5b53a5019b770999a258f98502bc8bb71c26890b5771fd924dfbbe",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tests/tools/test_phase_b_executor.py": "e833cebdd07104a9be8d2db9bd48dea8dfd9403a61155f6eaf838cf47865682d",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "hashes_stable": true,
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/baseline-integrity.stdout.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/baseline-integrity.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "pytest_summary": null
+    },
+    {
+      "label": "baseline-complete",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/native-pytest-execution-r1-20261014",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "4",
+        "--dist",
+        "worksteal",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "--tb=short",
+        "--durations=20"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "started_utc": "2026-10-14T08:30:41.262565+00:00",
+      "before_sha256": {
+        "TASKS.md": "c9c4ba1e1f8c8392dba9c9e22c0f0e442b11242e26dd808160c7d86f50e2f57b",
+        "CHANGELOG.md": "e40ddbac5d5b53a5019b770999a258f98502bc8bb71c26890b5771fd924dfbbe",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tests/tools/test_phase_b_executor.py": "e833cebdd07104a9be8d2db9bd48dea8dfd9403a61155f6eaf838cf47865682d",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "exit_code": 0,
+      "wall_seconds": 167.519,
+      "finished_utc": "2026-10-14T08:33:28.786064+00:00",
+      "after_sha256": {
+        "TASKS.md": "c9c4ba1e1f8c8392dba9c9e22c0f0e442b11242e26dd808160c7d86f50e2f57b",
+        "CHANGELOG.md": "e40ddbac5d5b53a5019b770999a258f98502bc8bb71c26890b5771fd924dfbbe",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tests/tools/test_phase_b_executor.py": "e833cebdd07104a9be8d2db9bd48dea8dfd9403a61155f6eaf838cf47865682d",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "hashes_stable": true,
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/baseline-complete.stdout.log",
+        "bytes": 4529,
+        "sha256": "2881ad82c4f1ffc0aa5126cd97ffa03916f2f0ab02ec84d20b44b15a67ca3ba9"
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/baseline-complete.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "pytest_summary": "1418 passed in 167.24s (0:02:47)"
+    },
+    {
+      "label": "candidate-integrity-1",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/native-pytest-execution-r1-20261014",
+      "argv": [
+        "python3",
+        "mu/tools/checks/linters/check_private_attr_access.py",
+        ".",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "mu/tests/docs/test_growth_caps.py"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "started_utc": "2026-10-14T08:38:07.221024+00:00",
+      "before_sha256": {
+        "TASKS.md": "750233e61029d77ad195825be169b388ae2695b1f41526b689a0a68fb42005f0",
+        "CHANGELOG.md": "8c22760d43e5281af68964939bfc4f3b840274e624db56c93ccb6201a6991ecf",
+        "mu/tools/executors/phase_b_executor.py": "e562436845f3d02120439ea2d057e5542fb3f0853f2f6d5623ab8750ef0f34e4",
+        "mu/tests/tools/test_phase_b_executor.py": "7b0d71f1416f26197b29e3a0eadd25266d53580378a67b2a81d98b14a98297d5",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "exit_code": 0,
+      "wall_seconds": 0.204,
+      "finished_utc": "2026-10-14T08:38:07.428218+00:00",
+      "after_sha256": {
+        "TASKS.md": "750233e61029d77ad195825be169b388ae2695b1f41526b689a0a68fb42005f0",
+        "CHANGELOG.md": "8c22760d43e5281af68964939bfc4f3b840274e624db56c93ccb6201a6991ecf",
+        "mu/tools/executors/phase_b_executor.py": "e562436845f3d02120439ea2d057e5542fb3f0853f2f6d5623ab8750ef0f34e4",
+        "mu/tests/tools/test_phase_b_executor.py": "7b0d71f1416f26197b29e3a0eadd25266d53580378a67b2a81d98b14a98297d5",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "hashes_stable": true,
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/candidate-integrity-1.stdout.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/candidate-integrity-1.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "pytest_summary": null
+    },
+    {
+      "label": "candidate-complete-1",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/native-pytest-execution-r1-20261014",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "4",
+        "--dist",
+        "worksteal",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "--tb=short",
+        "--durations=20"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "started_utc": "2026-10-14T08:38:06.060651+00:00",
+      "before_sha256": {
+        "TASKS.md": "750233e61029d77ad195825be169b388ae2695b1f41526b689a0a68fb42005f0",
+        "CHANGELOG.md": "8c22760d43e5281af68964939bfc4f3b840274e624db56c93ccb6201a6991ecf",
+        "mu/tools/executors/phase_b_executor.py": "e562436845f3d02120439ea2d057e5542fb3f0853f2f6d5623ab8750ef0f34e4",
+        "mu/tests/tools/test_phase_b_executor.py": "7b0d71f1416f26197b29e3a0eadd25266d53580378a67b2a81d98b14a98297d5",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "exit_code": 1,
+      "wall_seconds": 172.992,
+      "finished_utc": "2026-10-14T08:40:59.056356+00:00",
+      "after_sha256": {
+        "TASKS.md": "750233e61029d77ad195825be169b388ae2695b1f41526b689a0a68fb42005f0",
+        "CHANGELOG.md": "8c22760d43e5281af68964939bfc4f3b840274e624db56c93ccb6201a6991ecf",
+        "mu/tools/executors/phase_b_executor.py": "e562436845f3d02120439ea2d057e5542fb3f0853f2f6d5623ab8750ef0f34e4",
+        "mu/tests/tools/test_phase_b_executor.py": "7b0d71f1416f26197b29e3a0eadd25266d53580378a67b2a81d98b14a98297d5",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "hashes_stable": true,
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/candidate-complete-1.stdout.log",
+        "bytes": 5626,
+        "sha256": "8505dccf489b77480c0129a8f0f6883814fd0219df917d290cf3b6d023e8461a"
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/candidate-complete-1.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "pytest_summary": "1 failed, 1426 passed in 172.65s (0:02:52)"
+    },
+    {
+      "label": "candidate-integrity-2",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/native-pytest-execution-r1-20261014",
+      "argv": [
+        "python3",
+        "mu/tools/checks/linters/check_private_attr_access.py",
+        ".",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "mu/tests/docs/test_growth_caps.py"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "started_utc": "2026-10-14T08:42:51.026369+00:00",
+      "before_sha256": {
+        "TASKS.md": "750233e61029d77ad195825be169b388ae2695b1f41526b689a0a68fb42005f0",
+        "CHANGELOG.md": "8c22760d43e5281af68964939bfc4f3b840274e624db56c93ccb6201a6991ecf",
+        "mu/tools/executors/phase_b_executor.py": "e562436845f3d02120439ea2d057e5542fb3f0853f2f6d5623ab8750ef0f34e4",
+        "mu/tests/tools/test_phase_b_executor.py": "83f259c9c45948db9df968c95bc50fdf00563cbe42a772a44ba60062df04b7af",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "exit_code": 0,
+      "wall_seconds": 0.193,
+      "finished_utc": "2026-10-14T08:42:51.222777+00:00",
+      "after_sha256": {
+        "TASKS.md": "750233e61029d77ad195825be169b388ae2695b1f41526b689a0a68fb42005f0",
+        "CHANGELOG.md": "8c22760d43e5281af68964939bfc4f3b840274e624db56c93ccb6201a6991ecf",
+        "mu/tools/executors/phase_b_executor.py": "e562436845f3d02120439ea2d057e5542fb3f0853f2f6d5623ab8750ef0f34e4",
+        "mu/tests/tools/test_phase_b_executor.py": "83f259c9c45948db9df968c95bc50fdf00563cbe42a772a44ba60062df04b7af",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "hashes_stable": true,
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/candidate-integrity-2.stdout.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/candidate-integrity-2.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "pytest_summary": null
+    },
+    {
+      "label": "candidate-complete-2",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/native-pytest-execution-r1-20261014",
+      "argv": [
+        "python3",
+        "-m",
+        "pytest",
+        "-q",
+        "-n",
+        "4",
+        "--dist",
+        "worksteal",
+        "-p",
+        "no:cacheprovider",
+        "--import-mode=importlib",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "--tb=short",
+        "--durations=20"
+      ],
+      "environment": {
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1",
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "started_utc": "2026-10-14T08:42:49.863738+00:00",
+      "before_sha256": {
+        "TASKS.md": "750233e61029d77ad195825be169b388ae2695b1f41526b689a0a68fb42005f0",
+        "CHANGELOG.md": "8c22760d43e5281af68964939bfc4f3b840274e624db56c93ccb6201a6991ecf",
+        "mu/tools/executors/phase_b_executor.py": "e562436845f3d02120439ea2d057e5542fb3f0853f2f6d5623ab8750ef0f34e4",
+        "mu/tests/tools/test_phase_b_executor.py": "83f259c9c45948db9df968c95bc50fdf00563cbe42a772a44ba60062df04b7af",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "exit_code": 0,
+      "wall_seconds": 172.279,
+      "finished_utc": "2026-10-14T08:45:42.146074+00:00",
+      "after_sha256": {
+        "TASKS.md": "750233e61029d77ad195825be169b388ae2695b1f41526b689a0a68fb42005f0",
+        "CHANGELOG.md": "8c22760d43e5281af68964939bfc4f3b840274e624db56c93ccb6201a6991ecf",
+        "mu/tools/executors/phase_b_executor.py": "e562436845f3d02120439ea2d057e5542fb3f0853f2f6d5623ab8750ef0f34e4",
+        "mu/tests/tools/test_phase_b_executor.py": "83f259c9c45948db9df968c95bc50fdf00563cbe42a772a44ba60062df04b7af",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/checks/linters/check_private_attr_access.py": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd"
+      },
+      "hashes_stable": true,
+      "stdout": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/candidate-complete-2.stdout.log",
+        "bytes": 4479,
+        "sha256": "b6cf7c07d39cd8f9abf70c89e44ad9b03c730726705d670269199dc073e74a28"
+      },
+      "stderr": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-native-pytest-execution-r1-2026-10-14-phase-b/candidate-complete-2.stderr.log",
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "pytest_summary": "1427 passed in 171.95s (0:02:51)"
+    }
+  ],
+  "test_preservation": {
+    "baseline_source_sha256": "e833cebdd07104a9be8d2db9bd48dea8dfd9403a61155f6eaf838cf47865682d",
+    "candidate_source_sha256": "83f259c9c45948db9df968c95bc50fdf00563cbe42a772a44ba60062df04b7af",
+    "baseline_test_function_names": 601,
+    "candidate_test_function_names": 606,
+    "removed_test_names": [],
+    "changed_existing_tests": [
+      "test_run_pytest_on_files_forces_deterministic_hash_seed"
+    ],
+    "added_test_names": [
+      "test_native_pytest_real_cancellation_releases_workers",
+      "test_native_pytest_real_collection_execution_and_profiles",
+      "test_native_pytest_real_timeout_keeps_bounded_output_and_releases_workers",
+      "test_native_pytest_uncertain_cleanup_is_hold",
+      "test_native_real_pytest_assertion_blocks_public_phase_b"
+    ],
+    "baseline_assertions": 2261,
+    "candidate_assertions": 2307,
+    "every_original_assertion_retained": true
+  },
+  "tracker_reconciliation": {
+    "edits_outside_Ra": [
+      {
+        "candidate_line": 18,
+        "old_sha256": "f5fc091e2a3a5aea9e2a5b39d99e931136f0aae0578142bf33bb84e27f2c5e4b",
+        "primary_lines": [
+          18,
+          21
+        ]
+      },
+      {
+        "candidate_line": 190,
+        "old_sha256": "68abcf69f0b4329c388c1467f01464b2618d0b7b5de14e817a60b527af553903",
+        "primary_lines": [
+          193,
+          196
+        ]
+      },
+      {
+        "candidate_line": 196,
+        "old_sha256": "708938d547550eef5fa4debb5f58d74740883248cc257a8521bf91a92f294af9",
+        "primary_lines": [
+          202,
+          204
+        ]
+      },
+      {
+        "candidate_line": 804,
+        "old_sha256": "210183a09a3339127caa7c680dd7c757b13a4e8d07e31c81352eafa8f0f5dfaf",
+        "primary_lines": [
+          812,
+          815
+        ]
+      }
+    ],
+    "candidate_Ra_sha256": "45a9288fa85ad998573423e4b4b353a743559c38e33aa4a28dfc5b59d737aecb",
+    "final_Ra_sha256": "45a9288fa85ad998573423e4b4b353a743559c38e33aa4a28dfc5b59d737aecb",
+    "canonical_ids": 268,
+    "ordered_owners": 44,
+    "all_prior_nonempty_lines_retained": true,
+    "native_tracker_authority_restored": false
+  },
+  "primary_capture": {
+    "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/native-pytest-execution-r1-admission/PRIMARY-TASKS.md",
+    "sha256": "7e8900b91829b55d4633ae6d93cd174e3e208efefe915a6d23353d59f15f6bcc"
+  },
+  "inspection_attempts": [
+    "founder/bootstrap/operator/AGENTS/status/changelog/reports/AgentRunbook and executor/test source reads",
+    "git status/branch/HEAD: admitted branch and base",
+    "rg Codex bin recovery wrapper: exit 1 (no match); located exact wrapper in prior evidence",
+    "rg native-pytest-execution TASKS: exit 1; native launch tracker note removed during implementer, not restored here",
+    "cat pytest.ini: exit 1 (absent); no configuration edited",
+    "rg maxfail/addopts in existing pyproject.toml and conftest.py: read-only, no configuration changes"
+  ],
+  "unchanged_surfaces": [
+    "timeout caps",
+    "test selectors",
+    "executor_common.py process ownership/release",
+    "growth caps",
+    "private-attribute checker",
+    "executor_config.json",
+    "locked packet",
+    "runtime/seeds/JS/Python semantic/compiled assets",
+    "held stashes/transactions/old receipts/launch authority"
+  ],
+  "governance": {
+    "indexed_L4_Step5e_independent_review_COMMIT_GO_CI_merge_PRIMARY_sync": "Outer-owned; not run or claimed by implementer.",
+    "tracker_sync_note": "Native launch tracker restore remains producer-owned; implementer did not recapture or restore consumed authority.",
+    "cap_and_indicator_generation": "Native commit collector remains authority; no manual cap or L4 indicator changes.",
+    "runtime_substrate_delta": 0,
+    "semantic_and_host_debt_delta": "No runtime/seed/semantic changes; fresh ratchet governance belongs to outer pipeline."
+  },
+  "open_dependencies": [
+    "Retention R2 stays terminal, preserved and unmerged. Fresh R3 may carry only independently restored 13 source paths after actual repair landing, PRIMARY sync and released ownership.",
+    "Actual-repository retention capacity sizing remains OPEN and must be corrected/proved before usability closure; disposable pytest proofs do not resolve it.",
+    "Mu P1, monitor v12, original PR1330/1329/1325 full 52-path coverage/native dispositions and physical holds remain open."
+  ]
+}
