@@ -6,6 +6,50 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-13
 
+### Native timeout recovery R4 (Phase B implementation)
+
+- Correct the bridge round 1 dispatcher mismatch: native status-refresh
+  continuation must match the supervisor step in its sealed checkpoint;
+  existing post-reentry checkpoints retain their original default. Exercise
+  generated native packets through both public dispatcher entry points, with
+  exhausted-budget, stale-checkpoint, foreign-route and candidate-drift holds.
+  Keep completed SDK work and prior approvals intact while one repair performs
+  its owed review and validation.
+- The round 1 reproduction gate also captured a conservative ancestry-change
+  refusal during the identity-negative fixture's initial observation. Capture
+  that initial identity from one real OS snapshot, ending the fixture boundary
+  before PID-reuse, owner-loss, query-failure and permission injections. Preserve
+  every no-signal assertion and production observation behavior. Exact failed
+  and corrected gate receipts remain in the implementation evidence below.
+- Bridge round 1 final local validation passes 2,839 tests in 305.08s, exit 0,
+  with the declared command unchanged. Private-attribute integrity passes;
+  three fixed 24-case real-process runs pass without retries. Retain both failed
+  complete runs (8/2,832 and 11/2,828 failed/passed), their fixture diagnoses,
+  and every source/hash/exit receipt. Outer native governance remains pending.
+- Carry exactly eight independently restored R3 source/test paths after parent,
+  hash and mode verification. Retain strict timeout release, canonical/inline
+  ownership, detached-child, PID reuse, unresolved observation-gap and legacy
+  cleanup controls. Production process observation remains conservative.
+- Give positive release fixtures one fresh full OS snapshot per observation;
+  retain real transport, parser, signaling and fresh absence checks. End that
+  fixture boundary before adverse consumer injections. Real reparenting between
+  the production observer's two queries explicitly produces uncertainty. The
+  historical R3 assertNone failures do not establish their exact observer cause.
+- Admit native commit-ready status-refresh NEEDS_PHASE_B through the existing
+  sealed one-cycle latest-finding continuation. Bind the refreshed packet,
+  completed owner, source/index/package, launch metadata and config before review
+  and recheck before consumption. Preserve newest rejection on exhaustion and
+  completed actor accounting; neither approval nor budget is refreshed.
+- The complete donor baseline passed 2,792 tests. New status-refresh regressions
+  first failed 15 cases with four rejection controls passing. Corrected focused
+  coverage passes 120 cases plus two actor-interruption cases; exact commands,
+  all failed fixture attempts and final validation belong in
+  `reports/control_plane/workingrcx-native-timeout-recovery-r4-2026-10-13_implementation_evidence.json`.
+  Preserve 268 tracker IDs, 44 ordered owners, every prior candidate line and the
+  exact captured Ra section; retain PRIMARY history outside it. Indexed
+  L4/Step5e, independent review, final COMMIT_GO, CI, merge and PRIMARY sync
+  remain outer-owned and unclaimed.
+
 ### Preserved folder recovery R4 (Phase B implementation)
 
 - Verify all ten restored donor hashes against comparison `27e35ed4` and carry

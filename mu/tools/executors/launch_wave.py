@@ -1872,7 +1872,8 @@ def _native_post_commit_route_matches_config(
         return False
     try:
         expected = _native_stub_packet_contract_routing_record(config)
-    except LaunchWaveError:
+        _ec.copy_launch_wave_override_authority(record, required=True)
+    except (LaunchWaveError, _ec.ExecutorCommonError):
         return False
 
     for field_name in ("decision", "wave_name", "task_id"):

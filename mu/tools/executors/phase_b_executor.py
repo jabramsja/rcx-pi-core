@@ -64,6 +64,8 @@ try:
         MAX_WAVE_ID_LEN, WAVE_ID_RE,
         normalize_wave_id,
         process_descendants,
+        executor_release_evidence_error,
+        EXECUTOR_PROCESS_OWNER_ENV,
         artifact_size_mtime_ns,
         terminate_process_tree,
         ensure_not_agent_review_mode,
@@ -92,6 +94,8 @@ except ImportError:
     WAVE_ID_RE = _mod.WAVE_ID_RE
     normalize_wave_id = _mod.normalize_wave_id
     process_descendants = _mod.process_descendants
+    executor_release_evidence_error = _mod.executor_release_evidence_error
+    EXECUTOR_PROCESS_OWNER_ENV = _mod.EXECUTOR_PROCESS_OWNER_ENV
     artifact_size_mtime_ns = _mod.artifact_size_mtime_ns
     terminate_process_tree = _mod.terminate_process_tree
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
@@ -2851,8 +2855,24 @@ def _checkout_feature_branch_from_protected_branch(
     return None
 
 
+NATIVE_LATE_RESUME_STEPS = frozenset({"implementer", "agent_review", "bridge_converged"})
+
+
 def _save_state(repo_root: Path, state: dict[str, Any]) -> Path:
     """Persist executor state to disk for resume capability."""
+    if state.get("completed_step") in NATIVE_LATE_RESUME_STEPS:
+        binding = _native_late_checkpoint_binding(repo_root, state, require_restored=False)
+        if binding is not None:
+            state.pop("native_late_resume", None)
+            # Bind the checkpoint to the dispatcher invocation that produced it.
+            # Missing ownership is retained as uncertainty, never synthesized.
+            owner = os.environ.get(EXECUTOR_PROCESS_OWNER_ENV, "").rsplit(":", 1)[-1]
+            state["native_process_owner"] = owner if re.fullmatch(r"[0-9a-f]{32}", owner) else None
+            state["native_late_resume"] = {
+                "version": 1,
+                "checkpoint_sha256": _canonical_json_sha256(state),
+                "binding": binding,
+            }
     state_path = _state_file_path(repo_root)
     try:
         _atomic_write_text(state_path, json.dumps(state, indent=2) + "\n")
@@ -2862,6 +2882,123 @@ def _save_state(repo_root: Path, state: dict[str, Any]) -> Path:
             f"{agent_bus_relpath(_active_bus_dir(), 'executors', STATE_FILE_NAME)}: {exc}"
         ) from exc
     return state_path
+
+
+def _native_late_checkpoint_binding(
+    repo_root: Path, state: dict[str, Any], routing_record: dict[str, Any] | None = None,
+    *, require_restored: bool = True,
+) -> dict[str, Any] | None:
+    """Read the existing launch/restore authority; never capture or restore it."""
+    restore_path = _launch_tracker_restore_state_file_path(repo_root)
+    if not restore_path.exists():
+        return None
+    plan_path = state["plan_path"]
+    plan = load_plan_packet(repo_root, plan_path)
+    if not _launch_tracker_restore_marker_required(str(plan.get("content") or "")):
+        return None
+    route = load_routing_record(repo_root, bus_dir=_active_bus_dir())
+    authority, launch_route, spec, contract = _resolve_launch_tracker_restore_authority(
+        repo_root, plan=plan, plan_path=plan_path, wave_id=state["wave_id"],
+        routing_record=route if routing_record is None else routing_record,
+    )
+    restored = _load_launch_tracker_restore_state(
+        repo_root, authority=authority, authority_spec=spec,
+        native_contract=contract, launch_route=launch_route,
+    )
+    if restored is None or restored["status"] != "restored":
+        if not require_restored:
+            return None
+        raise PhaseBExecutorError("late Phase B checkpoint requires restored launch authority")
+    if routing_record is not None:
+        for key in (
+            "native_stub_packet_contract", "launch_wave_override_authority",
+            "candidate_authority", "candidate_authority_required", "head_sha", "merge_sha",
+            "founder_override", "founder_override_token", "pager_route",
+        ):
+            if key in routing_record and _canonical_json_sha256(routing_record[key]) != _canonical_json_sha256(route.get(key)):
+                raise PhaseBExecutorError(f"late Phase B routing authority changed: {key}")
+    index = subprocess.run(
+        ["git", "ls-files", "--stage", "-z"], cwd=repo_root, capture_output=True,
+        check=True, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+    ).stdout
+    config_path = repo_root / "mu/tools/executors/executor_config.json"
+    scope = sorted(set(spec.candidate_allowlist) | set(_collect_changed_files(repo_root)))
+    return {
+        "repo_root": str(repo_root.resolve()),
+        "bus_dir": str(agent_bus_relpath(_active_bus_dir())),
+        "authority": authority,
+        "launch_route_sha256": _sha256_bytes(agent_bus_path(
+            repo_root, _active_bus_dir(), "meta", "post_merge_routing.json",
+        ).read_bytes()),
+        "restored_tracker_sha256": _sha256_bytes(restore_path.read_bytes()),
+        "index_sha256": _sha256_bytes(index),
+        "scope_fingerprint": _bridge_scope_fingerprint(repo_root, scope),
+        "scope_modes": {path: (repo_root / path).lstat().st_mode
+                        for path in scope if (repo_root / path).exists()},
+        "config_sha256": _sha256_bytes(config_path.read_bytes()) if config_path.exists() else None,
+    }
+
+
+def native_late_checkpoint_error(
+    repo_root: Path, routing_record: dict[str, Any] | None, *,
+    bus_dir: str | Path | None = None, checkpoint_sha256: str | None = None,
+) -> str | None:
+    """Validate a native late checkpoint before cleanup or consumer mutation.
+
+    Only completed implementation/review/convergence owns this continuation,
+    and every entry requires the dispatcher's exact released-checkpoint record.
+    The canonical launch route and the checkpoint seal establish identity,
+    not prior-process release. In-flight actors, private reviews, questions and
+    commit-ready checkpoints keep their own rules.
+    """
+    token = _ACTIVE_BUS_DIR.set(bus_dir)
+    try:
+        if routing_record is None:
+            routing_record = load_routing_record(repo_root, bus_dir=bus_dir)
+        if not isinstance(routing_record, dict):
+            return "native late routing authority must be an object"
+        raw = _state_file_path(repo_root).read_bytes()
+        retry = routing_record.get("native_late_checkpoint")
+        if (type(retry) is not dict
+                or set(retry) != {"sha256", "bus_dir", "process_released", "release_evidence"}
+                or retry["bus_dir"] != str(agent_bus_relpath(bus_dir))
+                or retry["process_released"] is not True
+                or not _valid_sha256(retry["sha256"])
+                or retry["sha256"] != _sha256_bytes(raw)):
+            return "native late consumer lacks the exact released checkpoint"
+        release_error = executor_release_evidence_error(retry["release_evidence"], cwd=repo_root)
+        if release_error is not None:
+            return "native late process release: " + release_error
+        if checkpoint_sha256 is not None and _sha256_bytes(raw) != checkpoint_sha256:
+            return "native late checkpoint changed after prior process release"
+        state = json.loads(raw)
+        if not isinstance(state, dict):
+            return "native late checkpoint must be an object"
+        shape_error = _validate_resumable_state_shape(_state_file_path(repo_root), state)
+        if shape_error is not None:
+            return str(shape_error)
+        if state.get("completed_step") not in NATIVE_LATE_RESUME_STEPS:
+            return "native late checkpoint is not a completed implementation/review boundary"
+        if state.get("native_supervisor_reentry_exhausted") is True:
+            return "native supervisor continuation is exhausted"
+        seal = state.get("native_late_resume")
+        if type(seal) is not dict or set(seal) != {"version", "checkpoint_sha256", "binding"}:
+            return "native late checkpoint has no complete producer binding"
+        if type(seal["version"]) is not int or seal["version"] != 1:
+            return "native late checkpoint version must be integer 1"
+        core = {key: value for key, value in state.items() if key != "native_late_resume"}
+        if seal["checkpoint_sha256"] != _canonical_json_sha256(core):
+            return "native late checkpoint content changed"
+        if state.get("native_process_owner") != retry["release_evidence"]["owner"]:
+            return "native late release belongs to a different or unknown executor launch"
+        binding = _native_late_checkpoint_binding(repo_root, state, routing_record)
+        if binding is None or binding != seal["binding"]:
+            return "native late checkpoint candidate or restored authority changed"
+        return None
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError, subprocess.SubprocessError) as exc:
+        return f"native late checkpoint unavailable: {exc}"
+    finally:
+        _ACTIVE_BUS_DIR.reset(token)
 
 
 def _state_load_error(error_type: str, detail: str) -> dict[str, Any]:
@@ -3271,7 +3408,7 @@ def reentry_private_attr_continuation_issue(state: dict[str, Any]) -> str | None
 
 
 def supervisor_reentry_continuation_issue(state: dict[str, Any]) -> str | None:
-    """Validate the supervisor continuation which consumed a private-review GO."""
+    """Validate sealed latest-supervisor findings and consumed review ownership."""
     if state.get("completed_step") != "needs_phase_b_reentry" or type(state.get("bridge_rounds")) is not int or state["bridge_rounds"] != 0:
         return "supervisor continuation requires a fresh reentry cycle"
     if not _valid_state_string(state.get("reentry_findings")) or type(state.get("runtime_pre_push_failure_reentry")) is not bool:
@@ -3282,6 +3419,17 @@ def supervisor_reentry_continuation_issue(state: dict[str, Any]) -> str | None:
         or type(state.get("native_supervisor_reentry_exhausted")) is not bool
     ):
         return "native supervisor continuation requires its bounded attempt authority"
+    if "native_supervisor_step" in state or "native_status_refresh_candidate" in state:
+        candidate = state.get("native_status_refresh_candidate")
+        if (state.get("native_supervisor_step") != "commit_ready_status_supervisor"
+                or state.get("native_supervisor_reentries") != 1
+                or not isinstance(candidate, dict)
+                or set(candidate) != {"files", "index", "package_sha256", "candidate", "config_sha256", "launch_sha256", "index_flags_sha256"}
+                or not isinstance(candidate.get("files"), list)
+                or not candidate["files"]
+                or any(not _valid_state_string(path) for path in candidate["files"])
+                or candidate["files"] != sorted(set(candidate["files"]))):
+            return "native status supervisor continuation requires its current candidate binding"
     if any(key.startswith(("private_attr_", "reentry_private_attr_", "bridge_fix_", "implementer_mutation")) for key in state):
         return "supervisor continuation cannot retain consumed private-review authority"
     identity = state.get("supervisor_reentry_identity")
@@ -7999,6 +8147,38 @@ def _private_attr_candidate_binding(
     }
 
 
+def _native_status_refresh_candidate(
+    repo_root: Path, files: list[str], routing_record: dict[str, Any], wave_id: str,
+) -> dict[str, Any]:
+    """Bind a rejected status-refresh package without refreshing any approval."""
+    files = sorted(set(files))
+    for path in files:
+        if Path(path).is_absolute() or ".." in Path(path).parts:
+            raise PhaseBExecutorError("Native status supervisor has a nonlocal candidate path")
+    package_raw = (repo_root / ".scratch/phase_b_supervisor_package.json").read_bytes()
+    package = json.loads(package_raw)
+    if (sorted(package.get("changed_files", [])) != files
+            or package.get("wave_name") != wave_id):
+        raise PhaseBExecutorError("Native status supervisor package inventory changed")
+    config = repo_root / "mu/tools/executors/executor_config.json"
+    flags = subprocess.run(
+        ["git", "ls-files", "-v", "-z"], cwd=repo_root, capture_output=True, check=True,
+        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+    ).stdout
+    return {
+        "files": files,
+        "index": _private_attr_index_snapshot(repo_root, files),
+        "package_sha256": _sha256_bytes(package_raw),
+        "candidate": _private_attr_candidate_binding(repo_root, wave_id, routing_record),
+        "config_sha256": _sha256_bytes(config.read_bytes()) if config.exists() else None,
+        "index_flags_sha256": _sha256_bytes(flags),
+        "launch_sha256": _canonical_json_sha256({key: routing_record.get(key) for key in (
+            "native_stub_packet_contract", "launch_wave_override_authority", "head_sha", "merge_sha",
+            "founder_override", "founder_override_token", "pager_route",
+        )}),
+    }
+
+
 def _private_attr_prepared_authority(
     repo_root: Path, state: dict[str, Any], *, routing_record: dict[str, Any],
     plan: dict[str, Any], plan_path: str, wave_id: str,
@@ -10463,6 +10643,26 @@ def run_phase_b(
     saved_state = _load_state(repo_root)
     if _is_state_load_error(saved_state):
         return _state_load_error_result(saved_state)
+    late_binding_required = bool(
+        (saved_state and "native_late_resume" in saved_state)
+        or (isinstance(routing_record_override, dict)
+            and "native_late_checkpoint" in routing_record_override)
+    )
+    if (saved_state and saved_state.get("completed_step") in NATIVE_LATE_RESUME_STEPS
+            and _launch_tracker_restore_state_file_path(repo_root).exists()):
+        try:
+            late_binding_required |= json.loads(
+                _launch_tracker_restore_state_file_path(repo_root).read_bytes(),
+            ).get("status") == "restored"
+        except (OSError, ValueError, AttributeError):
+            late_binding_required = True
+    if late_binding_required:
+        late_error = native_late_checkpoint_error(
+            repo_root, routing_record_override, bus_dir=_active_bus_dir(),
+        )
+        if late_error is not None:
+            return {"status": "error", "step": "native_late_checkpoint",
+                    "authority_error": "invalid_checkpoint", "errors": [late_error]}
     saved_step = saved_state.get("completed_step") if saved_state else None
     if saved_step == "private_attr_remediation_prepared_pending_review" and plan_path:
         packet = repo_root / plan_path
@@ -10695,6 +10895,13 @@ def run_phase_b(
             return _bridge_fix_mutation_error((
                 "invocation_mismatch", identity_error or "supervisor continuation invocation changed",
             ))
+        if "native_status_refresh_candidate" in saved_state:
+            try:
+                before = saved_state["native_status_refresh_candidate"]
+                if _native_status_refresh_candidate(repo_root, before["files"], routing_record, wave_id) != before:
+                    raise PhaseBExecutorError("Native status supervisor candidate changed before continuation")
+            except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as exc:
+                return _bridge_fix_mutation_error(("candidate_mismatch", str(exc)))
     if private_attr_prepared_recovery:
         # Resolve reduced dispatcher metadata read-only. Capturing/restoring a
         # tracker note is forbidden until the prepared review has been consumed.
@@ -10968,6 +11175,8 @@ def run_phase_b(
 
     bridge_fix_authority_fields: dict[str, Any] = {}
     approved_private_attr_state: dict[str, Any] | None = None
+    native_status_refresh_owner: dict[str, Any] | None = None
+    native_status_refresh_candidate: dict[str, Any] | None = None
     bridge_fix_outcome_fields = {
         field: saved_state[field] for field in BRIDGE_FIX_MUTATION_CARRY_FIELDS
         if saved_state and field in saved_state
@@ -10998,12 +11207,24 @@ def run_phase_b(
     def _continue_private_attr_supervisor_reentry(supervisor_step: str) -> dict[str, Any] | None:
         """Exchange completed review ownership for the actual latest findings."""
         native_late = (approved_private_attr_state is None
-                       and supervisor_step == "post_reentry_supervisor"
+                       and (supervisor_step == "post_reentry_supervisor"
+                            or (supervisor_step == "commit_ready_status_supervisor"
+                                and native_status_refresh_owner is not None))
                        and isinstance(routing_record.get("native_stub_packet_contract"), dict)
                        and routing_record["native_stub_packet_contract"].get("required") is True)
         if approved_private_attr_state is None and not native_late:
             return None
         try:
+            previous = _load_state(repo_root) if native_late else approved_private_attr_state
+            native_status = native_late and supervisor_step == "commit_ready_status_supervisor"
+            if native_status:
+                if (native_status_refresh_owner is None
+                        or previous != native_status_refresh_owner
+                        or native_status_refresh_candidate is None):
+                    raise PhaseBExecutorError("Native status supervisor completed owner changed during review")
+                before = native_status_refresh_candidate
+                if _native_status_refresh_candidate(repo_root, before["files"], routing_record, wave_id) != before:
+                    raise PhaseBExecutorError("Native status supervisor candidate changed during review")
             identity, identity_error = _bridge_fix_active_identity(
                 repo_root, routing_record=routing_record, plan=plan, plan_path=plan_path,
                 wave_id=wave_id,
@@ -11036,11 +11257,13 @@ def run_phase_b(
                 prior = (saved_state or {}).get("native_supervisor_reentries", 0)
                 checkpoint.update(native_supervisor_reentries=1,
                                   native_supervisor_reentry_exhausted=bool(prior))
+                if native_status:
+                    checkpoint.update(native_supervisor_step=supervisor_step,
+                                      native_status_refresh_candidate=native_status_refresh_candidate)
             elif saved_state and "native_supervisor_reentries" in saved_state:
                 checkpoint.update(native_supervisor_reentries=1,
                                   native_supervisor_reentry_exhausted=True)
             checkpoint["supervisor_reentry_sha256"] = _canonical_json_sha256(checkpoint)
-            previous = _load_state(repo_root) if native_late else approved_private_attr_state
             _save_bridge_fix_transition(repo_root, previous, checkpoint)
             exhausted = checkpoint.get("native_supervisor_reentry_exhausted") is True
             return {
@@ -11054,7 +11277,7 @@ def run_phase_b(
                     "implementer_changed", "executor_created", "baseline_wave_files", "all_non_blocking", "finding_history",
                 )},
             }
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as exc:
             return {
                 "status": "error", "step": "private_attr_supervisor_reentry",
                 "authority_error": "continuation_save_failed", "errors": [str(exc)],
@@ -12305,6 +12528,12 @@ def run_phase_b(
     if launch_tracker_restore_session is not None:
         try:
             restore_launch_tracker_note(repo_root, launch_tracker_restore_session)
+            # Restoration is one-time authority. Seal the completed implementer
+            # checkpoint before the next review can be interrupted.
+            restored_checkpoint = _load_state(repo_root)
+            if (restored_checkpoint and restored_checkpoint.get("completed_step") == "implementer"
+                    and "native_late_resume" not in restored_checkpoint):
+                _save_state(repo_root, restored_checkpoint)
         except (LaunchTrackerRestoreError, OSError) as exc:
             if not isinstance(exc, LaunchTrackerRestoreError):
                 exc = LaunchTrackerRestoreError(
@@ -14709,6 +14938,25 @@ def run_phase_b(
                 return {"status": "error", "step": "commit_ready_checkpoint", "errors": [str(exc)]}
 
         log("Re-running supervisor after commit-ready packet status refresh...")
+        # Prepared private reviews retain their dedicated interruption/review
+        # authority. Only the ordinary completed native lane gains this seal.
+        if (approved_private_attr_state is None
+                and prepared.get("completed_step") not in PRIVATE_ATTR_PREPARED_STEPS
+                and isinstance(routing_record.get("native_stub_packet_contract"), dict)
+                and routing_record["native_stub_packet_contract"].get("required") is True):
+            try:
+                native_status_refresh_owner = _load_state(repo_root)
+                if (not native_status_refresh_owner
+                        or native_status_refresh_owner.get("plan_path") != plan_path
+                        or native_status_refresh_owner.get("wave_id") != wave_id
+                        or native_status_refresh_owner.get("completed_step") not in {"bridge_converged", "needs_phase_b_reentry"}
+                        or _validate_resumable_state_shape(_state_file_path(repo_root), native_status_refresh_owner) is not None):
+                    raise PhaseBExecutorError("Native status supervisor requires a completed checkpoint owner")
+                native_status_refresh_candidate = _native_status_refresh_candidate(
+                    repo_root, changed_files, routing_record, wave_id,
+                )
+            except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as exc:
+                return {"status": "error", "step": "native_supervisor_reentry", "errors": [str(exc)]}
         try:
             _emit_phase_b_event(
                 repo_root,

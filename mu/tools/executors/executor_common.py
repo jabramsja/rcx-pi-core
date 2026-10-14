@@ -22,7 +22,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 DEFAULT_AGENT_BUS_DIR = Path(".agent_bus")
 ROUTING_RECORD_PATH = DEFAULT_AGENT_BUS_DIR / "meta" / "post_merge_routing.json"
@@ -217,6 +217,36 @@ REPEAT_FINDING_CAP = 3
 
 class ExecutorCommonError(RuntimeError):
     """Raised when a shared executor utility fails."""
+
+
+def copy_launch_wave_override_authority(
+    record: dict[str, Any], *, required: bool = False,
+) -> dict[str, Any]:
+    """Copy admitted launch overrides without inferring defaults or role pins.
+
+    This is transport/schema validation only. The launcher separately compares
+    these exact values against its frozen config and single-use receipt.
+    Agent names remain configuration-owned, not a provider allowlist here.
+    """
+    key = "launch_wave_override_authority"
+    if key not in record and not required:
+        return {}
+    value = record.get(key)
+    fields = {"version", "implementer_agent", "reviewer_agent", "pager_route", "max_turns"}
+    if type(value) is not dict or set(value) != fields:
+        raise ExecutorCommonError(f"{key} requires the complete version-1 object")
+    if type(value["version"]) is not int or value["version"] != 1:
+        raise ExecutorCommonError(f"{key} version must be exactly integer 1")
+    for field in ("implementer_agent", "reviewer_agent", "pager_route"):
+        item = value[field]
+        if type(item) is not str or item != item.strip():
+            raise ExecutorCommonError(f"{key}.{field} must be an exact string")
+    if value["pager_route"] not in {"", "codex", "claude", "both", "notify-only"}:
+        raise ExecutorCommonError(f"{key}.pager_route is unsupported")
+    turns = value["max_turns"]
+    if turns is not None and (type(turns) is not int or not 1 <= turns <= 1000):
+        raise ExecutorCommonError(f"{key}.max_turns must be null or an integer in 1..1000")
+    return {key: copy.deepcopy(value)}
 
 
 def normalize_agent_bus_dir(bus_dir: str | Path | None = None) -> Path:
@@ -1509,6 +1539,236 @@ def normalize_wave_id(raw: str) -> str:
     return wave_id
 
 
+EXECUTOR_PROCESS_OWNER_ENV = "RCX_EXECUTOR_PROCESS_OWNERS"
+
+
+class ExecutorProcessIdentity(NamedTuple):
+    pid: int
+    ppid: int
+    started: str
+    owned: bool
+
+
+class ExecutorProcessObservation(NamedTuple):
+    complete: bool
+    parents: dict[int, int]
+    identities: dict[int, ExecutorProcessIdentity]
+    error: str
+
+
+def observe_executor_processes(
+    owner: str, *, cwd: Path | None = None,
+) -> ExecutorProcessObservation:
+    """Observe process identities without conflating query failure and absence.
+
+    The inherited launch marker finds setsid/reparented children that a PPID
+    snapshot cannot recover. Both full queries must succeed and parse, include
+    init and this observer, and agree on every observed live process. A missing
+    row remains unresolved until it is present in both queries or a fresh probe
+    proves it exited. No environment or command text leaves this function.
+    This is OS snapshot evidence for
+    environment-inheriting executors, not containment of arbitrary programs
+    that deliberately discard ownership or an atomic process-lifetime census.
+    """
+    def uncertain(reason: str) -> ExecutorProcessObservation:
+        return ExecutorProcessObservation(False, {}, {}, reason)
+
+    if not isinstance(owner, str) or not re.fullmatch(r"[0-9a-f]{32}", owner):
+        return uncertain("invalid process owner")
+    known_pids: set[int] = set()
+    known_identities: dict[int, ExecutorProcessIdentity] = {}
+    try:
+        # Resample boundedly for processes born between the two queries. Keep
+        # every earlier PID so a later partial table cannot erase a live gap.
+        for _ in range(5):
+            graph = subprocess.run(
+                ["ps", "-axo", "pid=,ppid="], cwd=cwd, capture_output=True,
+                text=True, check=True, timeout=5,
+            )
+            identities = subprocess.run(
+                ["ps", "axeww", "-o", "pid=,ppid=,lstart=,stat=,command="],
+                cwd=cwd, capture_output=True, text=True, check=True, timeout=5,
+                env={**os.environ, "LC_ALL": "C"},
+            )
+            if graph.returncode != 0 or identities.returncode != 0:
+                return uncertain("process query failed")
+            parents: dict[int, int] = {}
+            for line in graph.stdout.splitlines():
+                fields = line.split()
+                if len(fields) != 2:
+                    return uncertain("malformed process graph")
+                pid, ppid = map(int, fields)
+                if pid <= 0 or ppid < 0 or pid == ppid or pid in parents:
+                    return uncertain("ambiguous process graph")
+                parents[pid] = ppid
+            observed: dict[int, ExecutorProcessIdentity] = {}
+            for line in identities.stdout.splitlines():
+                fields = line.split(None, 8)
+                if len(fields) != 9:
+                    return uncertain("malformed process identities")
+                pid, ppid = int(fields[0]), int(fields[1])
+                started = " ".join(fields[2:7])
+                datetime.strptime(started, "%a %b %d %H:%M:%S %Y")
+                if pid <= 0 or ppid < 0 or pid == ppid or pid in observed:
+                    return uncertain("ambiguous process identities")
+                markers = [word.partition("=")[2] for word in fields[8].split()
+                           if word.startswith(EXECUTOR_PROCESS_OWNER_ENV + "=")]
+                owned = any(owner in marker.split(":") for marker in markers)
+                observed[pid] = ExecutorProcessIdentity(pid, ppid, started, owned)
+            if not {1, os.getpid()} <= parents.keys() & observed.keys():
+                return uncertain("partial or empty process observation")
+            for pid in parents.keys() & observed.keys():
+                if parents[pid] != observed[pid].ppid:
+                    return uncertain("process ancestry changed between observations")
+            for pid, identity in observed.items():
+                previous = known_identities.get(pid)
+                if previous is not None and previous != identity:
+                    return uncertain("process identity changed during observation")
+            known_identities.update(observed)
+            known_pids.update(parents.keys() | observed.keys())
+            unresolved = False
+            for pid in known_pids - (parents.keys() & observed.keys()):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    continue
+                except (OSError, OverflowError):
+                    return uncertain("process observation gap absence is uncertain")
+                unresolved = True
+            if not unresolved:
+                return ExecutorProcessObservation(True, parents, observed, "")
+        return uncertain("live process missing from process observation")
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError, UnicodeError):
+        return uncertain("process observation unavailable or malformed")
+
+
+def signal_owned_executor_process(
+    identity: ExecutorProcessIdentity, owner: str, signum: int, *, cwd: Path | None = None,
+) -> bool:
+    """Recheck start identity and inherited owner immediately before signaling.
+
+    PID absence is harmless; query uncertainty or reuse must never select a
+    different actor. POSIX PID signaling is not atomic with the observation.
+    """
+    if (type(identity.pid) is not int or identity.pid <= 0
+            or identity.owned is not True or type(identity.started) is not str):
+        return False
+    observation = observe_executor_processes(owner, cwd=cwd)
+    if not observation.complete:
+        return False
+    current = observation.identities.get(identity.pid)
+    if current is None:
+        try:
+            os.kill(identity.pid, 0)
+        except ProcessLookupError:
+            return True
+        except OSError:
+            pass
+        return False
+    if not current.owned or current.started != identity.started:
+        return False
+    try:
+        os.kill(identity.pid, signum)
+        return True
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+
+
+def executor_release_evidence_error(evidence: Any, *, cwd: Path | None = None) -> str | None:
+    """Revalidate native release at each late consumer; never signal from a receipt."""
+    if (type(evidence) is not dict
+            or set(evidence) != {"version", "owner", "root_pid", "members"}
+            or type(evidence["version"]) is not int or evidence["version"] != 1
+            or type(evidence["root_pid"]) is not int or evidence["root_pid"] <= 0
+            or type(evidence["owner"]) is not str
+            or not re.fullmatch(r"[0-9a-f]{32}", evidence["owner"])
+            or type(evidence["members"]) is not list or not evidence["members"]):
+        return "missing or malformed native process release evidence"
+    pids: set[int] = set()
+    for member in evidence["members"]:
+        if (type(member) is not dict or set(member) != {"pid", "started"}
+                or type(member["pid"]) is not int or member["pid"] <= 0
+                or member["pid"] in pids or type(member["started"]) is not str):
+            return "invalid native process identity"
+        try:
+            datetime.strptime(member["started"], "%a %b %d %H:%M:%S %Y")
+        except ValueError:
+            return "invalid native process start identity"
+        pids.add(member["pid"])
+    if evidence["root_pid"] not in pids:
+        return "native process release lacks its root identity"
+    observation = observe_executor_processes(evidence["owner"], cwd=cwd)
+    if not observation.complete:
+        return observation.error
+    if any(identity.owned for identity in observation.identities.values()):
+        return "native executor still has owned processes"
+    try:
+        os.killpg(evidence["root_pid"], 0)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        return "native process group absence is uncertain"
+    else:
+        return "native process group is still present"
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        except OSError:
+            return "native process absence is uncertain"
+        return "native process identity remains or its PID was reused"
+    return None
+
+
+def terminate_owned_executor(
+    proc: subprocess.Popen, owner: str, *, cwd: Path | None = None,
+) -> dict[str, Any] | None:
+    """Release a live, completely observed owned tree, or preserve a HOLD.
+
+    An exited root or a reparented marked descendant makes ancestry uncertain.
+    In that case only the still-owned Popen child is stopped: best-effort tree
+    cleanup must not signal unverified PIDs or manufacture continuation proof.
+    """
+    observation = observe_executor_processes(owner, cwd=cwd)
+    root = observation.identities.get(proc.pid)
+    reliable = (observation.complete and proc.poll() is None and root is not None
+                and root.owned and root.ppid == os.getpid())
+    members: dict[int, ExecutorProcessIdentity] = {}
+    if reliable:
+        reachable = {proc.pid}
+        while True:
+            children = {pid for pid, ppid in observation.parents.items() if ppid in reachable}
+            if children <= reachable:
+                break
+            reachable.update(children)
+        members = {pid: identity for pid, identity in observation.identities.items() if identity.owned}
+        reliable = reachable == members.keys()
+    if reliable:
+        for pid in sorted(members.keys() - {proc.pid}, reverse=True):
+            if not signal_owned_executor_process(members[pid], owner, signal.SIGKILL, cwd=cwd):
+                reliable = False
+                break
+        if reliable:
+            reliable = signal_owned_executor_process(root, owner, signal.SIGKILL, cwd=cwd)
+    # Popen retains direct child ownership even if ps is unavailable. Its kill
+    # method polls/reaps before signaling, unlike a bare historical PID sweep.
+    try:
+        proc.kill()
+        proc.wait(timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not reliable:
+        return None
+    evidence = {
+        "version": 1, "owner": owner, "root_pid": proc.pid,
+        "members": [{"pid": pid, "started": member.started} for pid, member in sorted(members.items())],
+    }
+    return evidence if executor_release_evidence_error(evidence, cwd=cwd) is None else None
+
+
 def process_descendants(root_pid: int, *, cwd: Path | None = None) -> set[int]:
     """Return descendant PIDs for a process tree.
 
@@ -1516,10 +1776,9 @@ def process_descendants(root_pid: int, *, cwd: Path | None = None) -> set[int]:
     and walks from *root_pid* down.  The root does NOT need to be alive —
     descendants that were spawned before the root died still show the
     original PPID in the snapshot (reparenting to PID 1 happens
-    asynchronously and may not have occurred yet).  This is critical for
-    the timeout-kill path: the dispatcher kills the Phase A process group
-    first (``os.killpg``), then calls this function to sweep up children
-    in separate sessions (``start_new_session=True`` adapters).
+    asynchronously and may not have occurred yet). This legacy best-effort
+    cleanup interface deliberately retains its empty-set failure behavior.
+    It must never be used as process-release or lifetime ownership evidence.
     """
     if root_pid <= 0:
         return set()
