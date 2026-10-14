@@ -18,9 +18,12 @@ import io
 import json
 import os
 import re
+import signal
 import sqlite3
 import subprocess
 import sys
+import time
+import uuid
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,6 +33,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mu.tests.tools.module_loader import load_module
+from mu.tests.tools.test_executor_common import complete_process_observation
 
 # Load modules
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
@@ -44,6 +48,744 @@ common_mod = load_module("executor_common_for_phase_b_tests", _EXECUTORS_DIR / "
 # Default valid routing record for tests that call run_phase_b.
 # Tests that specifically test routing validation should NOT use this.
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
+
+
+@pytest.fixture
+def late_native_retry_lane(tmp_path, monkeypatch, request):
+    """Real tracker and Phase B producers/consumer, isolated actor boundaries."""
+    import copy
+    from meta_bridge_supervisor import compute_repo_state
+
+    fixture = _write_launch_tracker_restore_fixture(tmp_path, bus_dir=getattr(request, "param", None))
+    repo = fixture["repo"]
+    # The path loader may have reloaded this module while collecting another
+    # selector. Producer and dispatcher must share this fixture's actual module.
+    monkeypatch.setitem(sys.modules, "phase_b_executor", pb_mod)
+    monkeypatch.setitem(sys.modules, "executor_common", common_mod)
+    monkeypatch.setattr(pb_mod, "executor_release_evidence_error", common_mod.executor_release_evidence_error)
+    dispatch = load_module("late_native_dispatch", _EXECUTORS_DIR / "executor_dispatch.py")
+    route = copy.deepcopy(fixture["launch_route"])
+    route["decision"] = "ROUTE_PHASE_B"
+    route["launch_wave_override_authority"] = {
+        "version": 1, "implementer_agent": "", "reviewer_agent": "",
+        "pager_route": "", "max_turns": None,
+    }
+    canonical = repo / (fixture["bus_dir"] or ".agent_bus") / "meta/post_merge_routing.json"
+    canonical.write_text(json.dumps(route))
+    wave_files = [fixture["implementation_path"], "TASKS.md", fixture["plan_path"]]
+    calls = {"implementer": 0, "sdk": 0, "bridge": 0, "validation": 0}
+    control = {"interrupt_after_restore": False}
+    impl = _make_mock_impl()
+
+    class ValidationBoundary(BaseException):
+        pass
+
+    def implement(*args, **kwargs):
+        calls["implementer"] += 1
+        assert fixture["tracker_note"].encode() not in (repo / "TASKS.md").read_bytes()
+        with (repo / fixture["implementation_path"]).open("a") as stream:
+            stream.write("# native retry implementation\n")
+        return {"status": "success", "output": "done", "stderr": "", "exit_code": 0,
+                "job_id": "native-retry-implementation", "model_override_applied": False}
+
+    def sdk(*args, **kwargs):
+        calls["sdk"] += 1
+        assert (repo / "TASKS.md").read_bytes() == fixture["tasks_bytes"]
+        if control["interrupt_after_restore"] and calls["sdk"] == 1:
+            raise ValidationBoundary("sdk_review")
+        return {"exit_code": 0, "stdout": "", "stderr": ""}
+
+    def bridge(*args, **kwargs):
+        calls["bridge"] += 1
+        return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO",
+                "job_id": kwargs.get("job_id")}
+
+    def validation(*args, **kwargs):
+        calls["validation"] += 1
+        raise ValidationBoundary("final_validation")
+
+    impl.invoke_implementer.side_effect = implement
+    monkeypatch.setitem(sys.modules, "phase_b_implementer", impl)
+    monkeypatch.setattr(pb_mod, "_launch_tracker_restore_source_repo_root", lambda: repo)
+    monkeypatch.setattr(pb_mod, "_collect_changed_files", lambda *a: wave_files)
+    monkeypatch.setattr(pb_mod, "_collect_wave_owned_files", lambda *a: wave_files)
+    monkeypatch.setattr(pb_mod, "_emit_phase_b_event", lambda *a, **kw: None)
+    monkeypatch.setattr(pb_mod, "prepare_candidate_authority_if_configured", lambda *a, **kw: (None, None))
+    monkeypatch.setattr(pb_mod, "run_sdk_agents", sdk)
+    monkeypatch.setattr(pb_mod, "run_bridge_review", bridge)
+    monkeypatch.setattr(pb_mod, "_prepare_phase_b_pre_review_package", lambda *a, **kw: (wave_files, None))
+    monkeypatch.setattr(pb_mod, "_select_pytest_gate_files", lambda *a: ["mu/tests/tools/test_phase_b_executor.py"])
+    monkeypatch.setattr(pb_mod, "_run_pytest_on_files", validation)
+    route["state_sha"] = compute_repo_state(repo).state_sha
+    canonical.write_text(json.dumps(route))
+    return {**fixture, "route": route, "canonical": canonical, "dispatch": dispatch,
+            "calls": calls, "boundary": ValidationBoundary, "control": control}
+
+
+def _run_late_native_dispatch(fixture, monkeypatch, *, mutate=None, released=True, before_consumer=None, surface=False):
+    dispatch, repo = fixture["dispatch"], fixture["repo"]
+    invocations, consumers, restored = [], [], []
+    admissions = []
+    observations = []
+    complete_boundary = ExitStack()
+    recover = dispatch.attempt_recovery
+
+    def recovery(*args, **kwargs):
+        if admissions:
+            # Stop the fixture at the second owed validation boundary.
+            return {"recovered": False, "exhausted": True}
+        admitted = recover(*args, **kwargs)
+        admissions.append(admitted)
+        if mutate is not None:
+            mutate(args[1])
+        return admitted
+
+    def child(args, *, cwd, timeout):
+        invocations.append(Path(args[1]).name)
+        assert invocations[-1] == "phase_b_executor.py"
+        route = json.loads(args[args.index("--routing-record") + 1])
+        if len(invocations) == 2 and before_consumer is not None:
+            # End the complete-observation premise before any adversarial
+            # consumer mutation, especially failed/partial-query injection.
+            complete_boundary.close()
+            before_consumer(route)
+        owner = uuid.uuid4().hex
+        try:
+            with monkeypatch.context() as process_environment:
+                process_environment.setenv(common_mod.EXECUTOR_PROCESS_OWNER_ENV, owner)
+                outcome = pb_mod.run_phase_b(repo, fixture["plan_path"], routing_record_override=route,
+                                             bus_dir=fixture["bus_dir"])
+        except fixture["boundary"] as boundary:
+            consumers.append(str(boundary))
+            restore = fixture["canonical"].parent.parent / "executors" / pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME
+            restored.append(restore.read_bytes())
+            if len(invocations) == 1:
+                expired = subprocess.TimeoutExpired(args, timeout)
+                transport = subprocess.Popen(
+                    [sys.executable, "-B", "-c", "import time; time.sleep(60)"],
+                    env={**os.environ, common_mod.EXECUTOR_PROCESS_OWNER_ENV: owner},
+                    start_new_session=True,
+                )
+                try:
+                    evidence = common_mod.terminate_owned_executor(transport, owner, cwd=repo)
+                    assert evidence is not None, observations
+                finally:
+                    if transport.poll() is None:
+                        transport.kill()
+                    transport.wait(timeout=5)
+                expired.rcx_process_released = released
+                expired.rcx_process_release_evidence = evidence if released else None
+                raise expired
+            return subprocess.CompletedProcess(args, 2, json.dumps({"status": "needs_human"}), "")
+        consumers.append(outcome)
+        return subprocess.CompletedProcess(args, 2, json.dumps(outcome), "")
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(dispatch, "_run_executor_in_group", child)
+    monkeypatch.setattr(dispatch, "attempt_recovery", recovery)
+    monkeypatch.setattr(dispatch, "load_config", lambda *a: {"timeouts": {"phase_b_executor": 100}})
+    monkeypatch.setattr(dispatch, "_LaneMonitor", lambda *a, **kw: SimpleNamespace(
+        is_lane=False, spawn=lambda: None, cleanup=lambda: None))
+    argv = ["--routing-record", str(fixture["canonical"]), "--retries", "0", "--json"]
+    if fixture["bus_dir"] is not None:
+        argv += ["--bus-dir", fixture["bus_dir"]]
+    if surface:
+        args = dispatch.build_surface_parser().parse_args([
+            "phase-b", "--routing-record-json", json.dumps(fixture["route"]),
+            "--plan", fixture["plan_path"], "--json",
+            *(["--bus-dir", fixture["bus_dir"]] if fixture["bus_dir"] else []),
+        ])
+        with complete_boundary:
+            observations = complete_boundary.enter_context(complete_process_observation(common_mod))
+            assert dispatch.run_recoverable_surface_command(
+                args, repo_root=repo, config={"timeouts": {"phase_b_executor": 100}},
+            ) == 1
+    else:
+        with complete_boundary:
+            observations = complete_boundary.enter_context(complete_process_observation(common_mod))
+            assert dispatch.main(argv) == 1
+    assert admissions, observations
+    assert admissions[0]["recovered"] is True
+    return invocations, consumers, restored
+
+
+@pytest.mark.parametrize("late_native_retry_lane", [None, ".agent_bus-late-retry"], indirect=True)
+@pytest.mark.parametrize("surface", [False, True])
+def test_native_released_retry_resumes_actual_restored_tracker_consumer(late_native_retry_lane, monkeypatch, surface):
+    fixture = late_native_retry_lane
+    repo = fixture["repo"]
+    invocations, consumers, restored = _run_late_native_dispatch(fixture, monkeypatch, surface=surface)
+    assert consumers == ["final_validation", "final_validation"]
+    assert invocations == ["phase_b_executor.py", "phase_b_executor.py"]
+    assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 2}
+    assert restored[0] == restored[1]
+    assert (repo / "TASKS.md").read_bytes() == fixture["tasks_bytes"]
+
+
+@pytest.mark.parametrize("detached", [False, True])
+@pytest.mark.parametrize("exit_mode", ["nonzero", "transient", "timeout"])
+@pytest.mark.parametrize("late_native_retry_lane", [None, ".agent_bus-late-retry"], indirect=True)
+def test_native_real_process_release_fences_late_consumer(
+    late_native_retry_lane, monkeypatch, tmp_path, detached, exit_mode,
+):
+    _assert_native_real_process_release(
+        late_native_retry_lane, monkeypatch, tmp_path, detached, exit_mode,
+    )
+
+
+@pytest.mark.parametrize("scenario", [
+    "failed-query", "empty-query", "malformed-query", "partial-query",
+    "partial-identities-query",
+    "unavailable-query", "exited_parent_open_pipe", "live_parent_reparented_grandchild",
+])
+def test_native_uncertain_process_observation_holds_every_consumer(
+    late_native_retry_lane, monkeypatch, tmp_path, scenario,
+):
+    _assert_native_real_process_release(
+        late_native_retry_lane, monkeypatch, tmp_path, True, "timeout", scenario=scenario,
+    )
+
+
+def _assert_native_real_process_release(
+    late_native_retry_lane, monkeypatch, tmp_path, detached, exit_mode, *, scenario=None,
+):
+    """Actual process result -> recovery admission -> real checkpoint consumer.
+
+    The child executable and provider/test boundaries are substituted. Positive
+    timeout controls also use a complete real OS observation boundary through
+    retry admission; adversarial scenarios retain the original two-query path.
+    The dispatcher runs its real process transport, retry producer, recovery
+    gate and cleanup; run_phase_b produces and consumes the restored checkpoint.
+    """
+    fixture = late_native_retry_lane
+    dispatch, repo = fixture["dispatch"], fixture["repo"]
+    invocations, consumers, admissions = [], [], []
+    protected = {}
+    real_popen, recover = subprocess.Popen, dispatch.attempt_recovery
+    real_run = subprocess.run
+    real_observe = common_mod.observe_executor_processes
+    observations = []
+    query_failures = []
+    child_record = tmp_path / "detached-child.json"
+    heartbeat = tmp_path / "heartbeat"
+    checkpoint = fixture["canonical"].parent.parent / "executors/phase_b_state.json"
+    restoration = checkpoint.with_name(pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME)
+    protected_paths = [checkpoint, restoration, repo / "TASKS.md", fixture["canonical"],
+                       fixture["spec_path"], repo / fixture["plan_path"],
+                       repo / fixture["implementation_path"]]
+    index_before = []
+    processes = []
+
+    def observe(owner, *, cwd=None):
+        result = real_observe(owner, cwd=cwd)
+        observations.append({
+            "complete": result.complete, "error": result.error,
+            "owned": [dict(pid=item.pid, ppid=item.ppid, started=item.started)
+                      for item in result.identities.values() if item.owned],
+        })
+        return result
+
+    def start_process(args, **kwargs):
+        if len(args) < 2 or Path(str(args[1])).name != "phase_b_executor.py":
+            return real_popen(args, **kwargs)
+        invocations.append(Path(args[1]).name)
+        route = json.loads(args[args.index("--routing-record") + 1])
+        try:
+            with monkeypatch.context() as process_environment:
+                process_environment.setenv(
+                    common_mod.EXECUTOR_PROCESS_OWNER_ENV,
+                    kwargs["env"][common_mod.EXECUTOR_PROCESS_OWNER_ENV],
+                )
+                result = pb_mod.run_phase_b(repo, fixture["plan_path"], routing_record_override=route,
+                                            bus_dir=fixture["bus_dir"])
+        except fixture["boundary"] as boundary:
+            consumers.append(str(boundary))
+        else:
+            consumers.append(result)
+        if len(invocations) == 1:
+            protected.update({path: path.read_bytes() for path in protected_paths})
+            index_before.append(subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo))
+            child_code = (
+                "import json,os,sys,time; from pathlib import Path; "
+                "Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid(),'pgid':os.getpgrp()})); "
+                f"\nwhile True:\n Path({str(heartbeat)!r}).write_text(str(time.monotonic_ns())); time.sleep(0.03)\n"
+            )
+            script = (
+                "import subprocess,sys,time\n"
+                + (f"subprocess.Popen([sys.executable, '-B', '-c', {child_code!r}, {str(child_record)!r}], "
+                   "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, "
+                   "start_new_session=True)\n" if detached else "")
+                + ("time.sleep(60)\n" if exit_mode == "timeout" else
+                   f"sys.exit({137 if exit_mode == 'transient' else 2})\n")
+            )
+            if scenario == "exited_parent_open_pipe":
+                script = ("import subprocess,sys\n"
+                          f"subprocess.Popen([sys.executable, '-B', '-c', {child_code!r}, {str(child_record)!r}], start_new_session=True)\n"
+                          "sys.exit(137)\n")
+            elif scenario in {"live_parent_reparented_grandchild", "partial-identities-query"}:
+                intermediate = ("import subprocess,sys\n"
+                                f"subprocess.Popen([sys.executable, '-B', '-c', {child_code!r}, {str(child_record)!r}], "
+                                "start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n")
+                script = ("import subprocess,sys,time\n"
+                          f"subprocess.run([sys.executable, '-B', '-c', {intermediate!r}], check=True)\n"
+                          "time.sleep(60)\n")
+        else:
+            script = "import sys; sys.exit(2)"
+        proc = real_popen([sys.executable, "-B", "-c", script], **kwargs)
+        processes.append(proc)
+        if len(invocations) == 1 and detached:
+            deadline = time.monotonic() + 5
+            while not child_record.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert child_record.exists(), "real detached child did not start"
+        return proc
+
+    def recovery(*args, **kwargs):
+        if admissions:
+            return {"recovered": False, "exhausted": True}
+        admitted = recover(*args, **kwargs)
+        admissions.append((args[1], admitted))
+        return admitted
+
+    def process_query(args, *positional, **kwargs):
+        # Inject only process-table observation; real Git, process launch,
+        # native retry admission and all checkpoint consumers remain active.
+        if scenario and scenario.endswith("query") and args[0] == "ps":
+            if scenario == "partial-identities-query":
+                result = real_run(args, *positional, **kwargs)
+                if "axeww" in args:
+                    child_pid = json.loads(child_record.read_text())["pid"]
+                    rows = result.stdout.splitlines(keepends=True)
+                    assert any(int(row.split()[0]) == child_pid for row in rows)
+                    result.stdout = "".join(row for row in rows if int(row.split()[0]) != child_pid)
+                    query_failures.append(list(args))
+                return result
+            query_failures.append(list(args))
+            if scenario == "failed-query":
+                raise subprocess.CalledProcessError(1, args, stderr="isolated query failure")
+            if scenario == "unavailable-query":
+                raise FileNotFoundError("isolated ps unavailable")
+            if scenario == "empty-query":
+                return subprocess.CompletedProcess(args, 0, "", "")
+            if scenario == "malformed-query":
+                return subprocess.CompletedProcess(args, 0, "malformed process row\n", "")
+            result = real_run(args, *positional, **kwargs)
+            # A successful truncated table is not a release observation.
+            result.stdout = result.stdout.splitlines(keepends=True)[0]
+            return result
+        return real_run(args, *positional, **kwargs)
+
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(common_mod, "observe_executor_processes", observe)
+    monkeypatch.setattr(subprocess, "run", process_query)
+    monkeypatch.setattr(subprocess, "Popen", start_process)
+    monkeypatch.setattr(dispatch, "attempt_recovery", recovery)
+    monkeypatch.setattr(dispatch, "load_config", lambda *a: {"timeouts": {"phase_b_executor": 1}})
+    monkeypatch.setattr(dispatch, "_LaneMonitor", lambda *a, **kw: SimpleNamespace(
+        is_lane=False, spawn=lambda: None, cleanup=lambda: None))
+    try:
+        with ExitStack() as complete_boundary:
+            if exit_mode == "timeout" and scenario is None:
+                complete_boundary.enter_context(complete_process_observation(common_mod))
+            if exit_mode == "nonzero":
+                # Exit 2 is not automatically recoverable. Exercise its actual
+                # failure route and consumer without requesting an external actor.
+                failed = dispatch.dispatch(fixture["route"], repo_root=repo,
+                                           routing_record_path=fixture["canonical"], bus_dir=fixture["bus_dir"])
+                assert failed["status"] == "failed" and failed["exit_code"] == 2
+            else:
+                assert dispatch.main(["--routing-record", str(fixture["canonical"]),
+                                      "--retries", "0", "--json",
+                                      *(["--bus-dir", fixture["bus_dir"]] if fixture["bus_dir"] else [])]) == 1
+                failed, admitted = admissions[0]
+                assert admitted["recovered"] is True
+                assert admitted["failure_class"] == ("process_timeout" if exit_mode == "timeout" else "transient_kill")
+        assert processes[0].returncode is not None
+        if scenario and scenario.endswith("query"):
+            assert query_failures
+        expected_resume = exit_mode == "timeout" and scenario is None
+        child_alive = False
+        if detached:
+            try:
+                os.kill(json.loads(child_record.read_text())["pid"], 0)
+                child_alive = True
+            except ProcessLookupError:
+                pass
+        released = failed["retry_record"]["native_late_checkpoint"]["process_released"]
+        receipt = {
+            "scenario": scenario or exit_mode, "detached": detached,
+            "bus_dir": fixture["bus_dir"], "process_released": released,
+            "child_alive": child_alive, "root_reaped": processes[0].returncode is not None,
+            "actor_calls": dict(fixture["calls"]), "invocations": list(invocations),
+            "query_failures": len(query_failures),
+            "observations": observations,
+            "release_evidence": failed["retry_record"]["native_late_checkpoint"].get("release_evidence"),
+        }
+        (tmp_path / "native-release-observation.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        print(json.dumps({"scenario": scenario or exit_mode, "detached": detached,
+                          "bus_dir": fixture["bus_dir"], "observations": observations}))
+        assert released is expected_resume, {
+            "released": released, "child_alive": child_alive, "invocations": invocations,
+            "consumers": consumers, "calls": fixture["calls"],
+        }
+        assert invocations == ["phase_b_executor.py"] * (2 if expected_resume else 1), observations
+        assert consumers == ["final_validation"] * (2 if expected_resume else 1)
+        assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1,
+                                    "validation": 2 if expected_resume else 1}
+        assert restoration.read_bytes() == protected[restoration]
+        if not expected_resume:
+            from meta_bridge_supervisor import compute_repo_state
+
+            outcomes = {}
+            for entry, route in (("retry", failed["retry_record"]),
+                                 ("canonical", None), ("canonical_override", fixture["route"])):
+                try:
+                    outcomes[entry] = pb_mod.run_phase_b(
+                        repo, fixture["plan_path"], routing_record_override=route,
+                        bus_dir=fixture["bus_dir"],
+                    )
+                except fixture["boundary"] as boundary:
+                    outcomes[entry] = {"unexpected_continuation": str(boundary)}
+
+            def forbidden_actor(*args, **kwargs):
+                raise fixture["boundary"]("new_actor_without_release")
+
+            monkeypatch.setattr(dispatch, "_run_executor_in_group", forbidden_actor)
+            # Freshness does not grant release authority. Leave the immutable
+            # canonical launch route intact while exercising both public entries.
+            fresh_route = {**fixture["route"], "state_sha": compute_repo_state(repo).state_sha}
+            try:
+                outcomes["dispatch"] = dispatch.dispatch(
+                    fresh_route, repo_root=repo, bus_dir=fixture["bus_dir"],
+                )
+            except fixture["boundary"] as boundary:
+                outcomes["dispatch"] = {"unexpected_continuation": str(boundary)}
+            args = dispatch.build_surface_parser().parse_args([
+                "phase-b", "--routing-record-json", json.dumps(fresh_route),
+                "--plan", fixture["plan_path"], "--json",
+                *(["--bus-dir", fixture["bus_dir"]] if fixture["bus_dir"] else []),
+            ])
+            output = io.StringIO()
+            try:
+                with redirect_stdout(output):
+                    code = dispatch.run_recoverable_surface_command(args, repo_root=repo, config={})
+                outcomes["surface"] = json.loads(output.getvalue())
+                assert code == 1
+            except fixture["boundary"] as boundary:
+                outcomes["surface"] = {"unexpected_continuation": str(boundary)}
+            assert all(outcome.get("status") == "error" for outcome in outcomes.values()), {
+                "child_alive": child_alive, "outcomes": outcomes, "calls": fixture["calls"],
+            }
+            assert all(outcomes[entry]["step"] == "native_late_checkpoint"
+                       for entry in ("retry", "canonical", "canonical_override"))
+            assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 1}
+            assert all(path.read_bytes() == raw for path, raw in protected.items())
+            assert subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo) == index_before[0]
+            receipt.update(protected_files_unchanged=True, index_unchanged=True, consumer_outcomes=outcomes)
+            (tmp_path / "native-release-observation.json").write_text(json.dumps(receipt, indent=2) + "\n")
+            with pytest.raises(ProcessLookupError):
+                os.killpg(processes[0].pid, 0)
+            if detached:
+                child = json.loads(child_record.read_text())
+                assert child["pgid"] == child["pid"] != processes[0].pid
+                assert child_alive  # The escaped child is still alive at the HOLD.
+                before_pulse = heartbeat.read_text()
+                time.sleep(0.1)
+                assert heartbeat.read_text() != before_pulse
+            print(json.dumps({"scenario": scenario or exit_mode, "released": released,
+                              "child_alive_at_hold": child_alive, "actor_calls": fixture["calls"],
+                              "query_failures": len(query_failures), "protected_files_unchanged": True,
+                              "index_unchanged": True, "consumer_outcomes": outcomes}))
+    finally:
+        if child_record.exists():
+            try:
+                os.kill(json.loads(child_record.read_text())["pid"], signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        for proc in processes:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)
+
+
+@pytest.mark.parametrize("late_native_retry_lane", [None, ".agent_bus-late-retry"], indirect=True)
+def test_native_retry_after_tracker_restore_keeps_owed_reviews(late_native_retry_lane, monkeypatch):
+    fixture = late_native_retry_lane
+    fixture["control"]["interrupt_after_restore"] = True
+    invocations, consumers, restored = _run_late_native_dispatch(fixture, monkeypatch)
+    assert consumers == ["sdk_review", "final_validation"]
+    assert invocations == ["phase_b_executor.py", "phase_b_executor.py"]
+    assert fixture["calls"] == {"implementer": 1, "sdk": 2, "bridge": 1, "validation": 1}
+    assert restored[0] == restored[1]
+
+
+@pytest.mark.parametrize("lost", ["checkpoint", "restoration", "both"])
+def test_native_retry_consumer_never_recaptures_lost_authority(late_native_retry_lane, monkeypatch, lost):
+    fixture = late_native_retry_lane
+    checkpoint = fixture["repo"] / ".agent_bus/executors/phase_b_state.json"
+    restoration = checkpoint.with_name(pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME)
+    protected = {}
+
+    def lose_authority_after_admission(route):
+        if lost in {"checkpoint", "both"}: checkpoint.unlink()
+        if lost in {"restoration", "both"}: restoration.unlink()
+        for path in (checkpoint, restoration):
+            protected[path] = path.read_bytes() if path.exists() else None
+
+    invocations, consumers, _ = _run_late_native_dispatch(
+        fixture, monkeypatch, before_consumer=lose_authority_after_admission,
+    )
+    assert len(invocations) == 2
+    assert isinstance(consumers[1], dict), {"consumers": consumers, "calls": fixture["calls"]}
+    assert consumers[1]["step"] == "native_late_checkpoint", consumers
+    for path, raw in protected.items():
+        assert (path.read_bytes() if path.exists() else None) == raw
+    assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 1}
+    assert (fixture["repo"] / "TASKS.md").read_bytes() == fixture["tasks_bytes"]
+
+
+@pytest.mark.parametrize("corruption", [None, "{", "[]"])
+def test_native_restored_checkpoint_missing_route_returns_hold(late_native_retry_lane, monkeypatch, corruption):
+    fixture = late_native_retry_lane
+    repo = fixture["repo"]
+    fixture["control"]["interrupt_after_restore"] = True
+    with pytest.raises(fixture["boundary"]):
+        pb_mod.run_phase_b(repo, fixture["plan_path"], routing_record_override=fixture["route"])
+    checkpoint = repo / ".agent_bus/executors/phase_b_state.json"
+    restoration = checkpoint.with_name(pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME)
+    before = checkpoint.read_bytes(), restoration.read_bytes(), (repo / "TASKS.md").read_bytes()
+    if corruption is None: fixture["canonical"].unlink()
+    else: fixture["canonical"].write_text(corruption)
+    outcome = pb_mod.run_phase_b(repo, fixture["plan_path"])
+    assert outcome["status"] == "error", outcome
+    called = []
+    monkeypatch.setattr(fixture["dispatch"], "_run_executor_in_group", lambda *a, **kw: called.append(True))
+    outcome = fixture["dispatch"].dispatch(fixture["route"], repo_root=repo)
+    assert outcome["status"] == "error" and outcome["authority_error"] == "outstanding_ownership", outcome
+    assert not called
+    assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 0, "validation": 0}
+    assert (checkpoint.read_bytes(), restoration.read_bytes(), (repo / "TASKS.md").read_bytes()) == before
+
+
+@pytest.mark.parametrize("fault", [
+    "missing", "malformed", "plan", "wave", "seal", "step", "exhausted",
+    "source", "index", "base", "branch", "config", "restored", "candidate",
+    "route", "bus", "released", "release-type", "missing-binding",
+])
+def test_native_late_retry_drift_holds_before_cleanup_or_consumer(late_native_retry_lane, monkeypatch, fault):
+    fixture = late_native_retry_lane
+    repo = fixture["repo"]
+    checkpoint = repo / ".agent_bus/executors/phase_b_state.json"
+    restoration = checkpoint.with_name(pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME)
+    protected = {}
+
+    def mutate(result):
+        state = json.loads(checkpoint.read_bytes())
+        retry = result["retry_record"]
+        if fault == "missing": checkpoint.unlink()
+        elif fault == "malformed": checkpoint.write_bytes(b"{")
+        elif fault in {"plan", "wave", "seal", "step", "exhausted"}:
+            if fault == "plan": state["plan_path"] = "reports/control_plane/foreign.md"
+            elif fault == "wave": state["wave_id"] = "foreign-wave"
+            elif fault == "seal": state.pop("native_late_resume")
+            elif fault == "step": state["completed_step"] = "unknown"
+            else: state["native_supervisor_reentry_exhausted"] = True
+            checkpoint.write_text(json.dumps(state))
+        elif fault == "source":
+            (repo / fixture["implementation_path"]).write_text("foreign source\n")
+        elif fault == "index":
+            subprocess.run(["git", "add", "TASKS.md"], cwd=repo, check=True, capture_output=True)
+        elif fault == "base":
+            subprocess.run(["git", "commit", "--allow-empty", "-m", "foreign base"], cwd=repo, check=True, capture_output=True)
+        elif fault == "branch":
+            subprocess.run(["git", "checkout", "-b", "foreign-branch"], cwd=repo, check=True, capture_output=True)
+        elif fault == "config":
+            (repo / "mu/tools/executors/executor_config.json").write_text("{}\n")
+        elif fault == "restored": restoration.write_bytes(restoration.read_bytes() + b"\n")
+        elif fault == "candidate": fixture["spec_path"].write_text("{}\n")
+        elif fault == "route": fixture["canonical"].write_bytes(fixture["canonical"].read_bytes() + b" ")
+        elif fault == "bus": retry["native_late_checkpoint"]["bus_dir"] = ".agent_bus-foreign"
+        elif fault == "release-type": retry["native_late_checkpoint"]["process_released"] = 1
+        elif fault == "missing-binding": retry.pop("native_late_checkpoint")
+        for path in [checkpoint, restoration, repo / "TASKS.md", fixture["spec_path"], fixture["canonical"]]:
+            protected[path] = path.read_bytes() if path.exists() else None
+
+    invocations, consumers, _ = _run_late_native_dispatch(
+        fixture, monkeypatch, mutate=mutate, released=fault != "released",
+    )
+    assert invocations == ["phase_b_executor.py"]
+    assert consumers == ["final_validation"]
+    assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 1}
+    for path, raw in protected.items():
+        assert (path.read_bytes() if path.exists() else None) == raw
+
+
+@pytest.mark.parametrize("fault", [
+    "unchanged", "source", "index", "seal", "restored", "wrong-bus", "missing-release",
+    "false-release", "release-type", "checkpoint-hash", "malformed-release", "unknown-release-field",
+    "missing-proof", "proof-version", "proof-owner-type", "proof-member", "proof-pid-reuse",
+    "release-query", "revived-owner", "proof-owner-changed", "proof-from-another-launch",
+    "late-partial-identities", "late-partial-graph",
+])
+def test_native_late_direct_consumer_revalidates_before_mutation(late_native_retry_lane, monkeypatch, request, fault):
+    fixture = late_native_retry_lane
+    repo = fixture["repo"]
+    checkpoint = repo / ".agent_bus/executors/phase_b_state.json"
+    restoration = checkpoint.with_name(pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME)
+    protected = {}
+    admitted_routes = []
+    protected_index = []
+
+    def mutate_after_admission(route):
+        admitted_routes.append(json.loads(json.dumps(route)))
+        if fault == "source": (repo / fixture["implementation_path"]).write_text("foreign\n")
+        elif fault == "index": subprocess.run(["git", "add", "TASKS.md"], cwd=repo, check=True, capture_output=True)
+        elif fault == "seal":
+            state = json.loads(checkpoint.read_bytes()); state.pop("native_late_resume")
+            checkpoint.write_text(json.dumps(state))
+        elif fault == "restored": restoration.write_bytes(restoration.read_bytes() + b"\n")
+        elif fault == "wrong-bus": route["native_late_checkpoint"]["bus_dir"] = ".agent_bus-foreign"
+        elif fault == "missing-release": route.pop("native_late_checkpoint")
+        elif fault == "false-release": route["native_late_checkpoint"]["process_released"] = False
+        elif fault == "release-type": route["native_late_checkpoint"]["process_released"] = 1
+        elif fault == "checkpoint-hash": route["native_late_checkpoint"]["sha256"] = "0" * 64
+        elif fault == "malformed-release": route["native_late_checkpoint"] = []
+        elif fault == "unknown-release-field": route["native_late_checkpoint"]["unknown"] = True
+        elif fault == "missing-proof": route["native_late_checkpoint"].pop("release_evidence")
+        elif fault == "proof-version": route["native_late_checkpoint"]["release_evidence"]["version"] = True
+        elif fault == "proof-owner-type": route["native_late_checkpoint"]["release_evidence"]["owner"] = None
+        elif fault == "proof-owner-changed": route["native_late_checkpoint"]["release_evidence"]["owner"] = uuid.uuid4().hex
+        elif fault == "proof-from-another-launch":
+            owner = uuid.uuid4().hex
+            proc = subprocess.Popen(
+                [sys.executable, "-B", "-c", "import time; time.sleep(60)"],
+                start_new_session=True,
+                env={**os.environ, common_mod.EXECUTOR_PROCESS_OWNER_ENV: owner},
+            )
+            try:
+                unrelated = common_mod.terminate_owned_executor(proc, owner, cwd=repo)
+                assert unrelated is not None
+                route["native_late_checkpoint"]["release_evidence"] = unrelated
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
+        elif fault == "proof-member": route["native_late_checkpoint"]["release_evidence"]["members"] = []
+        elif fault == "proof-pid-reuse":
+            proof = route["native_late_checkpoint"]["release_evidence"]
+            proof["root_pid"] = os.getpid()
+            proof["members"][0]["pid"] = os.getpid()
+        elif fault == "release-query":
+            real_run = subprocess.run
+            def failed_query(args, *a, **kw):
+                if args[0] == "ps":
+                    raise subprocess.CalledProcessError(1, args)
+                return real_run(args, *a, **kw)
+            monkeypatch.setattr(subprocess, "run", failed_query)
+        elif fault in {"revived-owner", "late-partial-identities", "late-partial-graph"}:
+            owner = route["native_late_checkpoint"]["release_evidence"]["owner"]
+            proc = subprocess.Popen(
+                [sys.executable, "-B", "-c", "import time; time.sleep(60)"],
+                start_new_session=True,
+                env={**os.environ, common_mod.EXECUTOR_PROCESS_OWNER_ENV: owner},
+            )
+            def cleanup():
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
+            request.addfinalizer(cleanup)
+            if fault.startswith("late-partial-"):
+                real_run = subprocess.run
+
+                def partial_query(args, *a, **kw):
+                    result = real_run(args, *a, **kw)
+                    if args[0] == "ps" and (("axeww" in args) == (fault == "late-partial-identities")):
+                        rows = result.stdout.splitlines(keepends=True)
+                        assert any(int(row.split()[0]) == proc.pid for row in rows)
+                        result.stdout = "".join(row for row in rows if int(row.split()[0]) != proc.pid)
+                    return result
+
+                monkeypatch.setattr(subprocess, "run", partial_query)
+        protected.update({path: path.read_bytes() for path in (
+            checkpoint, restoration, repo / "TASKS.md", fixture["canonical"], fixture["spec_path"],
+            repo / fixture["implementation_path"], repo / fixture["plan_path"],
+        )})
+        protected_index.append(subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo))
+
+    invocations, consumers, _ = _run_late_native_dispatch(
+        fixture, monkeypatch, before_consumer=mutate_after_admission,
+    )
+    assert len(invocations) == 2
+    if fault == "unchanged":
+        assert consumers == ["final_validation", "final_validation"]
+        assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 2}
+    else:
+        assert consumers[0] == "final_validation"
+        assert isinstance(consumers[1], dict) and consumers[1]["status"] == "error", consumers
+        assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 1}
+    if fault == "unchanged":
+        before, after = json.loads(protected[checkpoint]), json.loads(checkpoint.read_bytes())
+        assert before["native_process_owner"] != after["native_process_owner"]
+        assert before["native_late_resume"]["binding"] == after["native_late_resume"]["binding"]
+        assert {k: v for k, v in before.items() if k not in {"native_process_owner", "native_late_resume"}} == {
+            k: v for k, v in after.items() if k not in {"native_process_owner", "native_late_resume"}
+        }
+        assert after["native_late_resume"]["checkpoint_sha256"] == hashlib.sha256(json.dumps(
+            {k: v for k, v in after.items() if k != "native_late_resume"},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode()).hexdigest()
+        assert all(path.read_bytes() == raw for path, raw in protected.items() if path != checkpoint)
+        # A newly owned continuation cannot replay the old process's release.
+        preserved = checkpoint.read_bytes()
+        refused = pb_mod.run_phase_b(repo, fixture["plan_path"], routing_record_override=admitted_routes[0])
+        assert refused["status"] == "error" and refused["step"] == "native_late_checkpoint"
+        assert checkpoint.read_bytes() == preserved
+        assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 2}
+    else:
+        assert all(path.read_bytes() == raw for path, raw in protected.items())
+    assert subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo) == protected_index[0]
+
+
+@pytest.mark.parametrize("late_native_retry_lane", [None, ".agent_bus-late-retry"], indirect=True)
+def test_native_restored_tracker_canonical_entry_requires_release(late_native_retry_lane):
+    fixture = late_native_retry_lane
+    fixture["control"]["interrupt_after_restore"] = True
+    repo = fixture["repo"]
+    with pytest.raises(fixture["boundary"], match="sdk_review"):
+        pb_mod.run_phase_b(repo, fixture["plan_path"], routing_record_override=fixture["route"],
+                          bus_dir=fixture["bus_dir"])
+    checkpoint = fixture["canonical"].parent.parent / "executors/phase_b_state.json"
+    restoration = checkpoint.with_name(pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME)
+    protected = {path: path.read_bytes() for path in (
+        checkpoint, restoration, fixture["canonical"], fixture["spec_path"], repo / "TASKS.md",
+    )}
+    outcome = pb_mod.run_phase_b(repo, fixture["plan_path"], bus_dir=fixture["bus_dir"])
+    assert outcome["status"] == "error" and outcome["step"] == "native_late_checkpoint"
+    assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 0, "validation": 0}
+    assert all(path.read_bytes() == raw for path, raw in protected.items())
+
+
+@pytest.mark.parametrize("decision", ["ROUTE_PHASE_A", "ROUTE_PHASE_B"])
+def test_native_late_ownership_survives_missing_actor_fields(late_native_retry_lane, monkeypatch, decision):
+    fixture = late_native_retry_lane
+    repo = fixture["repo"]
+    with pytest.raises(fixture["boundary"], match="final_validation"):
+        pb_mod.run_phase_b(repo, fixture["plan_path"], routing_record_override=fixture["route"])
+    checkpoint = repo / ".agent_bus/executors/phase_b_state.json"
+    state = json.loads(checkpoint.read_bytes())
+    for field in pb_mod.IMPLEMENTER_MUTATION_CARRY_FIELDS:
+        state.pop(field, None)
+    checkpoint.write_text(json.dumps(state))
+    protected = {path: path.read_bytes() for path in (
+        checkpoint, checkpoint.with_name(pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME),
+        fixture["canonical"], fixture["spec_path"], repo / "TASKS.md",
+    )}
+    called = []
+    monkeypatch.setattr(fixture["dispatch"], "_run_executor_in_group", lambda *a, **kw: called.append(True))
+    result = fixture["dispatch"].dispatch({**fixture["route"], "decision": decision}, repo_root=repo)
+    assert result["status"] == "error" and result["authority_error"] == "outstanding_ownership"
+    assert not called
+    assert all(path.read_bytes() == raw for path, raw in protected.items())
 
 
 @pytest.fixture
@@ -670,6 +1412,311 @@ def test_native_late_supervisor_hands_latest_full_findings_to_one_bounded_repair
 
 
 @pytest.fixture
+def native_status_refresh_lane(implementer_ownership_lane, monkeypatch):
+    """Run the real packet/status, checkpoint, index and continuation producers."""
+    lane = implementer_ownership_lane("initial", source_path="mu/tools/ownership_probe.py")
+    lane.armed = False
+    packet = lane.repo / lane.plan_path
+    packet.write_text(packet.read_text().replace("# Plan\n", "# Plan\nStatus: Phase B (locked, implementing)\n"))
+    lane.impl.load_executor_config.return_value["agent_review_enabled"] = True
+    monkeypatch.setattr(pb_mod, "_select_pytest_gate_files", lambda *a: ["mu/tests/tools/test_public_bridge_receipt.py"])
+    lane.impl.build_implementation_prompt.side_effect = lambda content, **kwargs: content
+    lane.route = {**_VALID_ROUTING_RECORD, "native_stub_packet_contract": {"required": True}}
+    lane.newest = dict(decision="NEEDS_PHASE_B", summary="Status refresh finding Δ",
+                       findings=[dict(severity="high", title="Current index defect", detail="Repair the refreshed candidate")],
+                       request_for_claude="Preserve the completed implementation and fix only this finding")
+    lane.approved = {"exit_code": 0, "receipt_path": ".agent_bus/meta/pre_commit_receipts/fixture.json",
+                     "parsed": {"decision": "COMMIT_GO", "summary": "Earlier package approved"}}
+    lane.supervisor = lane.mocks["run_pre_commit_supervisor"]
+    lane.supervisor.side_effect = [lane.approved, {**lane.approved, "parsed": lane.newest}]
+    lane.run = lambda: pb_mod.run_phase_b(lane.repo, lane.plan_path, max_bridge_rounds=5,
+                                        routing_record_override=lane.route.copy())
+    return lane
+
+
+def dispatch_native_supervisor_result(lane, first, *, entry, consumer):
+    """Feed a real producer result through dispatch, isolating executor processes."""
+    route = {**lane.route, "decision": "ROUTE_PHASE_B"}
+    route.setdefault("plan_path", lane.plan_path)
+    route.setdefault("wave_name", first["wave_id"])
+    bus = getattr(lane, "bus", None)
+    commands, payloads, commits = [], [], []
+
+    def child(command, *, cwd, timeout):
+        assert cwd == lane.repo
+        if Path(command[1]).name == "commit_executor.py":
+            assert payloads[-1]["status"] == "commit_ready"
+            commits.append(command)
+            return subprocess.CompletedProcess(command, 0, '{"status":"success"}', "")
+        assert Path(command[1]).name == "phase_b_executor.py"
+        assert "--dispatcher-owned-recovery" in command
+        assert len(commands) < 2, "Supervisor authority cannot authorize another repair"
+        if commands:
+            assert command == commands[0]
+        if bus:
+            assert command[command.index("--bus-dir") + 1] == bus
+        payload = consumer() if commands else first
+        commands.append(command)
+        payloads.append(payload)
+        return subprocess.CompletedProcess(command, 0 if payload["status"] in {
+            "continue_phase_b", "commit_ready",
+        } else 1, json.dumps(payload), "")
+
+    with patch.dict(sys.modules), patch.dict(os.environ):
+        dispatcher = load_module("native_supervisor_dispatcher", _EXECUTORS_DIR / "executor_dispatch.py")
+        with patch.object(dispatcher, "_run_executor_in_group", side_effect=child), \
+             patch.object(dispatcher, "attempt_recovery", side_effect=AssertionError("authority replay")) as recovery, \
+             patch.object(dispatcher, "_clear_phase_b_state_for_retry", side_effect=AssertionError("checkpoint clearing")), \
+             patch.object(dispatcher, "_LaneMonitor"), \
+             patch.object(dispatcher, "_install_wave_end_signal_cleanup"), \
+             patch.object(dispatcher, "_remove_wave_end_signal_cleanup"), \
+             patch.object(dispatcher, "_emit_executor_hard_fail_event"):
+            if entry == "surface":
+                args = dispatcher.build_surface_parser().parse_args([
+                    "phase-b", "--plan", lane.plan_path, "--max-rounds", "5",
+                    "--routing-record-json", json.dumps(route), "--json",
+                    *(["--bus-dir", bus] if bus else []),
+                ])
+                code = dispatcher.run_recoverable_surface_command(args, repo_root=lane.repo, config={})
+            else:
+                result = dispatcher.dispatch(route, repo_root=lane.repo, skip_freshness=True, bus_dir=bus)
+                code = 0 if result["status"] == "success" else 1
+        recovery.assert_not_called()
+    return SimpleNamespace(code=code, commands=commands, payloads=payloads, commits=commits,
+                           result=result if entry == "routing" else None)
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["status-refresh"], indirect=True)
+@pytest.mark.parametrize("entry", ["surface", "routing"])
+@pytest.mark.parametrize("fault", ["supervisor-mismatch", "unknown-step", "missing-step", "checkpoint",
+                                  "exhausted", "route", "source", "index"])
+def test_native_supervisor_dispatcher_holds_invalid_continuation(commit_ready_resume_lane, entry, fault):
+    lane = commit_ready_resume_lane
+    first = dict(lane.result)
+    assert first["status"] == "continue_phase_b", first
+    assert "f.py" in json.loads(lane.state_path.read_bytes())["native_status_refresh_candidate"]["files"]
+    sealed_index = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=lane.repo)
+    if fault == "supervisor-mismatch":
+        first["supervisor_step"] = "post_reentry_supervisor"
+    elif fault == "unknown-step":
+        first["supervisor_step"] = "build_and_run_supervisor"
+    elif fault == "missing-step":
+        first.pop("supervisor_step")
+    elif fault == "checkpoint":
+        lane.state_path.write_bytes(lane.state_path.read_bytes() + b" ")
+    elif fault == "exhausted":
+        calls = []
+        def reject_again(repo, package, **kwargs):
+            calls.append(package)
+            if len(calls) == 1:
+                return lane.approve(repo, package, **kwargs)
+            return {"exit_code": 0, "parsed": {"decision": "NEEDS_PHASE_B",
+                    "summary": "Newest rejection after the one authorized repair"}}
+        with patch.dict(sys.modules, {"phase_b_implementer": lane.impl}), \
+             patch.object(pb_mod, "run_sdk_agents", side_effect=AssertionError("completed SDK replay")), \
+             patch.object(pb_mod, "run_bridge_review", side_effect=lane.bridge), \
+             patch.object(pb_mod, "run_private_attr_gate", side_effect=lane.gate), \
+             patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}), \
+             patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=reject_again):
+            first = pb_mod.run_phase_b(lane.repo, lane.plan_path, bus_dir=lane.bus,
+                routing_record_override={**lane.route, "decision": "ROUTE_PHASE_B"})
+        assert first["status"] == "needs_phase_b", first
+        assert json.loads(lane.state_path.read_bytes())["native_supervisor_reentry_exhausted"] is True
+        assert "Newest rejection" in json.loads(lane.state_path.read_bytes())["reentry_findings"]
+        first["status"] = "continue_phase_b"  # A result cannot resurrect the real exhausted checkpoint.
+    elif fault == "route":
+        lane.route["task_id"] = "[FOREIGN]"
+    elif fault == "source":
+        (lane.repo / "f.py").write_text("# concurrent source mutation\n")
+    else:
+        subprocess.run(["git", "reset", "HEAD", "--", "f.py"], cwd=lane.repo, check=True, capture_output=True)
+    checkpoint = lane.state_path.read_bytes()
+    source = (lane.repo / "f.py").read_bytes()
+    index = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=lane.repo)
+    if fault == "index":
+        assert index != sealed_index
+    edits, reviews, gates = lane.impl.invoke_implementer.call_count, list(lane.reviews), lane.gates
+    with patch.dict(sys.modules, {"phase_b_implementer": lane.impl}), \
+         patch.object(pb_mod, "run_sdk_agents", side_effect=AssertionError("completed SDK replay")) as sdk, \
+         patch.object(pb_mod, "run_bridge_review", side_effect=lane.bridge) as bridge, \
+         patch.object(pb_mod, "run_private_attr_gate", side_effect=lane.gate), \
+         patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}) as gate, \
+         patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=lane.approve) as supervisor:
+        consume = lambda: pb_mod.run_phase_b(lane.repo, lane.plan_path, bus_dir=lane.bus,
+            routing_record_override={**lane.route, "decision": "ROUTE_PHASE_B"})
+        outcome = dispatch_native_supervisor_result(lane, first, entry=entry, consumer=consume)
+    assert outcome.code == 1
+    if fault == "route" and entry == "routing":
+        assert outcome.result["authority_error"] == "invalid_native_stub_packet_contract"
+        assert not outcome.commands  # Routed contract validation precedes the first executor.
+    else:
+        assert len(outcome.commands) == (2 if fault in {"source", "index"} else 1), outcome.result
+    assert not outcome.commits
+    assert lane.state_path.read_bytes() == checkpoint
+    assert (lane.repo / "f.py").read_bytes() == source
+    assert subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=lane.repo) == index
+    assert lane.impl.invoke_implementer.call_count == edits
+    assert lane.reviews == reviews and lane.gates == gates
+    sdk.assert_not_called()
+    bridge.assert_not_called()
+    gate.assert_not_called()
+    supervisor.assert_not_called()
+
+
+@pytest.mark.parametrize("exhaust", [False, True])
+def test_native_status_refresh_latest_finding_has_one_repair(native_status_refresh_lane, exhaust):
+    lane = native_status_refresh_lane
+    first = lane.run()
+    assert first["status"] == "continue_phase_b", first
+    assert first["supervisor_step"] == "commit_ready_status_supervisor"
+    state = json.loads(lane.state_path.read_bytes())
+    assert pb_mod.supervisor_reentry_continuation_issue(state) is None
+    assert json.loads(state["reentry_findings"]) == lane.newest
+    assert state["supervisor_reentry_identity"]["plan_sha256"] == hashlib.sha256((lane.repo / lane.plan_path).read_bytes()).hexdigest()
+    assert "Status: IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT" in (lane.repo / lane.plan_path).read_text()
+    assert state["native_supervisor_reentries"] == 1
+    assert state["native_supervisor_reentry_exhausted"] is False
+    assert not any(k.startswith("implementer_mutation") for k in state)
+    assert lane.counts["implementer"] == 1
+    assert lane.counts["review"] == 1
+    assert lane.mocks["run_sdk_agents"].call_count == 1
+    assert lane.mocks["_run_pytest_on_files"].call_count == 1
+    newest = {**lane.newest, "summary": "Newest rejection after the one authorized repair"}
+    lane.supervisor.side_effect = ([lane.approved, {**lane.approved, "parsed": newest}]
+                                  if exhaust else [lane.approved, lane.approved])
+    second = lane.run()
+    assert lane.counts["implementer"] == 2
+    assert lane.counts["review"] == 2
+    assert lane.mocks["run_sdk_agents"].call_count == 1  # Completed SDK work is not replayed.
+    assert lane.mocks["_run_pytest_on_files"].call_count == 2
+    prompt = lane.impl.invoke_implementer.call_args.args[1]
+    assert "Repair the refreshed candidate" in prompt
+    assert "Earlier package approved" not in prompt
+    if exhaust:
+        assert second["status"] == "needs_phase_b", second
+        stopped = lane.state_path.read_bytes()
+        assert json.loads(stopped)["native_supervisor_reentry_exhausted"] is True
+        assert json.loads(json.loads(stopped)["reentry_findings"]) == newest
+        assert lane.run()["status"] == "needs_phase_b"
+        assert lane.state_path.read_bytes() == stopped
+        assert lane.counts["implementer"] == 2
+    else:
+        assert second["status"] == "commit_ready", second
+
+
+@pytest.mark.parametrize("fault", ["packet", "source", "index", "branch", "package", "route", "seal", "missing-binding", "flags", "config", "launch"])
+def test_native_status_refresh_consumer_holds_mutation_drift(native_status_refresh_lane, fault):
+    lane = native_status_refresh_lane
+    result = lane.run()
+    assert result["status"] == "continue_phase_b", result
+    if fault == "packet":
+        path = lane.repo / lane.plan_path
+        path.write_text(path.read_text().replace("IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT", "Phase B (locked, implementing)"))
+    elif fault == "source":
+        (lane.repo / lane.source_path).write_text("# unrelated mutation\n")
+    elif fault == "index":
+        subprocess.run(["git", "reset", "HEAD", "--", lane.source_path], cwd=lane.repo, check=True, capture_output=True)
+    elif fault == "branch":
+        subprocess.run(["git", "checkout", "-b", "foreign-status-owner"], cwd=lane.repo, check=True, capture_output=True)
+    elif fault == "package":
+        path = lane.repo / ".scratch/phase_b_supervisor_package.json"
+        path.write_bytes(path.read_bytes() + b" ")
+    elif fault == "route":
+        lane.route["task_id"] = "[FOREIGN]"
+    elif fault == "launch":
+        lane.route["native_stub_packet_contract"] = {"required": False}
+    elif fault == "config":
+        path = lane.repo / "mu/tools/executors/executor_config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n")
+    elif fault == "flags":
+        subprocess.run(["git", "update-index", "--assume-unchanged", lane.source_path], cwd=lane.repo, check=True, capture_output=True)
+    else:
+        state = json.loads(lane.state_path.read_bytes())
+        if fault == "seal": state["reentry_findings"] = "Stale review"
+        else: state.pop("native_status_refresh_candidate")
+        lane.state_path.write_text(json.dumps(state))
+    before = lane.state_path.read_bytes()
+    index = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=lane.repo)
+    second = lane.run()
+    assert second["status"] == "error", second
+    assert lane.state_path.read_bytes() == before
+    assert subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=lane.repo) == index
+    assert lane.counts["implementer"] == lane.counts["review"] == 1
+    assert lane.supervisor.call_count == 2
+
+
+@pytest.mark.parametrize("boundary", ["actor", "success"])
+def test_native_status_refresh_repair_interruption_keeps_actor_ownership(native_status_refresh_lane, boundary):
+    lane = native_status_refresh_lane
+    assert lane.run()["status"] == "continue_phase_b"
+    lane.armed, lane.target, lane.boundary = True, 2, boundary
+    with pytest.raises(PrivateReviewCrash):
+        lane.run()
+    before = lane.state_path.read_bytes()
+    state = json.loads(before)
+    assert state["implementer_mutation_context"]["checkpoint"]["native_supervisor_reentries"] == 1
+    assert lane.counts["implementer"] == 2
+    assert lane.counts["review"] == 1
+    if boundary == "actor":
+        assert state["implementer_mutation"]["state"] == "IN_FLIGHT"
+        assert lane.run()["authority_error"] == "ambiguous_outcome"
+        assert lane.state_path.read_bytes() == before
+    else:
+        assert state["implementer_mutation"]["state"] == "SUCCESS_PENDING_FINALIZE"
+        assert lane.run()["step"] == "implementer_finalize"
+        lane.supervisor.side_effect = [lane.approved, lane.approved]
+        assert lane.run()["status"] == "commit_ready"
+        assert lane.counts["review"] == 2
+        assert lane.mocks["_run_pytest_on_files"].call_count == 2
+    assert lane.counts["implementer"] == 2
+    assert lane.mocks["run_sdk_agents"].call_count == 1
+
+
+@pytest.mark.parametrize("fault", ["owner", "missing-owner", "source", "index", "package"])
+def test_native_status_refresh_producer_rejects_review_time_drift(native_status_refresh_lane, fault):
+    lane = native_status_refresh_lane
+    retained = []
+    def supervisor(repo, package, **kwargs):
+        if lane.supervisor.call_count == 1:
+            return lane.approved
+        if fault == "owner":
+            state = json.loads(lane.state_path.read_bytes())
+            state["completed_step"] = "implementer_mutation"
+            lane.state_path.write_text(json.dumps(state))
+        elif fault == "missing-owner":
+            lane.state_path.unlink()
+        elif fault == "source":
+            (repo / lane.source_path).write_text("# concurrent change\n")
+        elif fault == "index":
+            subprocess.run(["git", "reset", "HEAD", "--", lane.source_path], cwd=repo, check=True, capture_output=True)
+        else:
+            package.write_bytes(package.read_bytes() + b" ")
+        retained.append(lane.state_path.read_bytes() if lane.state_path.exists() else None)
+        return {**lane.approved, "parsed": lane.newest}
+    lane.supervisor.side_effect = supervisor
+    outcome = lane.run()
+    assert outcome["status"] == "error", outcome
+    assert (lane.state_path.read_bytes() if lane.state_path.exists() else None) == retained[0]
+    assert lane.counts["implementer"] == lane.counts["review"] == 1
+
+
+@pytest.mark.parametrize("decision", ["NEEDS_PHASE_A", "QUESTION", "ERROR_INTERNAL", None])
+def test_native_status_refresh_nonrepair_verdict_never_mints_authority(native_status_refresh_lane, decision):
+    lane = native_status_refresh_lane
+    lane.supervisor.side_effect = [lane.approved, {
+        "exit_code": -1 if decision is None else 0,
+        "receipt_path": "" if decision is None else lane.approved["receipt_path"],
+        "parsed": {"decision": decision, "summary": "Explicit rejection" if decision else "No terminal envelope"},
+    }]
+    outcome = lane.run()
+    assert outcome["status"] == "supervisor_rejected", outcome
+    assert outcome["step"] == "commit_ready_status_supervisor"
+    assert not lane.state_path.exists() or "supervisor_reentry_identity" not in json.loads(lane.state_path.read_bytes())
+    assert lane.counts["implementer"] == lane.counts["review"] == 1
+
+
+@pytest.fixture
 def sdk_ownership_lane(implementer_ownership_lane):
     lane = implementer_ownership_lane("initial", source_path="mu/tools/ownership_probe.py")
     lane.armed = False
@@ -1288,6 +2335,7 @@ def _write_launch_tracker_restore_fixture(
     root: Path,
     *,
     marker: bool = True,
+    bus_dir: str | None = None,
 ) -> dict[str, Any]:
     """Create one native launch packet/route/spec bound to a dynamic Git base."""
     repo = root / "repo"
@@ -1423,7 +2471,7 @@ def _write_launch_tracker_restore_fixture(
     spec_path = candidate_authority_mod.write_authority_spec(
         repo,
         authority_spec,
-        bus_dir=None,
+        bus_dir=bus_dir,
     )
     spec_identity = candidate_authority_mod.authority_spec_identity(
         repo,
@@ -1465,7 +2513,7 @@ def _write_launch_tracker_restore_fixture(
             },
         },
     }
-    route_path = repo / ".agent_bus" / "meta" / "post_merge_routing.json"
+    route_path = repo / (bus_dir or ".agent_bus") / "meta" / "post_merge_routing.json"
     route_path.parent.mkdir(parents=True, exist_ok=True)
     route_path.write_text(json.dumps(launch_route, indent=2) + "\n", encoding="utf-8")
     phase_b_route = {
@@ -1476,6 +2524,7 @@ def _write_launch_tracker_restore_fixture(
     }
     return {
         "repo": repo,
+        "bus_dir": bus_dir,
         "wave_id": wave_id,
         "task_id": task_id,
         "title": title,
@@ -7719,6 +8768,8 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
     from meta_bridge_supervisor import MetaBridgeResponse, write_pre_commit_receipt, build_meta_reviewer_prompt
     from executor_common import emit_pipeline_agent_event
 
+    native_status = getattr(request, "param", "future") in {"status-refresh", "post-reentry"}
+    post_reentry = getattr(request, "param", "future") == "post-reentry"
     repo = tmp_path / "commit-ready"
     repo.mkdir()
     wave = "commit-ready-resume-fixture"
@@ -7755,6 +8806,8 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
                            test_path=test_path, indicator_path=indicator, reviews=[], gates=0,
                            state_path=repo / bus / "executors/phase_b_state.json", receipts=[])
     impl = _make_successful_impl_with_edits(test_path)
+    if native_status:
+        impl.build_implementation_prompt.side_effect = lambda content, **kwargs: content
 
     def bridge(repo_root, summary, **kwargs):
         job = kwargs["job_id"]
@@ -7774,7 +8827,7 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
 
     def gate(*args, **kwargs):
         lane.gates += 1
-        return dict(passed=lane.gates != 1, exit_code=int(lane.gates == 1),
+        return dict(passed=native_status or lane.gates != 1, exit_code=int(not native_status and lane.gates == 1),
                     test_files=[test_path], stdout="private attr fixture", stderr="")
 
     def approve(repo_root, package_path, **kwargs):
@@ -7787,8 +8840,15 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
                     parsed=dict(decision="COMMIT_GO", status="success", findings=[], summary="Fixture review"))
 
     def supervisor(repo_root, package_path, **kwargs):
+        if post_reentry:
+            return dict(exit_code=0, receipt_path="", parsed=dict(
+                decision="NEEDS_PHASE_B", status="success", findings=[], summary="Latest native status refresh finding"))
         if not lane.receipts:
             return approve(repo_root, package_path, **kwargs)
+        if native_status:
+            # NEEDS_PHASE_B is a terminal response, never a commit receipt.
+            return dict(exit_code=0, receipt_path="", parsed=dict(
+                decision="NEEDS_PHASE_B", status="success", findings=[], summary="Latest native status refresh finding"))
         meta = repo / bus / "meta"
         prompt = meta / "prompts/meta-fixture-12345678--r1-meta.txt"
         raw = meta / "raw" / prompt.name
@@ -7826,6 +8886,11 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
         stack.enter_context(patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor))
         with pytest.raises(launcher.LaunchWaveError, match="dispatcher launch failed"):
             launcher.run_wave_setup(repo, config, launch=True, runner=dispatched, bus_dir=bus)
+    if native_status:
+        assert lane.result["status"] == "continue_phase_b", lane.result
+        lane.approve, lane.impl, lane.bridge, lane.gate = approve, impl, bridge, gate
+        lane.supervisor_step = "post_reentry_supervisor" if post_reentry else "commit_ready_status_supervisor"
+        return lane
     assert lane.result["step"] == "commit_ready_status_supervisor", lane.result
     assert lane.result["status"] == "supervisor_rejected", lane.result
     assert len(lane.reviews) == 2
@@ -7837,6 +8902,47 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
     lane.approve = approve
     lane.impl = impl
     return lane
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["status-refresh", "post-reentry"], indirect=True)
+@pytest.mark.parametrize("entry", ["direct", "surface", "routing"])
+def test_native_generated_status_refresh_continuation_consumes_current_candidate(commit_ready_resume_lane, entry):
+    lane = commit_ready_resume_lane
+    state = json.loads(lane.state_path.read_bytes())
+    assert lane.result["supervisor_step"] == lane.supervisor_step
+    if lane.supervisor_step == "commit_ready_status_supervisor":
+        assert state["native_status_refresh_candidate"]["candidate"]["required"] is True
+    else:
+        assert "native_supervisor_step" not in state  # Existing sealed post-reentry shape remains compatible.
+    assert state["native_supervisor_reentries"] == 1
+    assert pb_mod.supervisor_reentry_continuation_issue(state) is None
+    assert json.loads(state["reentry_findings"])["summary"] == "Latest native status refresh finding"
+    completed = lane.impl.invoke_implementer.call_count
+    old_receipts = {p: p.read_bytes() for p in (lane.repo / lane.bus / "meta/pre_commit_receipts").glob("*.json")}
+    with patch.dict(sys.modules, {"phase_b_implementer": lane.impl}), \
+         patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0}) as sdk, \
+         patch.object(pb_mod, "run_bridge_review", side_effect=lane.bridge) as bridge, \
+         patch.object(pb_mod, "run_private_attr_gate", side_effect=lane.gate), \
+         patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}) as gate, \
+         patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=lane.approve):
+        consume = lambda: pb_mod.run_phase_b(lane.repo, lane.plan_path, bus_dir=lane.bus,
+            routing_record_override={**lane.route, "decision": "ROUTE_PHASE_B"})
+        if entry == "direct":
+            result = consume()
+        else:
+            outcome = dispatch_native_supervisor_result(lane, lane.result, entry=entry, consumer=consume)
+            assert outcome.code == 0, (outcome.result, outcome.payloads)
+            assert len(outcome.commands) == 2
+            assert len(outcome.commits) == 1
+            result = outcome.payloads[-1]
+    assert result["status"] == "commit_ready", result
+    assert lane.impl.invoke_implementer.call_count == completed + 1
+    assert bridge.call_count == 1
+    assert gate.call_count == 1
+    sdk.assert_not_called()
+    assert "Latest native status refresh finding" in lane.impl.invoke_implementer.call_args.args[1]
+    assert all(p.read_bytes() == raw for p, raw in old_receipts.items())
+    assert not lane.state_path.exists()
 
 
 @pytest.mark.parametrize("commit_ready_resume_lane", ["legacy", "future"], indirect=True)

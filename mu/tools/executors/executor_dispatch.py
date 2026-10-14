@@ -22,6 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,7 @@ try:
         DEFAULT_EXECUTOR_CONFIG,
         agent_bus_path,
         agent_bus_relpath,
+        copy_launch_wave_override_authority,
         load_executor_config as _common_load_executor_config,
         load_routing_record as _common_load_routing_record,
         build_and_write_routing_record as _common_build_and_write_routing_record,
@@ -50,6 +52,8 @@ try:
         normalize_wave_id,
         packet_status_is_completed,
         process_descendants,
+        EXECUTOR_PROCESS_OWNER_ENV,
+        terminate_owned_executor,
         read_control_plane_packet_status,
         read_control_plane_packet_wave_id,
         read_founder_ordered_task_state,
@@ -75,10 +79,13 @@ except ImportError:
     ensure_git_worktree_clean = _mod.ensure_git_worktree_clean
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
+    copy_launch_wave_override_authority = _mod.copy_launch_wave_override_authority
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
     normalize_wave_id = _mod.normalize_wave_id
     packet_status_is_completed = _mod.packet_status_is_completed
     process_descendants = _mod.process_descendants
+    EXECUTOR_PROCESS_OWNER_ENV = _mod.EXECUTOR_PROCESS_OWNER_ENV
+    terminate_owned_executor = _mod.terminate_owned_executor
     read_control_plane_packet_status = _mod.read_control_plane_packet_status
     read_control_plane_packet_wave_id = _mod.read_control_plane_packet_wave_id
     read_founder_ordered_task_state = _mod.read_founder_ordered_task_state
@@ -91,6 +98,7 @@ try:
         implementer_failure_blocks_recovery, ordinary_bridge_fix_failure_blocks_recovery,
         REENTRY_PRIVATE_ATTR_FIX_COMPLETE, reentry_private_attr_continuation_issue,
         supervisor_reentry_continuation_issue,
+        native_late_checkpoint_error,
     )
 except ImportError:
     import importlib.util as _ilu
@@ -103,6 +111,7 @@ except ImportError:
     reentry_private_attr_continuation_issue = _phase_b_mod.reentry_private_attr_continuation_issue
     supervisor_reentry_continuation_issue = _phase_b_mod.supervisor_reentry_continuation_issue
     implementer_failure_blocks_recovery = _phase_b_mod.implementer_failure_blocks_recovery
+    native_late_checkpoint_error = _phase_b_mod.native_late_checkpoint_error
 
 try:
     from pipeline_monitor_identity import (
@@ -2137,12 +2146,14 @@ def run_recoverable_surface_command(
         "phase-b": "phase_b_executor",
         "commit": "commit_executor",
     }[args.surface]
-    ownership_error = _owned_phase_b_entry_error(executor_name, repo_root=repo_root, bus_dir=bus_dir)
+    decision = _surface_decision(args)
+    surface_record = _surface_record_for_chain(args, repo_root)
+    ownership_error = _owned_phase_b_entry_error(
+        executor_name, repo_root=repo_root, bus_dir=bus_dir, routing_record=surface_record,
+    )
     if ownership_error is not None:
         _emit_surface_stop_result(ownership_error, json_output=bool(getattr(args, "json", False)))
         return 1
-    decision = _surface_decision(args)
-    surface_record = _surface_record_for_chain(args, repo_root)
     explicit_commit_handoff = args.surface == "commit" and getattr(args, "handoff", None)
     if not explicit_commit_handoff:
         completed_stop = _completed_candidate_stop_result(
@@ -2209,7 +2220,24 @@ def run_recoverable_surface_command(
                 wave_id = normalize_wave_id(
                     str(surface_record.get("wave_name") or surface_record.get("wave_id") or wave_id)
                 )
-                if args.surface == "phase-a":
+                invocation_args = args
+                if args.surface == "phase-a" and decision == "ROUTE_PHASE_B":
+                    invocation_args = copy.copy(args)
+                    invocation_args.surface = "phase-b"
+                    invocation_args.plan = _routing_record_tracked_packet(surface_record)
+                    invocation_args.routing_record_path = None
+                    invocation_args.routing_record_json = None
+                    invocation_args.bootstrap_exception = False
+                executor_name = resolve_executor(decision) or executor_name
+                ownership_error = _owned_phase_b_entry_error(
+                    executor_name, repo_root=repo_root, bus_dir=bus_dir,
+                    routing_record=surface_record,
+                )
+                if ownership_error is not None:
+                    result = ownership_error
+                    _emit_surface_stop_result(result, json_output=bool(getattr(args, "json", False)))
+                    break
+                if invocation_args.surface == "phase-a":
                     surface_record = _persist_phase_a_surface_routing_record(
                         repo_root,
                         surface_record,
@@ -2217,7 +2245,7 @@ def run_recoverable_surface_command(
                         verbose=getattr(args, "verbose", False),
                     )
                 cmd = build_surface_command(
-                    args,
+                    invocation_args,
                     routing_record=surface_record,
                     script_repo_root=script_repo_root,
                 )
@@ -2279,8 +2307,10 @@ def run_recoverable_surface_command(
                             "exit_code": completed.returncode,
                             "stdout": completed.stdout,
                             "stderr": completed.stderr,
+                            **({"retry_record": _phase_b_failure_retry_record(surface_record, repo_root, bus_dir=bus_dir, process_released=getattr(completed, "rcx_process_released", False), release_evidence=getattr(completed, "rcx_process_release_evidence", None))}
+                               if executor_name == "phase_b_executor" else {}),
                         }
-                except subprocess.TimeoutExpired:
+                except subprocess.TimeoutExpired as exc:
                     result = {
                         "status": "timeout",
                         "decision": decision,
@@ -2289,6 +2319,8 @@ def run_recoverable_surface_command(
                         "message": f"Executor {executor_name} timed out after {timeout}s",
                         "stdout": "",
                         "stderr": "",
+                        **({"retry_record": _phase_b_failure_retry_record(surface_record, repo_root, bus_dir=bus_dir, process_released=getattr(exc, "rcx_process_released", False), release_evidence=getattr(exc, "rcx_process_release_evidence", None))}
+                           if executor_name == "phase_b_executor" else {}),
                     }
 
             if _is_protected_ordinary_dispatch_error(result, repo_root=repo_root, bus_dir=bus_dir):
@@ -2304,13 +2336,18 @@ def run_recoverable_surface_command(
                         "[dispatch] Surface Phase B recovered in-process — "
                         "retrying before commit chain"
                     )
-                _clear_phase_b_state_for_retry(
-                    repo_root, result, verbose=getattr(args, "verbose", False), bus_dir=bus_dir
-                )
                 retry_record = _recovered_retry_record(
                     result,
                     current_record=surface_record,
                     allow_phase_b_to_phase_a=bool(getattr(args, "bootstrap_exception", False)),
+                )
+                retry_error = _native_recovered_retry_error(result, retry_record, surface_record, repo_root, bus_dir=bus_dir)
+                if retry_error is not None:
+                    result = retry_error
+                    _emit_surface_stop_result(result, json_output=bool(getattr(args, "json", False)))
+                    break
+                _clear_phase_b_state_for_retry(
+                    repo_root, result, verbose=getattr(args, "verbose", False), bus_dir=bus_dir
                 )
                 if retry_record is not None:
                     surface_retry_record = retry_record
@@ -2337,12 +2374,17 @@ def run_recoverable_surface_command(
                 original_timeouts,
                 new_orig,
             )
-            _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False), bus_dir=bus_dir)
             retry_record = _recovered_retry_record(
                 result,
                 current_record=surface_record,
                 allow_phase_b_to_phase_a=bool(getattr(args, "bootstrap_exception", False)),
             )
+            retry_error = _native_recovered_retry_error(result, retry_record, surface_record, repo_root, bus_dir=bus_dir)
+            if retry_error is not None:
+                result = retry_error
+                _emit_surface_stop_result(result, json_output=bool(getattr(args, "json", False)))
+                break
+            _clear_phase_b_state_for_retry(repo_root, result, verbose=getattr(args, "verbose", False), bus_dir=bus_dir)
             if retry_record is not None:
                 surface_retry_record = retry_record
 
@@ -3087,21 +3129,70 @@ def _carry_forward_native_stub_packet_contract(
     )
     if errors:
         return {}, "Native stub packet contract identity mismatch: " + "; ".join(errors)
+    try:
+        overrides = copy_launch_wave_override_authority(source, required=True)
+    except ExecutorCommonError as exc:
+        return {}, str(exc)
     key = NATIVE_STUB_PACKET_CONTRACT_KEY
-    return {key: copy.deepcopy(source[key])}, None
+    return {key: copy.deepcopy(source[key]), **overrides}, None
+
+
+def _phase_b_failure_retry_record(
+    record: dict[str, Any], repo_root: Path, *,
+    bus_dir: str | Path | None = None, process_released: bool = False,
+    release_evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Capture the owned Phase B route after its subprocess has been reaped.
+
+    Phase B may have staged its supported machine sections since Phase A. Bind
+    that returned candidate's freshness once; never rebind a later changed
+    candidate or replace the canonical launcher route with this retry route.
+    Ownership and recovery-budget guards still decide whether it can run.
+    """
+    retry = copy.deepcopy(record)
+    retry["decision"] = "ROUTE_PHASE_B"
+    retry.pop("native_late_checkpoint", None)  # Never carry an earlier release forward.
+    retry.pop("state_sha", None)
+    try:
+        retry["state_sha"] = _compute_repo_state(repo_root).state_sha
+    except Exception:
+        pass  # Missing freshness fails closed at native retry admission.
+    state_path = agent_bus_path(repo_root, bus_dir, "executors", "phase_b_state.json")
+    try:
+        raw = state_path.read_bytes()
+        state = json.loads(raw)
+        if ("native_stub_packet_contract" in record
+                and isinstance(state, dict) and "native_late_resume" in state):
+            retry["native_late_checkpoint"] = {
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "bus_dir": str(agent_bus_relpath(bus_dir)),
+                "process_released": process_released is True and release_evidence is not None,
+                "release_evidence": copy.deepcopy(release_evidence),
+            }
+    except (OSError, ValueError, UnicodeError):
+        pass  # Missing/torn state cannot gain late resume authority.
+    return retry
 
 
 def _owned_phase_b_entry_error(
     executor_name: str, *, repo_root: Path, bus_dir: str | Path | None,
+    routing_record: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Fence existing ownership before routing refresh or another Phase A actor."""
     if executor_name not in {"phase_a_executor", "phase_b_executor"}:
         return None
-    if not implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir):
-        return None
+    owned = implementer_failure_blocks_recovery(repo_root, {"status": "error"}, bus_dir=bus_dir)
     try:
         state = json.loads(agent_bus_path(repo_root, bus_dir, "executors", "phase_b_state.json").read_bytes())
-        if (
+        if isinstance(state, dict) and "native_late_resume" in state:
+            # Native late ownership survives independently of inherited actor
+            # fields. A sealed implementer success cannot override a refusal.
+            owned = True
+            if (executor_name == "phase_b_executor" and native_late_checkpoint_error(
+                    repo_root, routing_record, bus_dir=bus_dir,
+            ) is None):
+                return None
+        elif (
             executor_name == "phase_b_executor" and isinstance(state, dict)
             and isinstance(state.get("implementer_mutation"), dict)
             and state["implementer_mutation"].get("state") == "SUCCESS_PENDING_FINALIZE"
@@ -3110,6 +3201,8 @@ def _owned_phase_b_entry_error(
             return None
     except (OSError, ValueError, UnicodeError):
         pass
+    if not owned:
+        return None
     return {
         "status": "error", "decision": "ROUTE_PHASE_B", "executor": "phase_b_executor",
         "step": "implementer_mutation", "authority_error": "outstanding_ownership",
@@ -3121,6 +3214,15 @@ def _is_protected_ordinary_dispatch_error(
     result: dict[str, Any], *, repo_root: Path, bus_dir: str | Path | None,
 ) -> bool:
     """Stop before every retry consumer, including embedded recovery results."""
+    retry = result.get("retry_record")
+    checkpoint = retry.get("native_late_checkpoint") if isinstance(retry, dict) else None
+    if (result.get("executor") == "phase_b_executor" and result.get("status") in {"timeout", "failed"}
+            and isinstance(checkpoint, dict) and checkpoint.get("process_released") is True
+            and checkpoint.get("bus_dir") == str(agent_bus_relpath(bus_dir))
+            and native_late_checkpoint_error(
+                repo_root, retry, bus_dir=bus_dir, checkpoint_sha256=checkpoint.get("sha256"),
+            ) is None):
+        return False
     return (
         result.get("executor") == "phase_b_executor"
         and (
@@ -3226,7 +3328,9 @@ def _ordinary_bridge_fix_continuation_issue(
         if payload.get("step") == "native_supervisor_reentry" and (
             state.get("native_supervisor_reentries") != 1
             or state.get("native_supervisor_reentry_exhausted") is not False
-            or payload.get("supervisor_step") != "post_reentry_supervisor"
+            # Status refresh seals its distinct step and candidate binding.
+            # Existing post-reentry checkpoints predate the explicit step.
+            or payload.get("supervisor_step") != state.get("native_supervisor_step", "post_reentry_supervisor")
         ):
             return "native supervisor continuation exhausted or lacks its bounded authority"
     else:
@@ -3428,6 +3532,8 @@ def _continue_successful_executor_chain(
             "task_id": (record or {}).get("task_id", ""),
             "summary": "Chained from Phase A convergence",
             "next_candidates": phase_b_candidates,
+            **{key: copy.deepcopy(record[key]) for key in ("head_sha", "merge_sha")
+               if record is not None and key in record},
             # Carry the wave's declared FOUNDER_OVERRIDE across the A->B rebuild so
             # the commit-executor Step-5e growth-cap auto-bump reads a non-empty
             # token (see _carry_forward_founder_override). Without this, the rebuilt
@@ -3481,12 +3587,13 @@ def _continue_successful_executor_chain(
             phase_b_result = _run_executor_in_group(
                 phase_b_args, cwd=repo_root, timeout=phase_b_timeout,
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             return {
                 "status": "timeout",
                 "decision": "ROUTE_PHASE_B",
                 "executor": "phase_b_executor",
                 "message": f"Phase B executor timed out after {phase_b_timeout}s",
+                "retry_record": _phase_b_failure_retry_record(phase_b_routing, repo_root, bus_dir=bus_dir, process_released=getattr(exc, "rcx_process_released", False), release_evidence=getattr(exc, "rcx_process_release_evidence", None)),
                 "chained_from": "phase_a_executor",
             }
         if emit_output:
@@ -3505,6 +3612,7 @@ def _continue_successful_executor_chain(
                 "exit_code": phase_b_result.returncode,
                 "stdout": phase_b_result.stdout,
                 "stderr": phase_b_result.stderr,
+                "retry_record": _phase_b_failure_retry_record(phase_b_routing, repo_root, bus_dir=bus_dir, process_released=getattr(phase_b_result, "rcx_process_released", False), release_evidence=getattr(phase_b_result, "rcx_process_release_evidence", None)),
                 "chained_from": "phase_a_executor",
             }
         return _continue_successful_executor_chain(
@@ -3616,7 +3724,7 @@ def _continue_successful_executor_chain(
                             "before chaining commit"
                         ),
                         "recovery": recovery,
-                        "retry_record": dict(record or {}),
+                        "retry_record": _phase_b_failure_retry_record(record or {}, repo_root, bus_dir=bus_dir, process_released=getattr(completed, "rcx_process_released", False), release_evidence=getattr(completed, "rcx_process_release_evidence", None)),
                         "chained_from": (
                             "phase_a_executor" if origin == "phase_a_executor" else None
                         ),
@@ -3759,10 +3867,15 @@ def _run_executor_in_group(
 ) -> subprocess.CompletedProcess[str]:
     """Run an executor subprocess in its own process group.
 
-    On timeout, kills the entire process group (including grandchildren)
-    before raising TimeoutExpired.  This prevents orphaned worker
-    subprocesses from persisting across retry attempts.
+    On timeout, stop the directly owned child and only identity-verified
+    descendants. Release requires complete rooted ownership and fresh absence
+    observations; a best-effort cleanup is never proof. A non-timeout exit
+    supplies no late-checkpoint replay authority: descendants can detach
+    before the executor exits, beyond any subsequent PPID/group observation.
     """
+    owner = uuid.uuid4().hex
+    inherited = os.environ.get(EXECUTOR_PROCESS_OWNER_ENV, "")
+    child_env = {**os.environ, EXECUTOR_PROCESS_OWNER_ENV: ":".join(filter(None, (inherited, owner)))}
     proc = subprocess.Popen(
         args,
         cwd=cwd,
@@ -3770,6 +3883,7 @@ def _run_executor_in_group(
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=True,
+        env=child_env,
     )
     previous_handlers = {
         signum: signal.getsignal(signum)
@@ -3793,36 +3907,15 @@ def _run_executor_in_group(
         signal.signal(signum, _cleanup_for_signal)
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        # Collect the full descendant tree BEFORE killing the process group.
-        # Children spawned with start_new_session=True (e.g. claude --print
-        # via bridge_adapters.py:576) live in separate sessions and survive
-        # os.killpg.  After killpg they get reparented to PID 1 and become
-        # unreachable via PPID-tree walking.  Snapshot them first.
-        try:
-            pre_kill_descendants = process_descendants(proc.pid, cwd=cwd)
-        except Exception:
-            pre_kill_descendants = set()
-        # Kill the process group (catches same-session children)
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except OSError:
-            pass
-        # Kill descendants from the pre-kill snapshot (catches cross-session children)
-        for pid in sorted(pre_kill_descendants, reverse=True):
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
-        try:
-            terminate_process_tree(proc.pid, cwd=cwd)
-        except Exception:
-            pass
-        try:
-            proc.kill()
-        except OSError:
-            pass
-        proc.wait()
+    except subprocess.TimeoutExpired as exc:
+        evidence = terminate_owned_executor(proc, owner, cwd=cwd)
+        exc.rcx_process_release_evidence = evidence
+        exc.rcx_process_released = evidence is not None
+        # A detached writer can keep the output pipes open after the Popen root
+        # exited. Do not wait for its EOF or turn that exit into release proof.
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
         raise
     except BaseException:
         try:
@@ -3837,7 +3930,13 @@ def _run_executor_in_group(
     finally:
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
-    return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+    completed = subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+    # communicate() reaps only the executor. A detached child can outlive it
+    # with closed pipes and an absent original process group; no lifetime
+    # descendant ownership is recorded on this path. Withhold release proof
+    # so native late retries preserve the checkpoint and HOLD before replay.
+    completed.rcx_process_released = False
+    return completed
 
 
 def _retry_commit_only(
@@ -4140,6 +4239,12 @@ def _clear_phase_b_state_for_retry(
         return
     if _is_protected_ordinary_dispatch_error(result, repo_root=repo_root, bus_dir=bus_dir):
         return
+    retry_record = result.get("retry_record")
+    if (isinstance(retry_record, dict) and "native_stub_packet_contract" in retry_record
+            and "native_late_checkpoint" in retry_record):
+        # Admission validates this exact checkpoint before cleanup is reached.
+        # Invalid bindings must also remain intact as refusal evidence.
+        return
     recovery = result.get("recovery")
     if (
         isinstance(recovery, dict)
@@ -4232,6 +4337,76 @@ def _recovered_retry_record(
         return json.loads(json.dumps(retry_record))
     except (TypeError, ValueError):
         return dict(retry_record)
+
+
+def _native_recovered_retry_error(
+    result: dict[str, Any],
+    retry_record: dict[str, Any] | None,
+    current_record: dict[str, Any],
+    repo_root: Path,
+    *, bus_dir: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Reject native retry drift before checkpoint cleanup or routing fallback."""
+    if not _phase_b_result_context(result):
+        return None
+    if "native_stub_packet_contract" not in current_record:
+        return None
+    # The explicit supported bootstrap exception retains its existing selector.
+    if retry_record is not None and retry_record.get("decision") == "ROUTE_PHASE_A":
+        return None
+    issue = "native Phase B recovery lacks a valid same-wave retry record"
+    if retry_record is not None and retry_record.get("decision") == "ROUTE_PHASE_B":
+        source, source_error = _carry_forward_native_stub_packet_contract(current_record)
+        _, carry_error = _carry_forward_native_stub_packet_contract(retry_record)
+        issue = source_error or carry_error or ""
+        if not issue:
+            for key in (
+                *source, "candidate_authority_required", "candidate_authority",
+                "head_sha", "merge_sha", "pager_route", "founder_override",
+                "founder_override_token", *_carry_forward_terminal_receipt(current_record),
+            ):
+                try:
+                    matches = (
+                        (key in current_record) == (key in retry_record)
+                        and json.dumps(current_record.get(key), sort_keys=True, allow_nan=False)
+                        == json.dumps(retry_record.get(key), sort_keys=True, allow_nan=False)
+                    )
+                except (TypeError, ValueError):
+                    matches = False
+                if not matches:
+                    issue = f"native Phase B retry changed launch authority: {key}"
+                    break
+        if not issue:
+            fresh, detail = validate_routing_record_freshness(retry_record, repo_root)
+            if not fresh:
+                issue = detail
+        if not issue and "native_late_checkpoint" in retry_record:
+            checkpoint = retry_record["native_late_checkpoint"]
+            if (
+                type(checkpoint) is not dict
+                or set(checkpoint) != {"sha256", "bus_dir", "process_released", "release_evidence"}
+                or checkpoint["bus_dir"] != str(agent_bus_relpath(bus_dir))
+                or checkpoint["process_released"] is not True
+                or not isinstance(checkpoint["sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", checkpoint["sha256"])
+            ):
+                issue = "native late retry lacks conclusive selected-bus process release"
+            else:
+                issue = native_late_checkpoint_error(
+                    repo_root, retry_record, bus_dir=bus_dir,
+                    checkpoint_sha256=checkpoint["sha256"],
+                ) or ""
+        elif not issue and agent_bus_path(
+            repo_root, bus_dir, "executors", "phase_b_launch_tracker_restore_v1.json",
+        ).exists():
+            issue = "native tracker recovery lacks a bound resumable checkpoint"
+    if not issue:
+        return None
+    return {
+        "status": "error", "decision": "ROUTE_PHASE_B", "executor": "phase_b_executor",
+        "authority_error": "invalid_native_phase_b_retry",
+        "message": issue + "; checkpoint and canonical launch route preserved",
+    }
 
 
 def _auto_refresh_routing(
@@ -4740,9 +4915,17 @@ def dispatch(
     cfg = config or load_config()
     ownership_error = _owned_phase_b_entry_error(
         resolve_executor(record.get("decision", "")), repo_root=repo, bus_dir=bus_dir,
+        routing_record=record,
     )
     if ownership_error is not None:
         return ownership_error
+    _, native_error = _carry_forward_native_stub_packet_contract(record)
+    if native_error is not None:
+        return {
+            "status": "error", "decision": record.get("decision", ""),
+            "executor": resolve_executor(record.get("decision", "")),
+            "authority_error": "invalid_native_stub_packet_contract", "message": native_error,
+        }
     # Preserve caller/canonical identity before TASKS.md tracked_packet backfill.
     identity_record = record
     record = _restore_canonical_supervisor_terminal_receipt(
@@ -5215,6 +5398,8 @@ def dispatch(
                 "exit_code": result.returncode,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
+                **({"retry_record": _phase_b_failure_retry_record(record, repo, bus_dir=bus_dir, process_released=getattr(result, "rcx_process_released", False), release_evidence=getattr(result, "rcx_process_release_evidence", None))}
+                   if executor_name == "phase_b_executor" else {}),
             }
         return _continue_successful_executor_chain(
             executor_name,
@@ -5225,12 +5410,14 @@ def dispatch(
             verbose=verbose,
             bus_dir=bus_dir,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         return {
             "status": "timeout",
             "decision": decision,
             "executor": executor_name,
             "message": f"Executor {executor_name} timed out after {timeout}s",
+            **({"retry_record": _phase_b_failure_retry_record(record, repo, bus_dir=bus_dir, process_released=getattr(exc, "rcx_process_released", False), release_evidence=getattr(exc, "rcx_process_release_evidence", None))}
+               if executor_name == "phase_b_executor" else {}),
         }
     except Exception as exc:
         return {
@@ -5992,6 +6179,7 @@ def main(argv: list[str] | None = None) -> int:
             max_attempts = 1 + max(0, args.retries)
             result = None
             attempt = 1
+            recovered_phase_b_route = False
             _recovery_original_timeouts = None
             while attempt <= max_attempts:
                 # If previous attempt was a chained commit failure (Phase A/B
@@ -6008,7 +6196,9 @@ def main(argv: list[str] | None = None) -> int:
                         record,
                         config=config,
                         repo_root=repo_root,
-                        routing_record_path=args.routing_record if args.routing_record else None,
+                        routing_record_path=(
+                            None if recovered_phase_b_route else args.routing_record
+                        ),
                         skip_freshness=args.skip_freshness,
                         verbose=args.verbose,
                         bus_dir=args.bus_dir,
@@ -6028,10 +6218,15 @@ def main(argv: list[str] | None = None) -> int:
                             "[dispatch] Phase B recovered in-process — retrying "
                             "before commit chain"
                         )
-                    _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
                     retry_record = _recovered_retry_record(result, current_record=record)
+                    retry_error = _native_recovered_retry_error(result, retry_record, record, repo_root, bus_dir=args.bus_dir)
+                    if retry_error is not None:
+                        result = retry_error
+                        break
+                    _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
                     if retry_record is not None:
                         record = retry_record
+                        recovered_phase_b_route = record.get("decision") == "ROUTE_PHASE_B"
                     elif not _is_chained_commit_failure(result):
                         if args.routing_record:
                             explicit_record = _reload_explicit_routing_record(
@@ -6095,10 +6290,15 @@ def main(argv: list[str] | None = None) -> int:
                             new_orig,
                         )
                         # Recovery succeeded — grant one extra attempt (don't increment counter)
-                        _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
                         retry_record = _recovered_retry_record(result, current_record=record)
+                        retry_error = _native_recovered_retry_error(result, retry_record, record, repo_root, bus_dir=args.bus_dir)
+                        if retry_error is not None:
+                            result = retry_error
+                            break
+                        _clear_phase_b_state_for_retry(repo_root, result, verbose=args.verbose, bus_dir=args.bus_dir)
                         if retry_record is not None:
                             record = retry_record
+                            recovered_phase_b_route = record.get("decision") == "ROUTE_PHASE_B"
                         elif not _is_chained_commit_failure(result):
                             if args.routing_record:
                                 explicit_record = _reload_explicit_routing_record(

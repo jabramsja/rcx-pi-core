@@ -1202,6 +1202,77 @@ def _prepare_native_phase_b_terminal_state(
     }
 
 
+@pytest.mark.parametrize("fault", [None, "role", "turn-type", "wave", "packet", "missing-receipt", "claimed-receipt"])
+def test_real_dispatch_rebind_retains_same_config_single_use_continuation(wave_repo, monkeypatch, fault):
+    """Real launcher -> canonical rebind -> A/B argv -> terminal -> continuation."""
+    import executor_dispatch as dispatch
+    import phase_a_executor as phase_a
+
+    delivered = []
+
+    def rebind(repo, config, bus):
+        route_path = ec.routing_record_path(repo, bus)
+        original = json.loads(route_path.read_bytes())
+        packet = (repo / config.tracked_packet).read_text()
+        with pytest.raises(phase_a.PhaseAExecutorError, match="outside the exact launcher skeleton"):
+            phase_a.validate_native_stub_packet_contract(original, config.tracked_packet, packet)
+        assert phase_a.validate_native_stub_packet_contract(
+            original, config.tracked_packet, packet, allow_post_lock_machine_sections=True)
+
+        def completed_actor(args, *, cwd, timeout):
+            route = json.loads(args[args.index("--routing-record") + 1])
+            delivered.append(route)
+            if Path(args[1]).name == "phase_a_executor.py":
+                # Model the already-completed Phase A process boundary only.
+                return subprocess.CompletedProcess(args, 0, json.dumps({"plan_path": config.tracked_packet}), "")
+            assert Path(args[1]).name == "phase_b_executor.py"
+            return subprocess.CompletedProcess(args, 2, "", "terminal fixture return")
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(dispatch, "_run_executor_in_group", completed_actor)
+            result = dispatch.dispatch(original, repo_root=repo, routing_record_path=route_path, bus_dir=bus)
+        assert result["status"] == "failed"
+        assert len(delivered) == 2
+        rebound = json.loads(route_path.read_bytes())
+        for route in [rebound, *delivered, result["retry_record"]]:
+            for key in ("launch_wave_override_authority", "native_stub_packet_contract", "candidate_authority", "founder_override"):
+                assert route[key] == original[key]
+        assert rebound["decision"] == "ROUTE_PHASE_A"
+
+    state = _prepare_native_phase_b_terminal_state(wave_repo, mutate_before_return=rebind)
+    config = state["config"]
+    _write_phase_b_resume_bridge(wave_repo, state["bus_dir"])
+    if fault == "role":
+        config = dataclasses.replace(config, reviewer_agent="claude")
+    elif fault in {"turn-type", "wave", "packet"}:
+        route = json.loads(state["routing_path"].read_bytes())
+        if fault == "turn-type": route["launch_wave_override_authority"]["max_turns"] = True
+        elif fault == "wave": route["wave_name"] = "foreign-wave"
+        else: route["next_candidates"][0]["tracked_packet"] = "reports/control_plane/foreign.md"
+        state["routing_path"].write_text(json.dumps(route))
+    elif fault == "missing-receipt":
+        state["available_path"].unlink()
+    elif fault == "claimed-receipt":
+        state["available_path"].rename(state["claimed_path"])
+    before = _phase_b_resume_authority_snapshot(wave_repo, state)
+    calls = []
+    def resume(args, **kwargs):
+        calls.append(args)
+        assert args[2] == "phase-b"
+        assert state["claimed_path"].exists() and not state["available_path"].exists()
+        assert _phase_b_resume_authority_snapshot(wave_repo, state) == before
+        return subprocess.CompletedProcess(args, 0)
+    _forbid_phase_b_resume_producers(monkeypatch)
+    if fault is None:
+        assert lw.run_wave_setup(wave_repo, config, launch=True, runner=resume, bus_dir=state["bus_dir"]).launch["returncode"] == 0
+        assert len(calls) == 1
+        assert not state["available_path"].exists() and not state["claimed_path"].exists()
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(wave_repo, config, launch=True, runner=resume, bus_dir=state["bus_dir"])
+    assert len(calls) == (1 if fault is None else 0)
+    assert _phase_b_resume_authority_snapshot(wave_repo, state) == before
+
+
 def _publish_native_pre_supervisor_fixture(repo, config, bus_dir):
     """Use native note/fingerprint/seal producers on a real staged Git candidate."""
     import phase_b_executor as phase_b

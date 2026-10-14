@@ -19,6 +19,7 @@ from unittest.mock import patch, MagicMock, PropertyMock
 import pytest
 
 from mu.tests.tools.module_loader import load_module
+from mu.tests.tools.test_executor_common import complete_process_observation
 from tests.repo_root import REPO_ROOT
 from mu.tests.tools.test_phase_b_executor import (
     PrivateReviewCrash, private_review_checkpoint, real_pre_review_package,
@@ -339,7 +340,7 @@ def test_terminal_parser_never_promotes_nested_or_ambiguous_results(stdout):
     assert dispatch_mod._extract_structured_stdout_payload(stdout) is None  # ANTICHEAT_OK: direct terminal framing negative controls
 
 
-@pytest.mark.parametrize("terminal", [True, False])
+@pytest.mark.parametrize("terminal", [True, False, "timeout"])
 def test_terminal_transport_drains_both_child_pipes(tmp_path, terminal):
     """A disposable child exceeding both pipe buffers must finish intact."""
     payload = {"status": "commit_ready"}
@@ -351,10 +352,20 @@ def test_terminal_transport_drains_both_child_pipes(tmp_path, terminal):
         " sys.stdout.write('[diagnostic] ' + 'o' * 4096 + '\\n'); sys.stdout.flush()\n"
         " sys.stderr.write('e' * 4096 + '\\n'); sys.stderr.flush()\n"
         f"sys.stdout.write({final!r}); sys.stdout.flush()\n"
-        f"sys.exit({exit_code})\n"
+        + ("import time; time.sleep(60)\n" if terminal == "timeout" else "")
+        + f"sys.exit({exit_code})\n"
     )
-    result = dispatch_mod._run_executor_in_group([sys.executable, "-c", script], cwd=tmp_path, timeout=10)  # ANTICHEAT_OK: real pipe-drain boundary with disposable non-executor child
+    from contextlib import nullcontext
+    with complete_process_observation(common_mod) if terminal == "timeout" else nullcontext() as observations:
+        with pytest.raises(subprocess.TimeoutExpired) if terminal == "timeout" else nullcontext() as caught:
+            result = dispatch_mod._run_executor_in_group([sys.executable, "-c", script], cwd=tmp_path, timeout=0.1 if terminal == "timeout" else 10)  # ANTICHEAT_OK: real pipe-drain boundary with disposable non-executor child
+        if terminal == "timeout":
+            assert caught.value.rcx_process_released is True, observations
+            assert common_mod.executor_release_evidence_error(caught.value.rcx_process_release_evidence, cwd=tmp_path) is None
+            return
     assert result.returncode == exit_code
+    # A normal exit cannot prove that descendants in other sessions exited.
+    assert result.rcx_process_released is False
     assert result.stdout == ("[diagnostic] " + "o" * 4096 + "\n") * 64 + final
     assert result.stderr == ("e" * 4096 + "\n") * 64
     actual = dispatch_mod._extract_structured_stdout_payload(result.stdout)  # ANTICHEAT_OK: terminal parsing after actual pipe draining
@@ -12755,15 +12766,21 @@ class TestDispatcherExecutorGroupCleanup:
         with patch.object(dispatch_mod.subprocess, "Popen", return_value=mock_proc) as mock_popen, \
              patch.object(dispatch_mod.os, "killpg") as mock_killpg, \
              patch.object(dispatch_mod, "process_descendants", return_value=set()) as mock_descendants, \
-             patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate:
-            with pytest.raises(subprocess.TimeoutExpired):
+             patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate, \
+             patch.object(dispatch_mod.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["ps"])):
+            with pytest.raises(subprocess.TimeoutExpired) as expired:
                 dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)  # ANTICHEAT_OK: testing direct executor-group timeout cleanup helper
 
         _, kwargs = mock_popen.call_args
         assert kwargs["start_new_session"] is True
-        mock_descendants.assert_called_once_with(4321, cwd=Path("."))
-        mock_killpg.assert_called_once_with(4321, signal.SIGTERM)
-        mock_terminate.assert_called_once_with(4321, cwd=Path("."))
+        # The historical node now fences query failure: the directly owned
+        # Popen child is reaped, and no best-effort PID set authorizes signaling
+        # or replay. The legacy cleanup helper has separate unchanged coverage.
+        mock_descendants.assert_not_called()
+        mock_killpg.assert_not_called()
+        mock_terminate.assert_not_called()
+        assert expired.value.rcx_process_released is False
+        assert expired.value.rcx_process_release_evidence is None
         mock_proc.kill.assert_called_once()
 
     def test_interrupt_calls_terminate_process_tree(self):
@@ -17993,6 +18010,219 @@ def _run_native_phase_a_chain(fixture, monkeypatch, record=None, *, plan_path=No
 
 class TestNativeEnvelopeDispatcherTransport:
     """The two observed dispatcher projections must retain native authority."""
+
+    @pytest.mark.parametrize("stale", [False, True])
+    def test_native_launch_overrides_survive_public_dispatch(self, native_dispatch_fixture, monkeypatch, stale):
+        fixture = native_dispatch_fixture
+        route = copy.deepcopy(fixture["record"])
+        if stale:
+            route["state_sha"] = "stale"
+        fixture["canonical"].write_text(json.dumps(route))
+        before = fixture["canonical"].read_bytes()
+        replace = os.replace
+        delivered, publications = [], []
+
+        def publish(source, target):
+            if Path(target) == fixture["canonical"]:
+                assert fixture["canonical"].read_bytes() == before
+                candidate = json.loads(Path(source).read_bytes())
+                assert candidate.get("launch_wave_override_authority") == route["launch_wave_override_authority"]
+                publications.append(candidate)
+            return replace(source, target)
+
+        def child(args, *, cwd, timeout):
+            received = json.loads(args[args.index("--routing-record") + 1])
+            delivered.append(received)
+            if Path(args[1]).name == "phase_a_executor.py":
+                return subprocess.CompletedProcess(args, 0, json.dumps({"plan_path": fixture["config"].tracked_packet}), "")
+            return subprocess.CompletedProcess(args, 2, "", "fixture child boundary")
+
+        monkeypatch.setattr(os, "replace", publish)
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", child)
+        result = dispatch_mod.dispatch(route, repo_root=fixture["repo"],
+            routing_record_path=fixture["canonical"], bus_dir=fixture["bus_dir"])
+        assert result["status"] == "failed"
+        assert len(delivered) == 2
+        assert len(publications) == int(stale)
+        for received in delivered:
+            for key in ("native_stub_packet_contract", "launch_wave_override_authority", "candidate_authority"):
+                assert received.get(key) == route[key]
+        assert result["retry_record"]["decision"] == "ROUTE_PHASE_B"
+        assert result["retry_record"]["next_candidates"] == delivered[-1]["next_candidates"]
+
+    @pytest.mark.parametrize("failure", ["timeout", "failed-kill", "exhausted"])
+    def test_native_chained_recovery_uses_real_retry_selector(self, native_dispatch_fixture, monkeypatch, failure):
+        fixture = native_dispatch_fixture
+        repo, bus = fixture["repo"], fixture["bus_dir"]
+        config_dir = repo / "mu/tools/executors"
+        config_dir.mkdir(parents=True)
+        config_path = config_dir / "executor_config.json"
+        config_path.write_text(json.dumps({"timeouts": {"phase_a_executor": 100, "phase_b_executor": 100}}))
+        config_before = config_path.read_bytes()
+        route = fixture["record"]
+        calls, observed_routes = [], []
+
+        def child(args, *, cwd, timeout):
+            executor = Path(args[1]).name
+            calls.append((executor, timeout))
+            received = json.loads(args[args.index("--routing-record") + 1])
+            observed_routes.append(received)
+            if executor == "phase_a_executor.py":
+                assert len(calls) == 1, "completed Phase A must not be relaunched"
+                return subprocess.CompletedProcess(args, 0, json.dumps({"plan_path": fixture["config"].tracked_packet}), "")
+            assert executor == "phase_b_executor.py"
+            assert args[args.index("--plan") + 1] == fixture["config"].tracked_packet
+            assert args[args.index("--bus-dir") + 1] == bus
+            if len(calls) == 2 or failure == "exhausted":
+                if failure == "failed-kill":
+                    return subprocess.CompletedProcess(args, -15, "", "terminated")
+                raise subprocess.TimeoutExpired(args, timeout)
+            return subprocess.CompletedProcess(args, 2, json.dumps({"status": "needs_human"}), "")
+
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", child)
+        monkeypatch.setattr(dispatch_mod, "resolve_repo_root_for_dispatch", lambda **kw: repo)
+        monkeypatch.setattr(dispatch_mod, "load_config", lambda *a: json.loads(config_before))
+        monkeypatch.setattr(dispatch_mod, "_LaneMonitor", lambda *a, **kw: SimpleNamespace(
+            is_lane=False, spawn=lambda: None, cleanup=lambda: None))
+        monkeypatch.chdir(repo)
+        assert dispatch_mod.main(["--routing-record", str(fixture["canonical"]),
+            "--bus-dir", bus, "--retries", "0", "--json"]) == 1
+        expected = [("phase_a_executor.py", 100), ("phase_b_executor.py", 100),
+                    ("phase_b_executor.py", 100 if failure == "failed-kill" else 150)]
+        if failure == "exhausted":
+            expected.append(("phase_b_executor.py", 200))
+        assert calls == expected
+        for received in observed_routes:
+            for key in ("native_stub_packet_contract", "launch_wave_override_authority", "candidate_authority"):
+                assert received.get(key) == route[key]
+        assert config_path.read_bytes() == config_before
+        assert json.loads(fixture["canonical"].read_bytes())["decision"] == "ROUTE_PHASE_A"
+
+    def test_native_timeout_reaps_process_before_actual_phase_b_retry(self, native_dispatch_fixture, monkeypatch):
+        fixture = native_dispatch_fixture
+        repo, bus = fixture["repo"], fixture["bus_dir"]
+        scripts = repo / "mu/tools/executors"
+        scripts.mkdir(parents=True)
+        config = {"timeouts": {"phase_a_executor": 2, "phase_b_executor": 2}}
+        (scripts / "executor_config.json").write_text(json.dumps(config))
+        (scripts / "phase_a_executor.py").write_text(
+            "import json\nprint(json.dumps(" + repr({"plan_path": fixture["config"].tracked_packet}) + "))\n")
+        # A disposable stand-in, run by the real process-group owner. The next
+        # process independently probes the previous PID before returning.
+        (scripts / "phase_b_executor.py").write_text(
+            "import json, os, pathlib, sys, time\n"
+            f"receipt = pathlib.Path({str(repo / bus / 'process-observations.json')!r})\n"
+            "observed = json.loads(receipt.read_text()) if receipt.exists() else []\n"
+            "for prior in observed:\n"
+            "    try: os.kill(prior['pid'], 0)\n"
+            "    except ProcessLookupError: pass\n"
+            "    else: raise RuntimeError('duplicate process owner')\n"
+            "observed.append({'pid': os.getpid(), 'args': sys.argv})\n"
+            "receipt.write_text(json.dumps(observed))\n"
+            "if len(observed) == 1: time.sleep(60)\n"
+            "print(json.dumps({'status': 'needs_human'}))\n"
+            "sys.exit(2)\n")
+        monkeypatch.chdir(repo)
+        monkeypatch.setattr(dispatch_mod, "SCRIPT_DIR", scripts)
+        monkeypatch.setattr(dispatch_mod, "load_config", lambda *a: copy.deepcopy(config))
+        monkeypatch.setattr(dispatch_mod, "_LaneMonitor", lambda *a, **kw: SimpleNamespace(is_lane=False, spawn=lambda: None, cleanup=lambda: None))
+        assert dispatch_mod.main(["--routing-record", str(fixture["canonical"]), "--bus-dir", bus, "--json"]) == 1
+        observations = json.loads((repo / bus / "process-observations.json").read_bytes())
+        assert len(observations) == 2
+        assert len({item["pid"] for item in observations}) == 2
+        for item in observations:
+            with pytest.raises(ProcessLookupError):
+                os.kill(item["pid"], 0)
+            args = item["args"]
+            assert args[args.index("--plan") + 1] == fixture["config"].tracked_packet
+            route = json.loads(args[args.index("--routing-record") + 1])
+            assert route["launch_wave_override_authority"] == fixture["record"]["launch_wave_override_authority"]
+
+    @pytest.mark.parametrize("stale", [False, True])
+    @pytest.mark.parametrize("fault", ["missing", "null", "version-bool", "role-type", "pager-type", "turns-type", "extra"])
+    def test_native_override_invalid_authority_holds_before_any_projection(self, native_dispatch_fixture, monkeypatch, stale, fault):
+        fixture = native_dispatch_fixture
+        route = copy.deepcopy(fixture["record"])
+        authority = route["launch_wave_override_authority"]
+        if fault == "missing":
+            route.pop("launch_wave_override_authority")
+        elif fault == "null":
+            route["launch_wave_override_authority"] = None
+        else:
+            key, value = {"version-bool": ("version", True), "role-type": ("implementer_agent", []),
+                "pager-type": ("pager_route", 0), "turns-type": ("max_turns", False), "extra": ("unknown", 1)}[fault]
+            authority[key] = value
+        if stale:
+            route["state_sha"] = "stale"
+        fixture["canonical"].write_text(json.dumps(route))
+        before = {p: p.read_bytes() for p in (fixture["canonical"], fixture["packet_path"], fixture["repo"] / "TASKS.md", fixture["repo"] / ".git/index")}
+        def forbidden(*args, **kwargs):
+            pytest.fail("invalid launch authority must stop before a child or fallback")
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", forbidden)
+        monkeypatch.setattr(dispatch_mod, "_auto_refresh_routing", forbidden)
+        result = dispatch_mod.dispatch(route, repo_root=fixture["repo"],
+            routing_record_path=fixture["canonical"], bus_dir=fixture["bus_dir"])
+        assert result["status"] == "error"
+        assert "launch_wave_override_authority" in result["message"]
+        assert all(p.read_bytes() == content for p, content in before.items())
+
+    @pytest.mark.parametrize("fault", ["wave", "packet", "role", "override", "candidate", "candidate-type", "decision", "missing", "digest", "source", "index", "config", "owned"])
+    def test_native_recovered_retry_drift_holds_with_checkpoint(self, native_dispatch_fixture, monkeypatch, fault):
+        fixture = native_dispatch_fixture
+        repo, bus = fixture["repo"], fixture["bus_dir"]
+        config_path = repo / "mu/tools/executors/executor_config.json"
+        config_path.parent.mkdir(parents=True)
+        config_path.write_text(json.dumps({"timeouts": {"phase_a_executor": 100, "phase_b_executor": 100}}))
+        checkpoint = repo / bus / "executors/phase_b_state.json"
+        checkpoint.parent.mkdir(parents=True)
+        checkpoint_bytes = json.dumps({"completed_step": "agent_review"}).encode()
+        checkpoint.write_bytes(checkpoint_bytes)
+        calls = []
+        recovery_calls = []
+        protected = []
+        real_recovery = dispatch_mod.attempt_recovery
+
+        def child(args, *, cwd, timeout):
+            calls.append(Path(args[1]).name)
+            if len(calls) == 1:
+                return subprocess.CompletedProcess(args, 0, json.dumps({"plan_path": fixture["config"].tracked_packet}), "")
+            assert len(calls) == 2, "a drifted retry must not launch another actor"
+            if fault == "owned":
+                checkpoint.write_text(json.dumps({"completed_step": "implementer_mutation", "implementer_mutation": {"state": "RUNNING"}}))
+                protected.append(checkpoint.read_bytes())
+            raise subprocess.TimeoutExpired(args, timeout)
+
+        def recover(*args, **kwargs):
+            recovery_calls.append(True)
+            result = real_recovery(*args, **kwargs)
+            retry = args[1].get("retry_record", {})
+            if fault == "wave": retry["wave_name"] = "foreign-wave"
+            elif fault == "packet": retry["next_candidates"][0]["tracked_packet"] = "reports/control_plane/foreign.md"
+            elif fault == "role": retry["launch_wave_override_authority"]["implementer_agent"] = "foreign-role"
+            elif fault == "override": retry["founder_override"] = "foreign-wave"
+            elif fault == "candidate": retry["candidate_authority"]["required"] = True
+            elif fault == "candidate-type": retry["candidate_authority"] = {"invalid-json"}
+            elif fault == "decision": retry["decision"] = "COMMIT_GO"
+            elif fault == "missing": retry.pop("launch_wave_override_authority")
+            elif fault == "digest": retry["native_stub_packet_contract"]["digest"] = "0" * 64
+            elif fault == "source": fixture["packet_path"].write_text(fixture["packet_path"].read_text() + "\n## Foreign\n")
+            elif fault == "config": config_path.write_text(config_path.read_text() + "\n")
+            elif fault == "index":
+                (repo / "foreign.txt").write_text("foreign index change")
+                subprocess.run(["git", "add", "foreign.txt"], cwd=repo, check=True)
+            protected.append(checkpoint.read_bytes())
+            return result
+
+        monkeypatch.chdir(repo)
+        monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", child)
+        monkeypatch.setattr(dispatch_mod, "attempt_recovery", recover)
+        monkeypatch.setattr(dispatch_mod, "load_config", lambda *a: {"timeouts": {"phase_a_executor": 100, "phase_b_executor": 100}})
+        monkeypatch.setattr(dispatch_mod, "_LaneMonitor", lambda *a, **kw: SimpleNamespace(is_lane=False, spawn=lambda: None, cleanup=lambda: None))
+        assert dispatch_mod.main(["--routing-record", str(fixture["canonical"]), "--bus-dir", bus, "--json"]) == 1
+        assert calls == ["phase_a_executor.py", "phase_b_executor.py"]
+        assert len(recovery_calls) == (0 if fault == "owned" else 1)
+        assert checkpoint.read_bytes() == protected[0]
+        assert json.loads(fixture["canonical"].read_bytes())["decision"] == "ROUTE_PHASE_A"
 
     def test_phase_a_to_b_delivers_exact_envelope(self, native_dispatch_fixture, monkeypatch):
         fixture = native_dispatch_fixture
