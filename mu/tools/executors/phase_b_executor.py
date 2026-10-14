@@ -34,6 +34,7 @@ import importlib.util
 import json
 import os
 import re
+import selectors
 import signal
 import sqlite3
 import stat
@@ -41,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import uuid
 from functools import wraps
 from contextlib import closing, contextmanager
@@ -68,6 +70,7 @@ try:
         EXECUTOR_PROCESS_OWNER_ENV,
         artifact_size_mtime_ns,
         terminate_process_tree,
+        terminate_owned_executor,
         ensure_not_agent_review_mode,
         run_bridge_subprocess,
         resolve_agent_bus_dir,
@@ -98,6 +101,7 @@ except ImportError:
     EXECUTOR_PROCESS_OWNER_ENV = _mod.EXECUTOR_PROCESS_OWNER_ENV
     artifact_size_mtime_ns = _mod.artifact_size_mtime_ns
     terminate_process_tree = _mod.terminate_process_tree
+    terminate_owned_executor = _mod.terminate_owned_executor
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     run_bridge_subprocess = _mod.run_bridge_subprocess
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
@@ -142,6 +146,39 @@ class PhaseBExecutorError(RuntimeError):
     """Raised when Phase B executor cannot proceed."""
 
 
+class PytestCleanupHoldError(PhaseBExecutorError):
+    """An interrupted pytest producer could not prove process release.
+
+    Consumers must transport pytest_result before attempting any recovery.
+    The exception message and traceback are diagnostics, never stop authority.
+    """
+
+    def __init__(self, pytest_result: dict[str, Any]):
+        super().__init__("HOLD: interrupted pytest process release is unverified")
+        self.pytest_result = pytest_result
+        self.result = {
+            "status": "error", "step": "pytest_cleanup", "hold": True,
+            "retry_allowed": False, "errors": [str(self)],
+            "pytest_result": pytest_result,
+        }
+
+
+def pytest_cleanup_hold_from_exception(exc: BaseException) -> dict[str, Any] | None:
+    """Recover only the typed producer contract, including wrapped exceptions."""
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, PytestCleanupHoldError):
+            return current.pytest_result
+        pending.extend(error for error in (current.__cause__, current.__context__)
+                       if error is not None)
+    return None
+
+
 class ImplementerOwnershipError(PhaseBExecutorError):
     """An owned invocation could not establish its durable outcome."""
 
@@ -177,6 +214,8 @@ DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
 # final sweep. Keep a bounded cap while allowing the configured executor budget
 # to cover a full evidence-sized pytest run.
 MAX_PYTEST_GATE_TIMEOUT_S = 7200
+PYTEST_GATE_WORKERS = 4
+PYTEST_OUTPUT_BYTES_PER_STREAM = 65536
 _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/host/",
     "mu/substrate/",
@@ -1404,27 +1443,133 @@ def _run_pytest_on_files(
     *,
     timeout: int = 120,
 ) -> dict[str, Any]:
-    """Run pytest on specific test files. Returns exit_code and output."""
+    """Compatibility seam for all existing native gate callers."""
+    try:
+        return run_pytest_on_files(repo_root, test_files, timeout=timeout)
+    except BaseException as exc:
+        native = pytest_cleanup_hold_from_exception(exc)
+        if native is None:
+            raise
+        return native
+
+
+class _PytestOutputBuffer:
+    """Drain arbitrary subprocess output while retaining a finite head and tail."""
+
+    def __init__(self) -> None:
+        self.head = bytearray()
+        self.tail = bytearray()
+        self.total = 0
+
+    def append(self, chunk: bytes) -> None:
+        self.total += len(chunk)
+        half = PYTEST_OUTPUT_BYTES_PER_STREAM // 2
+        take = min(len(chunk), half - len(self.head))
+        self.head.extend(chunk[:take])
+        self.tail.extend(chunk[take:])
+        if len(self.tail) > half:
+            del self.tail[:-half]
+
+    def render(self) -> str:
+        omitted = self.total - len(self.head) - len(self.tail)
+        gap = f"\n... <{omitted} output bytes omitted> ...\n".encode() if omitted else b""
+        return (self.head + gap + self.tail).decode("utf-8", errors="replace")
+
+
+def run_pytest_on_files(
+    repo_root: Path,
+    test_files: list[str],
+    *,
+    timeout: int = 120,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Run the complete selection with four workers and bounded diagnostics.
+
+    Scheduling preserves pytest markers and Hypothesis profiles. Inherit the
+    environment, forcing only the existing hash seed and adding an inherited
+    process-ownership marker. Explicitly disable fail-fast from configuration
+    or PYTEST_ADDOPTS: failures remain blocking while the rest of the selected
+    tests still execute.
+
+    Timeout/cancellation uses the shared conservative owned-process releaser.
+    Uncertain cleanup is HOLD, never permission to replay or retire a source.
+    The retained output is bounded in memory; no unbounded spool or post-timeout
+    communicate() waits on pipes held open by unverified children.
+    """
     if not test_files:
         return {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
+    command = [sys.executable, "-u", "-m", "pytest", "-n", str(PYTEST_GATE_WORKERS),
+               "--dist", "worksteal", "--max-worker-restart=0", "--maxfail=0",
+               "--tb=short", *test_files]
+    owner = uuid.uuid4().hex
+    inherited_env = os.environ if env is None else env
+    owners = inherited_env.get(EXECUTOR_PROCESS_OWNER_ENV, "")
+    env = {**inherited_env, "PYTHONHASHSEED": "0",
+           EXECUTOR_PROCESS_OWNER_ENV: f"{owners}:{owner}" if owners else owner}
+    output = {name: _PytestOutputBuffer() for name in ("stdout", "stderr")}
+    started = time.monotonic()
+    proc = subprocess.Popen(command, cwd=repo_root, env=env, start_new_session=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    timed_out = False
+    release = None
+    interruption = None
+    cleanup_error = None
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", "-x", "--tb=short", *test_files],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-            env={**os.environ, "PYTHONHASHSEED": "0"},
-        )
-        return {
-            "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "passed": result.returncode == 0,
-        }
-    except subprocess.TimeoutExpired:
-        return {"exit_code": -1, "stdout": "", "stderr": "pytest timed out", "passed": False}
+        with selectors.DefaultSelector() as selector:
+            for name in output:
+                selector.register(getattr(proc, name), selectors.EVENT_READ, name)
+            while selector.get_map() or proc.poll() is None:
+                remaining = started + timeout - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                for key, _ in selector.select(min(0.1, remaining)):
+                    chunk = os.read(key.fd, 8192)
+                    if chunk:
+                        output[key.data].append(chunk)
+                    else:
+                        selector.unregister(key.fileobj)
+    except BaseException as exc:
+        interruption = exc
+        timed_out = isinstance(exc, subprocess.TimeoutExpired)
+        try:
+            release = terminate_owned_executor(proc, owner, cwd=repo_root)
+        except BaseException as release_exc:
+            # An observer/releaser error supplies no release authority. Keep
+            # both exceptions and the original bounded process diagnostics.
+            cleanup_error = release_exc
+    finally:
+        for name in output:
+            getattr(proc, name).close()
+    result = {
+        "exit_code": -1 if interruption is not None else proc.returncode,
+        "stdout": output["stdout"].render(),
+        "stderr": output["stderr"].render(),
+        "passed": interruption is None and proc.returncode == 0,
+        "failure_kind": ("timeout" if timed_out else
+                         "producer_error" if isinstance(interruption, Exception) else
+                         "interrupted" if interruption is not None else
+                         "nonzero_exit" if proc.returncode else "none"),
+        "timed_out": timed_out,
+        "timeout_seconds": timeout,
+        "elapsed_seconds": time.monotonic() - started,
+        "command": command,
+        "worker_count": PYTEST_GATE_WORKERS,
+        "output_bytes": {name: stream.total for name, stream in output.items()},
+        "output_limit_bytes_per_stream": PYTEST_OUTPUT_BYTES_PER_STREAM,
+        "cleanup_status": ("released" if release is not None else "HOLD") if interruption is not None else "not_needed",
+        "cleanup_release_evidence": release,
+    }
+    for field, error in (("interruption", interruption), ("cleanup_error", cleanup_error)):
+        if error is not None:
+            diagnostic = _PytestOutputBuffer()
+            for part in traceback.format_exception(error):
+                diagnostic.append(part.encode("utf-8", errors="replace"))
+            result[field] = {"type": type(error).__name__, "traceback": diagnostic.render()}
+    if interruption is not None and (not timed_out or cleanup_error is not None):
+        if release is None:
+            raise PytestCleanupHoldError(result) from interruption
+        raise interruption.with_traceback(interruption.__traceback__)
+    return result
 
 
 def _resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
@@ -2122,6 +2267,10 @@ def _summarize_pytest_failure(result: dict[str, Any], *, stdout_limit: int = 100
     stdout = result.get("stdout") or ""
     stderr = result.get("stderr") or ""
     parts: list[str] = []
+    if result.get("timed_out"):
+        parts.append(f"pytest timed out after {result['timeout_seconds']}s")
+    if result.get("cleanup_status") == "HOLD":
+        parts.append("HOLD: owned pytest process release is unverified")
     parts.extend(_summarize_bounded_output("stdout", stdout, limit=stdout_limit))
     parts.extend(_summarize_bounded_output("stderr", stderr, limit=stderr_limit))
     return " ".join(parts) if parts else "no stdout/stderr captured"
@@ -8592,8 +8741,10 @@ def _resume_commit_ready_supervisor(
             raise PhaseBExecutorError("Commit-ready private-attribute gate failed")
         tests = _run_pytest_on_files(repo_root, select_pytest_gate_files(files, repo_root),
                                     timeout=authority["pytest_gate_timeout"])
+        if tests.get("cleanup_status") == "HOLD":
+            return {**PytestCleanupHoldError(tests).result, "step": "commit_ready_resume_pytest"}
         if not tests.get("passed"):
-            raise PhaseBExecutorError("Commit-ready final tests failed")
+            raise PhaseBExecutorError("Commit-ready final tests failed: " + _summarize_pytest_failure(tests))
         if commit_ready_resume_authority(repo_root) != authority:
             raise PhaseBExecutorError("Candidate changed during continuation gates")
         review = run_pre_commit_supervisor(repo_root, package_path, verbose=verbose, bus_dir=_active_bus_dir())
@@ -13375,6 +13526,8 @@ def run_phase_b(
                 _clear_state(repo_root)
                 return result
             final_pytest = _run_pytest_on_files(repo_root, final_test_files, timeout=pytest_gate_timeout)
+            if final_pytest.get("cleanup_status") == "HOLD":
+                return {**PytestCleanupHoldError(final_pytest).result, "step": "final_pytest_gate"}
             if not final_pytest["passed"]:
                 failure_summary = (
                     f"Final pytest gate FAILED (exit={final_pytest['exit_code']}). "
@@ -13399,12 +13552,15 @@ def run_phase_b(
                     result["errors"] = [
                         f"Phase B pager emission failed after final pytest failure: {exc}"
                     ]
-                    _clear_state(repo_root)
+                    result["pytest_result"] = final_pytest
+                    if final_pytest.get("cleanup_status") != "HOLD":
+                        _clear_state(repo_root)
                     return result
                 return {
                     "status": "error",
                     "step": "final_pytest_gate",
                     "errors": [failure_summary],
+                    "pytest_result": final_pytest,
                 }
             log("Final pytest gate: PASSED")
             try:
@@ -14394,6 +14550,8 @@ def run_phase_b(
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
             reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files, timeout=pytest_gate_timeout)
+            if reentry_pytest.get("cleanup_status") == "HOLD":
+                return {**PytestCleanupHoldError(reentry_pytest).result, "step": "reentry_pytest_gate"}
             if not reentry_pytest["passed"]:
                 failure_summary = (
                     f"Re-entry pytest gate FAILED (exit={reentry_pytest['exit_code']}). "
@@ -14419,13 +14577,17 @@ def run_phase_b(
                     result["errors"] = [
                         f"Phase B pager emission failed after re-entry pytest failure: {exc}"
                     ]
-                    _clear_state(repo_root)
+                    result["pytest_result"] = reentry_pytest
+                    if reentry_pytest.get("cleanup_status") != "HOLD":
+                        _clear_state(repo_root)
                     return result
-                _clear_state(repo_root)
+                if reentry_pytest.get("cleanup_status") != "HOLD":
+                    _clear_state(repo_root)
                 return {
                     "status": "error",
                     "step": "reentry_pytest_gate",
                     "errors": [failure_summary],
+                    "pytest_result": reentry_pytest,
                 }
             log("Re-entry pytest gate: PASSED")
 
@@ -15563,14 +15725,20 @@ def main() -> int:
             # No full override — pass task_id for post-load merge in run_phase_b
             routing_record_override = {"_merge_task_id": args.task_id}
 
-    result = run_phase_b(
-        repo_root, args.plan,
-        max_bridge_rounds=args.max_rounds,
-        verbose=args.verbose,
-        force=args.bootstrap_exception,
-        routing_record_override=routing_record_override,
-        bus_dir=args.bus_dir,
-    )
+    try:
+        result = run_phase_b(
+            repo_root, args.plan,
+            max_bridge_rounds=args.max_rounds,
+            verbose=args.verbose,
+            force=args.bootstrap_exception,
+            routing_record_override=routing_record_override,
+            bus_dir=args.bus_dir,
+        )
+    except BaseException as exc:
+        native = pytest_cleanup_hold_from_exception(exc)
+        if native is None:
+            raise
+        result = PytestCleanupHoldError(native).result
 
     protected_ordinary_failure = ordinary_bridge_fix_failure_blocks_recovery(
         repo_root, result, bus_dir=args.bus_dir,
