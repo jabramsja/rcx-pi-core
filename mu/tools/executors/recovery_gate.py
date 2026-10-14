@@ -660,8 +660,46 @@ def local_review_terminal_payload(result: dict[str, Any]) -> dict[str, Any] | No
     return payload
 
 
+def _pytest_cleanup_hold_result(result: dict[str, Any]) -> dict[str, Any] | None:
+    """Preserve a native pytest cleanup refusal before any recovery effects.
+
+    Inspect result fields and standalone executor envelopes, never diagnostic
+    prose or nested prompt examples. A HOLD grants no retry authority and must
+    not consume a budget or replace the producer's checkpoint/release evidence.
+    """
+    if "type" in result:
+        return None
+    candidates = [result]
+    for stream in ("stdout", "stderr"):
+        if result.get(stream):
+            from executor_dispatch import _extract_structured_stdout_payload
+            payload = _extract_structured_stdout_payload(result[stream])
+            if payload is not None:
+                candidates.append(payload)
+    for candidate in candidates:
+        if "type" in candidate:
+            continue
+        for key in ("pytest_result", "validator_result"):
+            native = candidate.get(key)
+            if isinstance(native, dict) and native.get("cleanup_status") == "HOLD":
+                return {
+                    **_make_result(
+                        False, "pytest_cleanup_hold", 4, FailureClass.TERMINAL_POLICY,
+                        "HOLD: pytest process release is unverified; preserve ownership and checkpoint evidence",
+                        False,
+                    ),
+                    "status": "error",
+                    "hold": True,
+                    "retry_allowed": False,
+                    "pytest_result": native,
+                }
+    return None
+
+
 def classify_failure(result: dict[str, Any]) -> FailureClass:
     """Classify an executor failure result into a FailureClass."""
+    if _pytest_cleanup_hold_result(result) is not None:
+        return FailureClass.TERMINAL_POLICY
     if local_review_terminal_payload(result) is not None:
         return FailureClass.LOCAL_REVIEW_TERMINAL
     # Preserve the existing exact Phase A terminal fence before tracker repair.
@@ -8905,6 +8943,13 @@ def _run_pytest_targeted_validator(
     # history-recovery invocation, while retaining the finite caller deadline.
     # Exact module membership excludes foreign paths and node selectors.
     full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in targets
+    native_execution = not full_fleet and any(
+        target.split("::", 1)[0] in {
+            "mu/tests/tools/test_phase_b_executor.py",
+            "mu/tests/tools/test_recovery_gate.py",
+        }
+        for target in targets
+    )
     parallel = full_fleet or "mu/tests/tools/test_commit_executor_local_review.py" in targets
     effective_timeout = max(timeout, 900 + 240 * (len(targets) - 1)) if full_fleet else timeout
     command = [
@@ -8932,6 +8977,32 @@ def _run_pytest_targeted_validator(
             "TEMP": tmp_root,
             "XDG_CACHE_HOME": cache_root,
         }
+        if native_execution:
+            # These full modules exceed the unchanged 300s delegate cap when
+            # serial. Share Phase B's four-worker/no-restart policy, bounded
+            # diagnostics and conservative process release, retaining the
+            # admitted targets and this validator's temporary/cache ownership.
+            prior_dont_write_bytecode = sys.dont_write_bytecode
+            sys.dont_write_bytecode = True
+            try:
+                if str(SCRIPT_DIR) not in sys.path:
+                    sys.path.insert(0, str(SCRIPT_DIR))
+                from phase_b_executor import run_pytest_on_files
+            finally:
+                sys.dont_write_bytecode = prior_dont_write_bytecode
+            native = run_pytest_on_files(
+                repo_root,
+                ["-p", "no:cacheprovider", "--basetemp", str(Path(tmp_root) / "pytest"), *targets],
+                timeout=timeout,
+                env=env,
+            )
+            if native.get("timed_out"):
+                native["exit_code"] = 124
+                native["stderr"] = "\n".join(part for part in (
+                    f"hybrid validator timed out after {timeout}s",
+                    native["stderr"],
+                ) if part)
+            return {**native, "validator": "pytest_targeted", "targets": list(targets)}
         proc = subprocess.run(
             command,
             cwd=repo_root,
@@ -9127,6 +9198,7 @@ def _run_delegate_implementer_action(
     if not pre_validation_ok:
         return {
             "ok": False,
+            "hold": True,
             "detail": pre_validation_audit["detail"],
             "result_update": None,
             "implementer_result": implementer_result,
@@ -9157,22 +9229,41 @@ def _run_delegate_implementer_action(
             validation_spec=delegate_payload["validation_spec"],
             timeout=validator_timeout,
         )
-    except subprocess.TimeoutExpired as exc:
-        command = exc.cmd if isinstance(exc.cmd, list) else [str(exc.cmd)]
-        validator_result = {
-            "validator": "pytest_targeted",
-            "command": command,
-            "targets": validator_targets,
-            # TimeoutExpired may retain bytes even with text=True. Preserve
-            # bounded progress/failure evidence for the next diagnosis turn.
-            "stdout": _bounded_command_output(exc.stdout),
-            "stderr": "\n".join(part for part in (
-                f"hybrid validator timed out after {exc.timeout}s",
-                _bounded_command_output(exc.stderr),
-            ) if part),
-            "exit_code": 124,
-            "passed": False,
-            "timed_out": True,
+    except BaseException as exc:
+        from phase_b_executor import pytest_cleanup_hold_from_exception
+        native = pytest_cleanup_hold_from_exception(exc)
+        if native is not None:
+            validator_result = {**native, "validator": "pytest_targeted", "targets": validator_targets}
+        elif isinstance(exc, subprocess.TimeoutExpired):
+            command = exc.cmd if isinstance(exc.cmd, list) else [str(exc.cmd)]
+            validator_result = {
+                "validator": "pytest_targeted",
+                "command": command,
+                "targets": validator_targets,
+                # TimeoutExpired may retain bytes even with text=True. Preserve
+                # bounded progress/failure evidence for the next diagnosis turn.
+                "stdout": _bounded_command_output(exc.stdout),
+                "stderr": "\n".join(part for part in (
+                    f"hybrid validator timed out after {exc.timeout}s",
+                    _bounded_command_output(exc.stderr),
+                ) if part),
+                "exit_code": 124,
+                "passed": False,
+                "timed_out": True,
+            }
+        else:
+            raise
+    if validator_result.get("cleanup_status") == "HOLD":
+        # No post-validation audit, recovery journal or budget write may turn
+        # uncertain release into another actor's permission. Preserve the
+        # completed implementer and pre-validation checkpoint evidence.
+        return {
+            "ok": False, "hold": True, "retry_allowed": False,
+            "detail": "HOLD: hybrid validator process release is unverified",
+            "result_update": None,
+            "implementer_result": implementer_result,
+            "validator_result": validator_result,
+            "pre_validation_audit": pre_validation_audit,
         }
     final_ok, final_audit = _audit_hybrid_checkpoint(
         repo_root,
@@ -9183,6 +9274,7 @@ def _run_delegate_implementer_action(
     if not final_ok:
         return {
             "ok": False,
+            "hold": True,
             "detail": final_audit["detail"],
             "result_update": None,
             "implementer_result": implementer_result,
@@ -9192,7 +9284,12 @@ def _run_delegate_implementer_action(
     if not validator_result["passed"]:
         return {
             "ok": False,
-            "detail": "hybrid validator failed",
+            "hold": validator_result.get("cleanup_status") == "HOLD",
+            "detail": (
+                "HOLD: hybrid validator process release is unverified"
+                if validator_result.get("cleanup_status") == "HOLD"
+                else "hybrid validator failed"
+            ),
             "result_update": {
                 "stdout": validator_result["stdout"],
                 "stderr": validator_result["stderr"],
@@ -9325,6 +9422,9 @@ def run_recovery_loop(
     Returns dict with: recovered, exhausted, iterations, log.
     All iterations are durably logged to recovery_log.json.
     """
+    cleanup_hold = _pytest_cleanup_hold_result(result)
+    if cleanup_hold is not None:
+        return {**cleanup_hold, "iterations": 0, "log": []}
     if bus_dir is not None:
         resolve_agent_bus_dir(repo_root, bus_dir)
         token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
@@ -9787,7 +9887,27 @@ def run_recovery_loop(
                 "final_drift": (
                     delegate_result.get("final_audit", {}) or {}
                 ).get("observed_drift", []),
+                "validator_result": delegate_result.get("validator_result"),
             })
+            cleanup_hold = _pytest_cleanup_hold_result(delegate_result)
+            if cleanup_hold is not None:
+                return {**cleanup_hold, "iterations": i + 1, "log": loop_log,
+                        "validator_result": delegate_result["validator_result"]}
+            if (delegate_result.get("hold")
+                    or (delegate_result.get("validator_result") or {}).get("cleanup_status") == "HOLD"):
+                detail = delegate_result["detail"]
+                _log_tier3_attempt(
+                    repo_root, wave_id, step, fc, i + 1,
+                    "delegate_implementer", "held", dur, detail,
+                    invocation_id=invocation_id,
+                )
+                _finish_recovery_status(
+                    repo_root, recovered=False, exhausted=True,
+                    outcome="held", action="delegate_implementer", detail=detail,
+                    state="tier3_escalated",
+                )
+                return {"recovered": False, "exhausted": True, "hold": True,
+                        "iterations": i + 1, "log": loop_log}
             if delegate_result.get("ok"):
                 retry_target = _retry_target(result, step)
                 detail = delegate_result["detail"] or f"delegate_implementer applied; retrying {retry_target}"
@@ -12178,6 +12298,9 @@ def attempt_recovery(
 
     Returns dict with: recovered, action, tier, failure_class, detail, exhausted.
     """
+    cleanup_hold = _pytest_cleanup_hold_result(result)
+    if cleanup_hold is not None:
+        return cleanup_hold
     if bus_dir is not None:
         resolve_agent_bus_dir(repo_root, bus_dir)
         token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
@@ -12365,6 +12488,9 @@ def attempt_recovery(
             wave_id,
             invocation_id=invocation_id,
         )
+        cleanup_hold = _pytest_cleanup_hold_result(loop_result)
+        if cleanup_hold is not None:
+            return {**loop_result, **cleanup_hold}
         detail = ""
         if loop_result.get("log"):
             detail = str(loop_result["log"][-1].get("detail", "")).strip()

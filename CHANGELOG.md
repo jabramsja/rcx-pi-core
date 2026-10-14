@@ -4,6 +4,40 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-14
+
+### Preserve structured pytest cleanup HOLD (R3 Phase B implementation)
+
+- Carry exactly four independently restored R2 source/test donors after verifying
+  original/restored SHA-256, modes and actual `b7597254` parent bytes. Preserve
+  bounded four-worker execution, complete selection, configured failfast
+  neutralization, profiles, markers, deadlines and bounded diagnostics.
+- Retain unverified cleanup in a typed producer exception through native gates,
+  public Phase B JSON and delegated validator exceptions. Recovery returns a
+  terminal structured refusal before further learning, audits, journal/budget
+  updates or actors. Preserve checkpoints and original diagnostic/release data;
+  prose and provider envelopes never supply cleanup authority.
+- The exact pre-carry reproductions failed twice in 2.59s, with eight live
+  worker/child PIDs and learned/fix callbacks admitted in each case. Retain the
+  first focused run's 13 failures/34 passes: serialized delegated HOLD needed
+  a top-level error status. Corrected focused controls pass 56 tests. The first
+  complete gate retained one source-selector failure/3,109 passes; narrow that
+  existing assertion to ordinary re-entry failure and retain its clearing
+  checks. New real re-entry controls also exposed two fixture expectation
+  failures: the existing ownership fence correctly suppresses standalone
+  recovery. Corrected re-entry/public controls pass seven tests.
+- The unchanged complete declared two-module gate passes **3,112 tests in
+  245.77s**, exit 0, with stable source/checker/config hashes. Scoped integrity
+  passes unchanged. All commands, failures, fixture corrections, hashes and
+  real-process cleanup backstops are retained in
+  `reports/control_plane/workingrcx-native-pytest-execution-r3-2026-10-14_implementation_evidence.json`.
+- Reconcile current PRIMARY history outside exact captured Ra, retaining all
+  268 task IDs and 44 ordered owners. Keep R2 terminal/exhausted authority and
+  all held sources intact. The historical 30-second timeout cause remains
+  unproved. Native staging/L4/Step5e, fresh approval, current-head CI/review,
+  merge, separate PRIMARY sync and lane release remain pending, followed by
+  retention capacity/restore proof, Mu, monitor and original PR obligations.
+
 ## 2026-10-13
 
 ### Native timeout recovery R4 (Phase B implementation)
