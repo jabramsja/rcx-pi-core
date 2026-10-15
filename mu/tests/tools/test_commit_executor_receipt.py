@@ -8379,10 +8379,9 @@ class TestCommitExecutorPytestGate:
         repo = tmp_path / "repo"
         repo.mkdir()
 
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        with patch(
+            "phase_b_executor.run_pytest_on_files",
+            return_value={"passed": True, "exit_code": 0, "stdout": "", "stderr": ""},
         ) as mock_run:
             result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing targeted pytest timeout scaling helper
                 repo,
@@ -8404,10 +8403,9 @@ class TestCommitExecutorPytestGate:
         repo = tmp_path / "repo"
         repo.mkdir()
 
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        with patch(
+            "phase_b_executor.run_pytest_on_files",
+            return_value={"passed": True, "exit_code": 0, "stdout": "", "stderr": ""},
         ) as mock_run:
             result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing exact full Phase B module's 600s allocation
                 repo,
@@ -8423,10 +8421,9 @@ class TestCommitExecutorPytestGate:
         repo = tmp_path / "repo"
         repo.mkdir()
 
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        with patch(
+            "phase_b_executor.run_pytest_on_files",
+            return_value={"passed": True, "exit_code": 0, "stdout": "", "stderr": ""},
         ) as mock_run:
             result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing Phase B 600s plus ordinary selector 240s allocation
                 repo,
@@ -8445,10 +8442,10 @@ class TestCommitExecutorPytestGate:
         repo = tmp_path / "repo"
         repo.mkdir()
 
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            side_effect=subprocess.TimeoutExpired(["pytest"], timeout=840),
+        with patch(
+            "phase_b_executor.run_pytest_on_files",
+            return_value={"passed": False, "exit_code": -1, "stdout": "", "stderr": "",
+                          "timed_out": True, "cleanup_status": "released"},
         ):
             result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing timeout diagnostic includes computed budget
                 repo,
@@ -8468,10 +8465,9 @@ class TestCommitExecutorPytestGate:
         repo = tmp_path / "repo"
         repo.mkdir()
 
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        with patch(
+            "phase_b_executor.run_pytest_on_files",
+            return_value={"passed": True, "exit_code": 0, "stdout": "", "stderr": ""},
         ) as mock_run:
             result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: locks commit Step 8b fast-shard marker filter
                 repo,
@@ -8482,7 +8478,7 @@ class TestCommitExecutorPytestGate:
             )
 
         assert result["passed"] is True
-        args = mock_run.call_args.args[0]
+        args = mock_run.call_args.args[1]
         assert ["-m", "not slow and not fuzzer"] in [
             args[index:index + 2]
             for index in range(len(args) - 1)
@@ -8502,10 +8498,9 @@ class TestCommitExecutorPytestGate:
             "collected 17 items / 17 deselected / 0 selected\n\n"
             "============================ 17 deselected in 0.02s ============================"
         )
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=5, stdout=stdout, stderr=""),
+        with patch(
+            "phase_b_executor.run_pytest_on_files",
+            return_value={"passed": False, "exit_code": 5, "stdout": stdout, "stderr": ""},
         ) as mock_run:
             result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: locks slow-only commit gate handling
                 repo,
@@ -8514,7 +8509,7 @@ class TestCommitExecutorPytestGate:
 
         assert result["passed"] is True
         assert result["exit_code"] == 5
-        args = mock_run.call_args.args[0]
+        args = mock_run.call_args.args[1]
         assert ["-m", "not slow and not fuzzer"] in [
             args[index:index + 2]
             for index in range(len(args) - 1)
@@ -10087,17 +10082,11 @@ class TestCommitValidationChildBusIsolation:
         monkeypatch.setenv("UNRELATED_VALIDATION_VAR", "keep-me")
 
         captured: dict[str, object] = {}
-        real_run = subprocess.run
+        def intercept(root, targets, **kwargs):
+            captured["env"] = kwargs.get("env")
+            return {"passed": True, "exit_code": 0, "stdout": "1 passed", "stderr": ""}
 
-        def intercept(args, **kwargs):
-            if any("pytest" in str(a) for a in args):
-                captured["env"] = kwargs.get("env")
-                # Do not actually spawn pytest; a clean pass is enough to reach
-                # the env-construction assertions.
-                return subprocess.CompletedProcess(list(args), 0, stdout="1 passed", stderr="")
-            return real_run(args, **kwargs)
-
-        with patch.object(commit_mod.subprocess, "run", side_effect=intercept):
+        with patch("phase_b_executor.run_pytest_on_files", side_effect=intercept):
             res = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: validation-child override isolation regression
                 tmp_path, ["mu/tests/tools/test_agent_bus_namespacing.py"]
             )
@@ -11119,3 +11108,343 @@ class TestRequiredCIGreenGuard:
         assert response["failure_class"] == "unknown_error"
         assert response["ci_failures"] == []
         assert "test\tpending" in response["ci_checks_output"]
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "deselected", "empty"])
+def test_bounded_commit_real_selection_environment_and_failfast(tmp_path, monkeypatch, outcome):
+    """Real workers retain selectors, marker policy, seed/profile and commit env."""
+    import textwrap
+    repo = tmp_path / "bounded"
+    tests = repo / "mu/tests/tools"
+    tests.mkdir(parents=True)
+    records = repo / "records"
+    records.mkdir()
+    selected = ["mu/tests/tools/test_phase_b_executor.py", "mu/tests/tools/test_recovery_gate.py::test_selected"]
+    for key in commit_mod._commit_validation_protected_env_keys():  # ANTICHEAT_OK: real child must exclude canonical commit-owned controls
+        monkeypatch.setenv(key, "untrusted-parent")
+    monkeypatch.setenv("PYTHONHASHSEED", "123")
+    monkeypatch.setenv("HYPOTHESIS_PROFILE", "untrusted-profile")
+    monkeypatch.setenv("RCX_SKIP_RECEIPT_CHECK", "1")
+    monkeypatch.setenv("UNRELATED_VALIDATION_VAR", "retained")
+    # CLI policy wins over conflicting ambient parallel/fail-fast options.
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-n auto --max-worker-restart=3 --maxfail=0")
+    (repo / "pytest.ini").write_text("[pytest]\nmarkers =\n slow: slow control\n fuzzer: fuzzer control\n")
+    forbidden = sorted(commit_mod._commit_validation_protected_env_keys())  # ANTICHEAT_OK: actual environment construction contract
+    (repo / "conftest.py").write_text(textwrap.dedent(f'''
+        import hashlib,json,os
+        from pathlib import Path
+        import pytest
+        from hypothesis import settings
+        settings.register_profile('ci_fast', max_examples=7)
+        settings.load_profile(os.environ['HYPOTHESIS_PROFILE'])
+        records=Path({str(records)!r})
+        def pytest_collection_finish(session):
+            worker=getattr(session.config,'workerinput',{{}}).get('workerid','serial')
+            (records/('collection-'+worker+'.json')).write_text(json.dumps([i.nodeid for i in session.items]))
+        @pytest.fixture(autouse=True)
+        def record(request):
+            assert all(key not in os.environ for key in {forbidden!r})
+            assert not any(key.startswith('RCX_SKIP_') for key in os.environ)
+            assert os.environ['PYTHONHASHSEED']=='0'
+            assert os.environ['RCX_CI']=='1'
+            assert os.environ['HYPOTHESIS_PROFILE']=='ci_fast'
+            assert settings.default.max_examples==7
+            assert os.environ['UNRELATED_VALIDATION_VAR']=='retained'
+            assert os.environ['PYTEST_XDIST_WORKER_COUNT']=='4'
+            key=hashlib.sha256(request.node.nodeid.encode()).hexdigest()
+            with (records/('ran-'+key)).open('x') as stream: stream.write(request.node.nodeid)
+    '''))
+    marker = "@pytest.mark.slow\n" if outcome == "deselected" else ""
+    (tests / "test_phase_b_executor.py").write_text(
+        "import pytest\n" + marker + "@pytest.mark.parametrize('case',range(80))\n"
+        f"def test_selected(case):\n    assert {outcome != 'failure'!r}, 'COMMIT_REAL_FAILURE'\n"
+        "@pytest.mark.slow\ndef test_slow():\n    assert False\n"
+        "@pytest.mark.fuzzer\ndef test_fuzzer():\n    assert False\n")
+    (tests / "test_recovery_gate.py").write_text(
+        "import pytest\n" + marker + "def test_selected():\n    assert True\n"
+        "def test_unselected():\n    assert False, 'unselected node'\n")
+    if outcome == "empty":
+        (tests / "test_phase_b_executor.py").write_text("# truly empty collection\n")
+        selected = selected[:1]
+    result = commit_mod._run_pytest_on_files(repo, selected)  # ANTICHEAT_OK: real commit validation producer
+    assert result["passed"] is (outcome in {"success", "deselected"}), result
+    # xdist reports an intentional -x stop as INTERRUPTED (2); it remains a
+    # blocking failure. The worker assertions and early stop are proved below.
+    assert result["exit_code"] == (0 if outcome == "success" else 2 if outcome == "failure" else 5), result
+    assert result["command"][-len(selected):] == selected
+    assert result["worker_count"] == 4
+    assert result["timeout_seconds"] == (600 if outcome == "empty" else 840)
+    assert "-x" in result["command"] and "--max-worker-restart=0" in result["command"]
+    collections = list(records.glob("collection-gw*.json"))
+    assert len(collections) == 4
+    nodes = json.loads(collections[0].read_text())
+    assert all(json.loads(path.read_text()) == nodes for path in collections)
+    executed = [path.read_text() for path in records.glob("ran-*")]
+    if outcome == "success":
+        assert len(nodes) == 81 and sorted(executed) == sorted(nodes)
+    elif outcome == "failure":
+        assert len(nodes) == 81 and 0 < len(executed) < len(nodes)
+        assert "COMMIT_REAL_FAILURE" in result["stdout"]
+        assert "stopping after" in result["stdout"], result["stdout"]
+    else:
+        assert nodes == executed == []
+        assert result["selection_probe"]["worker_count"] == 0
+        assert "--collect-only" in result["selection_probe"]["command"]
+        assert 0 < result["selection_probe"]["timeout_seconds"] < result["timeout_seconds"]
+    assert os.environ["PYTHONHASHSEED"] == "123"
+    assert os.environ["HYPOTHESIS_PROFILE"] == "untrusted-profile"
+
+
+@pytest.fixture
+def bounded_commit_lifetime(tmp_path, monkeypatch):
+    from mu.tests.tools.test_phase_b_executor import native_pytest_hanging_tree, pb_mod, common_mod
+    monkeypatch.setitem(sys.modules, "phase_b_executor", pb_mod)
+    generator = native_pytest_hanging_tree.__wrapped__(tmp_path, monkeypatch)
+    hanging, launched = next(generator)
+    repo = _setup_repo(tmp_path)
+    (repo / "conftest.py").write_bytes((hanging / "conftest.py").read_bytes())
+    selected = "mu/tests/test_hanging.py"
+    (repo / selected).parent.mkdir(parents=True)
+    (repo / selected).write_bytes((hanging / "test_hanging.py").read_bytes())
+    supervisor_receipt = repo / ".scratch/step6_receipt.json"
+    supervisor_receipt.parent.mkdir()
+    supervisor_receipt.write_text(json.dumps({"decision": "COMMIT_GO", "staged_sha": "fresh_sha"}))
+    monkeypatch.setitem(sys.modules, "meta_bridge_client", SimpleNamespace(
+        MetaBridgeClientError=Exception,
+        run_meta_bridge_package=lambda *a, **kw: SimpleNamespace(
+            decision="COMMIT_GO", summary="fixture", receipt_path=".scratch/step6_receipt.json"),
+    ))
+    state = repo / ".agent_bus/executors/phase_b_state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text('{"completed_step":"commit_ready","owner":"retained"}\n')
+    try:
+        yield SimpleNamespace(repo=repo, pb=pb_mod, common=common_mod, selected=selected,
+                              launched=launched, state=state, receipt=supervisor_receipt)
+    finally:
+        generator.close()
+
+
+@pytest.mark.parametrize("consumer", ["mechanical", "bot"])
+@pytest.mark.parametrize("observation, interruption", [
+    ("complete", "timeout"), ("failed", "timeout"), ("partial", "timeout"),
+    ("failed", "cancellation"), ("partial", "producer_error"),
+    ("foreign", "timeout"), ("unknown", "timeout"),
+])
+def test_bounded_commit_real_cleanup_hold_public_transport(
+    bounded_commit_lifetime, monkeypatch, capsys, consumer, observation, interruption,
+):
+    import signal
+    import time
+    from unittest.mock import MagicMock
+    from mu.tests.tools.test_executor_common import complete_process_observation
+    import worktree_lifecycle
+    lane = bounded_commit_lifetime
+    repo = lane.repo
+    handoff = _make_new_schema_handoff(files_to_stage=["file.py", lane.selected])
+    handoff_path = repo / ".scratch/handoff.json"
+    handoff_path.write_text(json.dumps(handoff))
+    real_runner = lane.pb.run_pytest_on_files
+    real_release = lane.common.terminate_owned_executor
+    real_run, real_popen = subprocess.run, subprocess.Popen
+    seen = {}
+    effects = {name: MagicMock() for name in (
+        "_maybe_demote_completed_handoff_state_for_commit_retry",
+        "_invalidate_bot_remediation_hook_receipt", "_mint_bot_remediation_receipt",
+        "_emit_commit_lifecycle_event", "run_private_attr_test_gate",
+        "record_commit_pr_lifecycle", "emit_pipeline_agent_event",
+    )}
+    for name, effect in effects.items():
+        monkeypatch.setattr(commit_mod, name, effect)
+    monkeypatch.setattr(commit_mod, "_commit_lifecycle_pager_enabled", lambda root: False)
+    owner = repo / ".agent_bus/fixture-lifecycle"
+    owner.mkdir()
+    (owner / "owner.json").write_text('{"owned":"fixture"}\n')
+    monkeypatch.setattr(worktree_lifecycle, "register_lane", lambda *a, **kw: owner)
+    for name in ("request_completion", "publish_closeout", "start_completion"):
+        effect = MagicMock(return_value={"record": str(owner)})
+        effects[name] = effect
+        monkeypatch.setattr(worktree_lifecycle, name, effect)
+
+    def protected():
+        paths = [repo / lane.selected, repo / "TASKS.md", repo / ".git/index", lane.receipt,
+                 *[p for p in (repo / ".agent_bus").rglob("*") if p.is_file()]]
+        return {p: p.read_bytes() for p in paths if p.exists()}
+
+    def short_run(root, targets, *, timeout, **kwargs):
+        seen["budget"] = timeout
+        # Supervisor events precede validation. Capture their transport here so
+        # an unrelated asynchronous pager cannot write inside the protected
+        # snapshot. Keep its call count in the post-HOLD no-effects assertion.
+        assert effects["emit_pipeline_agent_event"].call_count == (2 if consumer == "mechanical" else 0)
+        assert not (repo / ".agent_bus/observability").exists()
+        seen["before"] = protected()
+        seen["effects"] = {k: v.call_count for k, v in effects.items()}
+        try:
+            result = real_runner(root, targets, timeout=5, **kwargs)
+        except lane.pb.PytestCleanupHoldError as exc:
+            seen["native"] = exc.pytest_result
+            # Preserve typed authority through an ordinary validator wrapper.
+            raise RuntimeError("commit validator wrapper") from exc
+        seen["native"] = result
+        return result
+
+    def release(proc, token, **kwargs):
+        if observation == "complete":
+            with complete_process_observation(lane.common):
+                return real_release(proc, token, **kwargs)
+        def query(command, **kw):
+            result = real_run(command, **kw)
+            if command[:1] == ["ps"]:
+                if observation == "failed":
+                    raise subprocess.CalledProcessError(1, command)
+                if observation == "partial":
+                    result.stdout = result.stdout.splitlines(keepends=True)[0]
+            return result
+        with patch.object(subprocess, "run", side_effect=query):
+            return real_release(proc, token, **kwargs)
+
+    def launch(command, **kwargs):
+        if command[1:4] == ["-u", "-m", "pytest"] and observation in {"foreign", "unknown"}:
+            env = dict(kwargs["env"])
+            if observation == "foreign":
+                env[lane.common.EXECUTOR_PROCESS_OWNER_ENV] = "foreign-fixture-owner"
+            else:
+                env.pop(lane.common.EXECUTOR_PROCESS_OWNER_ENV, None)
+            kwargs["env"] = env
+        return real_popen(command, **kwargs)
+
+    real_select = lane.pb.selectors.DefaultSelector.select
+    def interrupt(selector, timeout=None):
+        if len(list(repo.glob("*.pids"))) == len(list(repo.glob("*.mutation"))) == 4:
+            if interruption == "cancellation":
+                raise KeyboardInterrupt("commit fixture cancellation")
+            raise OSError("commit fixture producer error")
+        return real_select(selector, timeout)
+
+    monkeypatch.setattr(lane.pb, "run_pytest_on_files", short_run)
+    monkeypatch.setattr(lane.pb, "terminate_owned_executor", release)
+    monkeypatch.setattr(subprocess, "Popen", launch)
+    if interruption != "timeout":
+        monkeypatch.setattr(lane.pb.selectors.DefaultSelector, "select", interrupt)
+    if consumer == "bot":
+        _write_bot_remediation_executor_config(repo)
+        fixture = TestBotRemediationValidation()
+        monkeypatch.setattr(commit_mod, "_bridge_adapters", fixture._fake_bridge_adapters(  # ANTICHEAT_OK: local completed code-writing actor; actual staged validator remains production
+            lambda root: (root / lane.selected).write_text((root / lane.selected).read_text() + "\n# bot fixture\n")))
+        real_git = commit_mod._run  # ANTICHEAT_OK: stage/discover real disposable files; unrelated status is fixture-scoped
+        def git(command, **kwargs):
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(command, 0, " M " + lane.selected + "\n", "")
+            assert command[:2] not in (["git", "commit"], ["git", "push"])
+            return real_git(command, **kwargs)
+        monkeypatch.setattr(commit_mod, "_run", git)
+        def bot_pipeline(*args, **kwargs):
+            return commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: real bot actor-to-validation boundary before receipt mutation
+                [{"path": lane.selected, "body": "P1 fixture", "author": commit_mod.BOT_REVIEW_LOGIN}],
+                repo_root=repo, repo_owner="fixture", repo_name="fixture", pr_number="1",
+                target_branch="fixture", head_sha="old", wave_id="test-wave",
+                continuation_path=repo / ".agent_bus/continuation.json",
+                result={"steps_completed": ["git_commit"]}, log=lambda _: None,
+            )
+        monkeypatch.setattr(commit_mod, "_run_post_commit_pipeline_impl", bot_pipeline)
+        def post_commit(*args, **kwargs):
+            return commit_mod._run_post_commit_pipeline(  # ANTICHEAT_OK: exercise real finally transport before any PR lifecycle mutation
+                handoff=handoff, repo_root=repo,
+                result={"pr_lifecycle": {"owner": "retained"}, "steps_completed": ["git_commit"]},
+                target_branch="fixture", base_branch="dev",
+                continuation_path=repo / ".agent_bus/continuation.json", log=lambda _: None,
+            )
+        monkeypatch.setattr(commit_mod, "_run_commit_pipeline_impl", post_commit)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(sys, "argv", ["commit_executor.py", "--handoff", str(handoff_path), "--json"])
+    assert commit_mod.main() == 1
+    result = json.loads(capsys.readouterr().out)
+    native = seen["native"]
+    assert seen["budget"] == 240
+    assert len(lane.launched) == 1
+    pids = {int(pid) for p in repo.glob("*.pids") for pid in p.read_text().split()}
+    assert len(pids) == 8
+    if observation == "complete":
+        assert native["cleanup_status"] == "released", native
+        assert native["cleanup_release_evidence"]["root_pid"] == lane.launched[0].pid
+        for pid in pids | {lane.launched[0].pid}:
+            with pytest.raises(ProcessLookupError):
+                os.kill(pid, 0)
+        assert effects["request_completion"].called
+    else:
+        assert result["status"] == "error" and result["hold"] and not result["retry_allowed"]
+        assert result["pytest_result"]["cleanup_status"] == "HOLD"
+        assert result["pytest_result"]["cleanup_release_evidence"] is None
+        assert result["pytest_result"]["failure_kind"] == {
+            "timeout": "timeout", "cancellation": "interrupted", "producer_error": "producer_error",
+        }[interruption]
+        for stream in ("stdout", "stderr"):
+            assert "HEAD" in native[stream] and "TAIL" in native[stream]
+            assert "output bytes omitted" in native[stream] and len(native[stream]) < 65736
+        for pid in pids:
+            os.kill(pid, 0)
+        for entry in (recovery_gate_mod.attempt_recovery, recovery_gate_mod.run_recovery_loop):
+            held = entry(repo, {"status": "failed", "stdout": json.dumps(result)}, "commit-hold")
+            assert held["hold"] and not held["recovered"] and not held["exhausted"]
+        assert protected() == seen["before"]
+        assert {k: v.call_count for k, v in effects.items()} == seen["effects"]
+
+
+@pytest.mark.parametrize("wrapper", ["direct", "runtime", "timeout"])
+def test_commit_main_serializes_typed_cleanup_hold_before_standalone_recovery(tmp_path, monkeypatch, capsys, wrapper):
+    import phase_b_executor
+    from unittest.mock import MagicMock
+    repo = _setup_repo(tmp_path)
+    handoff = repo / "handoff.json"
+    handoff.write_text(json.dumps(_make_new_schema_handoff()))
+    native = {"passed": False, "exit_code": -1, "cleanup_status": "HOLD",
+              "cleanup_release_evidence": None, "failure_kind": "interrupted"}
+    def producer(*args, **kwargs):
+        try:
+            raise phase_b_executor.PytestCleanupHoldError(native) from KeyboardInterrupt("fixture")
+        except phase_b_executor.PytestCleanupHoldError as exc:
+            if wrapper == "runtime":
+                raise RuntimeError("consumer wrapper") from exc
+            if wrapper == "timeout":
+                raise subprocess.TimeoutExpired("consumer wrapper", 1) from exc
+            raise
+    monkeypatch.chdir(repo)
+    monkeypatch.delenv("RCX_EXECUTOR_DISPATCH_PID", raising=False)
+    monkeypatch.setattr(commit_mod, "run_commit_pipeline", producer)
+    recovery = MagicMock(side_effect=AssertionError("HOLD entered standalone recovery"))
+    monkeypatch.setattr(commit_mod, "_load_repo_recovery_symbols", recovery)
+    monkeypatch.setattr(sys, "argv", ["commit_executor.py", "--handoff", str(handoff), "--json", "--standalone"])
+    assert commit_mod.main() == 1
+    output = capsys.readouterr().out
+    assert len(output.splitlines()) == 1
+    result = json.loads(output)
+    assert result["hold"] is True and result["retry_allowed"] is False
+    assert result["pytest_result"] == native
+    recovery.assert_not_called()
+
+
+def test_bounded_commit_cancellation_with_verified_release_propagates(bounded_commit_lifetime, monkeypatch):
+    import time
+    from mu.tests.tools.test_executor_common import complete_process_observation
+    lane = bounded_commit_lifetime
+    real_runner = lane.pb.run_pytest_on_files
+    real_select = lane.pb.selectors.DefaultSelector.select
+    def short_runner(root, targets, **kwargs):
+        assert kwargs.pop("timeout") == 240
+        return real_runner(root, targets, timeout=5, **kwargs)
+    def cancel(selector, timeout=None):
+        if len(list(lane.repo.glob("*.pids"))) == len(list(lane.repo.glob("*.mutation"))) == 4:
+            raise KeyboardInterrupt("released commit cancellation")
+        return real_select(selector, timeout)
+    monkeypatch.setattr(lane.pb, "run_pytest_on_files", short_runner)
+    monkeypatch.setattr(lane.pb.selectors.DefaultSelector, "select", cancel)
+    with complete_process_observation(lane.common), pytest.raises(KeyboardInterrupt, match="released commit"):
+        commit_mod._run_pytest_on_files(lane.repo, [lane.selected])  # ANTICHEAT_OK: actual commit-owned cancellation and process release
+    pids = {int(pid) for p in lane.repo.glob("*.pids") for pid in p.read_text().split()}
+    assert len(pids) == 8 and len(lane.launched) == 1
+    for pid in pids | {lane.launched[0].pid}:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+    mutations = {p: p.read_bytes() for p in lane.repo.glob("*.mutation")}
+    time.sleep(0.1)
+    assert all(p.read_bytes() == value for p, value in mutations.items())

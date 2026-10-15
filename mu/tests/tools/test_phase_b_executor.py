@@ -22,7 +22,9 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import textwrap
 import time
+import traceback
 import uuid
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -122,7 +124,10 @@ def late_native_retry_lane(tmp_path, monkeypatch, request):
             "calls": calls, "boundary": ValidationBoundary, "control": control}
 
 
-def _run_late_native_dispatch(fixture, monkeypatch, *, mutate=None, released=True, before_consumer=None, surface=False):
+def _run_late_native_dispatch(
+    fixture, monkeypatch, *, mutate=None, released=True, before_consumer=None,
+    surface=False, raw_consumer_observation=False,
+):
     dispatch, repo = fixture["dispatch"], fixture["repo"]
     invocations, consumers, restored = [], [], []
     admissions = []
@@ -145,9 +150,11 @@ def _run_late_native_dispatch(fixture, monkeypatch, *, mutate=None, released=Tru
         assert invocations[-1] == "phase_b_executor.py"
         route = json.loads(args[args.index("--routing-record") + 1])
         if len(invocations) == 2 and before_consumer is not None:
-            # End the complete-observation premise before any adversarial
-            # consumer mutation, especially failed/partial-query injection.
-            complete_boundary.close()
+            # Keep fresh coherent OS snapshots through positive release checks
+            # and authority-only mutations. Raw query fault controls must end
+            # this premise before installing their failed/partial observations.
+            if raw_consumer_observation:
+                complete_boundary.close()
             before_consumer(route)
         owner = uuid.uuid4().hex
         try:
@@ -490,8 +497,23 @@ def _assert_native_real_process_release(
                 assert child["pgid"] == child["pid"] != processes[0].pid
                 assert child_alive  # The escaped child is still alive at the HOLD.
                 before_pulse = heartbeat.read_text()
-                time.sleep(0.1)
-                assert heartbeat.read_text() != before_pulse
+                deadline = time.monotonic() + 5
+                pulses = []
+                while time.monotonic() < deadline:
+                    os.kill(child["pid"], 0)
+                    pulse = heartbeat.read_text()
+                    pulses.append(pulse)
+                    # write_text truncates before writing; an empty sample
+                    # cannot prove child progress. Require a newer timestamp.
+                    if pulse.isdigit() and before_pulse.isdigit() and int(pulse) > int(before_pulse):
+                        break
+                    if pulse.isdigit() and not before_pulse.isdigit():
+                        before_pulse = pulse
+                    time.sleep(0.01)
+                else:
+                    pytest.fail(f"Detached child {child['pid']} made no provable progress: {pulses}")
+                os.kill(child["pid"], 0)
+                assert int(pulse) > int(before_pulse)
             print(json.dumps({"scenario": scenario or exit_mode, "released": released,
                               "child_alive_at_hold": child_alive, "actor_calls": fixture["calls"],
                               "query_failures": len(query_failures), "protected_files_unchanged": True,
@@ -625,7 +647,7 @@ def test_native_late_retry_drift_holds_before_cleanup_or_consumer(late_native_re
     "false-release", "release-type", "checkpoint-hash", "malformed-release", "unknown-release-field",
     "missing-proof", "proof-version", "proof-owner-type", "proof-member", "proof-pid-reuse",
     "release-query", "revived-owner", "proof-owner-changed", "proof-from-another-launch",
-    "late-partial-identities", "late-partial-graph",
+    "late-partial-identities", "late-partial-graph", "late-changed-ancestry",
 ])
 def test_native_late_direct_consumer_revalidates_before_mutation(late_native_retry_lane, monkeypatch, request, fault):
     fixture = late_native_retry_lane
@@ -682,6 +704,21 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
                     raise subprocess.CalledProcessError(1, args)
                 return real_run(args, *a, **kw)
             monkeypatch.setattr(subprocess, "run", failed_query)
+        elif fault == "late-changed-ancestry":
+            real_run = subprocess.run
+
+            def changed_ancestry(args, *a, **kw):
+                result = real_run(args, *a, **kw)
+                if args == ["ps", "-axo", "pid=,ppid="]:
+                    rows = result.stdout.splitlines()
+                    for i, row in enumerate(rows):
+                        pid, ppid = map(int, row.split())
+                        if pid == os.getpid():
+                            rows[i] = f"{pid} {0 if ppid else 1}"
+                    result.stdout = "\n".join(rows) + "\n"
+                return result
+
+            monkeypatch.setattr(subprocess, "run", changed_ancestry)
         elif fault in {"revived-owner", "late-partial-identities", "late-partial-graph"}:
             owner = route["native_late_checkpoint"]["release_evidence"]["owner"]
             proc = subprocess.Popen(
@@ -714,6 +751,9 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
 
     invocations, consumers, _ = _run_late_native_dispatch(
         fixture, monkeypatch, before_consumer=mutate_after_admission,
+        raw_consumer_observation=fault in {
+            "release-query", "late-partial-identities", "late-partial-graph", "late-changed-ancestry",
+        },
     )
     assert len(invocations) == 2
     if fault == "unchanged":
@@ -723,6 +763,10 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
         assert consumers[0] == "final_validation"
         assert isinstance(consumers[1], dict) and consumers[1]["status"] == "error", consumers
         assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 1}
+        if fault == "late-changed-ancestry":
+            assert consumers[1]["errors"] == [
+                "native late process release: process ancestry changed between observations",
+            ]
     if fault == "unchanged":
         before, after = json.loads(protected[checkpoint]), json.loads(checkpoint.read_bytes())
         assert before["native_process_owner"] != after["native_process_owner"]
@@ -8018,14 +8062,13 @@ class TestFinalPytestGate:
     """Failed pytest MUST block commit_ready — hard gate after bridge convergence."""
 
     def test_run_pytest_on_files_forces_deterministic_hash_seed(self, tmp_path):
-        completed = subprocess.CompletedProcess(
-            args=["pytest"],
-            returncode=0,
-            stdout="ok",
-            stderr="",
+        (tmp_path / "test_seed.py").write_text(
+            'import os\ndef test_seed():\n assert os.environ["PYTHONHASHSEED"] == "0"\n'
         )
-        with patch.object(pb_mod.subprocess, "run", return_value=completed) as mock_run:
-            result = pb_mod._run_pytest_on_files(tmp_path, ["mu/tests/tools/test_foo.py"])  # ANTICHEAT_OK: testing internal final-pytest gate helper
+        # Observe the actual launch; this assertion alone is only an argv/env
+        # contract. The disposable test also reads its real process environment.
+        with patch.object(pb_mod.subprocess, "Popen", wraps=subprocess.Popen) as mock_run:
+            result = pb_mod.run_pytest_on_files(tmp_path, ["test_seed.py"])
 
         assert result["passed"] is True
         kwargs = mock_run.call_args.kwargs
@@ -19791,8 +19834,10 @@ class TestReentryStateClearing:
     def test_reentry_pytest_gate_failure_clears_state(self):
         """_clear_state must be called before returning from reentry_pytest_gate failure."""
         source = Path(pb_mod.__file__).read_text()  # ANTICHEAT_OK: testing internal executor functions
-        # Find the reentry_pytest_gate failure block
-        idx = source.find('"reentry_pytest_gate"')
+        # Ordinary pytest failure clears stale state; an earlier cleanup HOLD
+        # must retain it while process release remains unverified.
+        ordinary_failure = source.index('if not reentry_pytest["passed"]:')
+        idx = source.find('"reentry_pytest_gate"', ordinary_failure)
         assert idx > 0, "reentry_pytest_gate error path not found in source"
         # The _clear_state call must appear BEFORE the return in that block.
         # Look backwards from reentry_pytest_gate for _clear_state
@@ -22409,3 +22454,577 @@ def test_ordinary_dispatcher_explicit_actor_failure_keeps_existing_recovery(
     lane.impl.invoke_implementer.assert_called_once()
     lane.mocks["run_bridge_review"].assert_not_called()
     lane.mocks["run_sdk_agents"].assert_not_called()
+
+
+@pytest.mark.parametrize("profile", [None, "ci_fast"])
+@pytest.mark.parametrize("fails", [False, True])
+@pytest.mark.parametrize("failfast", [None, "ini", "env"])
+def test_native_pytest_real_collection_execution_and_profiles(tmp_path, monkeypatch, profile, fails, failfast):
+    """Real serial collection versus every real worker's full ordered collection."""
+    repo = tmp_path / "repo"
+    selected = ["mu/tests/test_native_a.py", "mu/tests/test_native_b.py"]
+    (repo / "mu/tests").mkdir(parents=True)
+    records = repo / "records"
+    records.mkdir()
+    monkeypatch.setenv("PYTHONHASHSEED", "123")
+    monkeypatch.setenv("NATIVE_FIXTURE_FAIL", str(int(fails)))
+    if profile is None:
+        monkeypatch.delenv("RCX_CI", raising=False)
+        monkeypatch.delenv("HYPOTHESIS_PROFILE", raising=False)
+    else:
+        monkeypatch.setenv("RCX_CI", "1")
+        monkeypatch.setenv("HYPOTHESIS_PROFILE", profile)
+    (repo / "pytest.ini").write_text("[pytest]\nmarkers =\n slow: slow control\n fuzzer: fuzzer control\n")
+    if failfast == "ini":
+        with (repo / "pytest.ini").open("a") as stream:
+            stream.write("addopts = -x --maxfail=1\n")
+    elif failfast == "env":
+        monkeypatch.setenv("PYTEST_ADDOPTS", "-x --maxfail=1")
+    (repo / "conftest.py").write_text(textwrap.dedent('''
+        import hashlib, json, os
+        from pathlib import Path
+        import pytest
+        from hypothesis import settings
+        settings.register_profile("ci_fast", max_examples=7)
+        settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
+        records = Path(__file__).parent / "records"
+        def pytest_collection_finish(session):
+            worker = getattr(session.config, "workerinput", {}).get("workerid", "serial")
+            (records / ("collection-" + worker + ".json")).write_text(
+                json.dumps([item.nodeid for item in session.items]))
+        @pytest.fixture(autouse=True)
+        def record_execution(request):
+            payload = dict(nodeid=request.node.nodeid, seed=os.environ.get("PYTHONHASHSEED"),
+                           profile=os.environ.get("HYPOTHESIS_PROFILE"), ci=os.environ.get("RCX_CI"),
+                           examples=settings.default.max_examples, hash_value=hash("native-pytest"),
+                           worker=request.config.workerinput["workerid"])
+            name = hashlib.sha256(request.node.nodeid.encode()).hexdigest()
+            with (records / ("ran-" + name + ".json")).open("x") as stream:
+                json.dump(payload, stream)
+    '''))
+    (repo / selected[0]).write_text(textwrap.dedent('''
+        import os, pytest
+        @pytest.mark.slow
+        @pytest.mark.parametrize("case", range(8))
+        def test_slow(case):
+            assert case >= 0
+        def test_negative():
+            assert os.environ["NATIVE_FIXTURE_FAIL"] == "0", "NATIVE_ASSERTION_DETAIL"
+    '''))
+    (repo / selected[1]).write_text(textwrap.dedent('''
+        import pytest
+        from hypothesis import given, strategies as st
+        @pytest.mark.fuzzer
+        @pytest.mark.parametrize("case", range(8))
+        def test_fuzzer(case):
+            assert case < 8
+        @given(st.integers())
+        def test_property(value):
+            assert value + 1 > value
+    '''))
+    (repo / "mu/tests/test_unselected.py").write_text('raise AssertionError("unselected file collected")\n')
+    files = pb_mod.select_pytest_gate_files(selected, repo)
+    assert files == selected
+    serial = subprocess.run(
+        [sys.executable, "-m", "pytest", "-x", "--tb=short", "--collect-only", "-q", *files],
+        cwd=repo, env={**os.environ, "PYTHONHASHSEED": "0"},
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert serial.returncode == 0, serial.stdout + serial.stderr
+    nodes = json.loads((records / "collection-serial.json").read_text())
+    assert len(nodes) == 18 and len(set(nodes)) == 18
+    result = pb_mod.run_pytest_on_files(repo, files, timeout=30)
+    assert result["passed"] is (not fails), result
+    assert result["exit_code"] == int(fails), result
+    assert result["timed_out"] is False
+    assert result["failure_kind"] == ("nonzero_exit" if fails else "none")
+    assert result["worker_count"] == 4
+    assert result["command"][-len(files):] == files
+    assert result["command"][4:-len(files)] == [
+        "-n", "4", "--dist", "worksteal", "--max-worker-restart=0", "--maxfail=0",
+        "--tb=short",
+    ]
+    collections = sorted(records.glob("collection-gw*.json"))
+    assert len(collections) == 4
+    assert all(json.loads(path.read_text()) == nodes for path in collections)
+    executed = [json.loads(path.read_text()) for path in records.glob("ran-*.json")]
+    assert sorted(item["nodeid"] for item in executed) == sorted(nodes)
+    assert {item["seed"] for item in executed} == {"0"}
+    assert {item["profile"] for item in executed} == {profile}
+    assert {item["ci"] for item in executed} == ({None} if profile is None else {"1"})
+    assert {item["examples"] for item in executed} == ({100} if profile is None else {7})
+    assert len({item["hash_value"] for item in executed}) == 1
+    assert "skipped" not in result["stdout"] and "xfailed" not in result["stdout"]
+    if fails:
+        assert "NATIVE_ASSERTION_DETAIL" in result["stdout"]
+        assert "test_native_a.py::test_negative" in result["stdout"]
+        assert "1 failed, 17 passed" in result["stdout"]
+    else:
+        assert "18 passed" in result["stdout"]
+
+
+@pytest.fixture
+def native_pytest_hanging_tree(tmp_path, monkeypatch):
+    """Owned real controller/workers/children; cleanup backstop is fixture-only."""
+    repo = tmp_path / "hanging"
+    repo.mkdir()
+    (repo / "conftest.py").write_text(textwrap.dedent('''
+        import os, sys
+        def pytest_sessionstart(session):
+            if hasattr(session.config, "workerinput"):
+                return
+            os.write(1, b"NATIVE_STDOUT_HEAD\\n" + b"o" * 90000 + b"\\nNATIVE_STDOUT_TAIL\\n")
+            os.write(2, b"NATIVE_STDERR_HEAD\\n" + b"e" * 90000 + b"\\nNATIVE_STDERR_TAIL\\n")
+        def pytest_sessionfinish(session, exitstatus):
+            # A positive release fixture keeps its controller alive for the
+            # owned releaser even after xdist reports terminated workers.
+            if exitstatus and not hasattr(session.config, "workerinput"):
+                import time
+                time.sleep(30)
+    '''))
+    (repo / "test_hanging.py").write_text(textwrap.dedent('''
+        import os, subprocess, sys, time
+        from pathlib import Path
+        import pytest
+        @pytest.mark.parametrize("case", range(8))
+        def test_hanging(case):
+            worker = os.environ["PYTEST_XDIST_WORKER"]
+            path = Path(worker + ".mutation")
+            child = subprocess.Popen([sys.executable, "-u", "-c",
+                "import pathlib,time; p=pathlib.Path(" + repr(str(path)) + "); "
+                "end=time.monotonic()+30\\nwhile time.monotonic()<end:\\n "
+                "p.write_text(str(time.monotonic())); time.sleep(0.02)"])
+            Path(worker + ".pids").write_text(str(os.getpid()) + " " + str(child.pid))
+            time.sleep(30)
+    '''))
+    # Use the existing shared implementation, with coherent real snapshots for
+    # positive cleanup. Adverse two-query observations are covered separately.
+    monkeypatch.setattr(pb_mod, "terminate_owned_executor", common_mod.terminate_owned_executor)
+    launched = []
+    real_popen = subprocess.Popen
+
+    def launch(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        if args[0][1:4] == ["-u", "-m", "pytest"]:
+            launched.append(proc)
+        return proc
+
+    with patch.object(subprocess, "Popen", side_effect=launch):
+        try:
+            yield repo, launched
+        finally:
+            # No test-owned process may outlive a failed assertion. Only these
+            # newly created isolated fixture groups are eligible for this sweep.
+            for proc in launched:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                proc.wait(timeout=5)
+
+
+def assert_native_pytest_tree_stopped(repo, launched):
+    assert len(launched) == 1
+    assert launched[0].poll() is not None
+    pids = {int(pid) for path in repo.glob("*.pids") for pid in path.read_text().split()}
+    assert len(pids) == 8  # four workers and four real mutating children
+    mutations = {path: path.read_bytes() for path in repo.glob("*.mutation")}
+    assert len(mutations) == 4
+    time.sleep(0.3)
+    assert all(path.read_bytes() == value for path, value in mutations.items())
+    for pid in pids | {launched[0].pid}:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+def test_native_pytest_real_timeout_keeps_bounded_output_and_releases_workers(native_pytest_hanging_tree):
+    repo, launched = native_pytest_hanging_tree
+    with complete_process_observation(common_mod) as observations:
+        result = pb_mod.run_pytest_on_files(repo, ["test_hanging.py"], timeout=5)
+    assert result["passed"] is False and result["exit_code"] == -1, result
+    assert result["failure_kind"] == "timeout" and result["timed_out"] is True
+    assert result["timeout_seconds"] == 5
+    assert 5 <= result["elapsed_seconds"] < 15
+    assert result["cleanup_status"] == "released", (result, observations)
+    assert result["cleanup_release_evidence"]["root_pid"] == launched[0].pid
+    for stream in ("stdout", "stderr"):
+        value = result[stream]
+        assert "NATIVE_" + stream.upper() + "_HEAD" in value
+        assert "NATIVE_" + stream.upper() + "_TAIL" in value
+        assert "output bytes omitted" in value
+        assert result["output_bytes"][stream] > 90000
+        assert len(value) <= result["output_limit_bytes_per_stream"] + 100
+    assert_native_pytest_tree_stopped(repo, launched)
+
+
+def test_native_pytest_real_cancellation_releases_workers(native_pytest_hanging_tree):
+    repo, launched = native_pytest_hanging_tree
+    original_select = pb_mod.selectors.DefaultSelector.select
+
+    def cancel_when_children_ready(selector, timeout=None):
+        if len(list(repo.glob("*.mutation"))) == len(list(repo.glob("*.pids"))) == 4:
+            raise KeyboardInterrupt("fixture cancellation")
+        return original_select(selector, timeout)
+
+    with complete_process_observation(common_mod), \
+         patch.object(pb_mod.selectors.DefaultSelector, "select", cancel_when_children_ready):
+        with pytest.raises(KeyboardInterrupt, match="fixture cancellation"):
+            pb_mod.run_pytest_on_files(repo, ["test_hanging.py"], timeout=10)
+    assert_native_pytest_tree_stopped(repo, launched)
+
+
+@pytest.mark.parametrize("observation", ["failed", "partial"])
+def test_native_pytest_uncertain_cleanup_is_hold(tmp_path, monkeypatch, observation):
+    """Real timeout plus adverse raw observation: never fabricate release."""
+    (tmp_path / "test_wait.py").write_text("import time\ndef test_wait():\n time.sleep(30)\n")
+    # Avoid creating any workers in this observation-negative fixture. This
+    # Popen shim is explicitly an argv-contract limit, not scheduling proof.
+    original_popen = subprocess.Popen
+    launched = []
+    def serial_launch(command, **kwargs):
+        xdist_args = ["-n", "4", "--dist", "worksteal", "--max-worker-restart=0"]
+        serial_args_start = 4 + len(xdist_args)
+        assert command[4:serial_args_start] == xdist_args
+        assert command[serial_args_start:serial_args_start + 2] == [
+            "--maxfail=0", "--tb=short",
+        ]
+        # Strip only xdist options; retain fail-fast neutralization and targets.
+        proc = original_popen([*command[:4], *command[serial_args_start:]], **kwargs)
+        launched.append(proc)
+        return proc
+    real_run = subprocess.run
+    def uncertain_query(command, **kwargs):
+        if command[:1] == ["ps"]:
+            if observation == "failed":
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return real_run(command, **kwargs)
+    monkeypatch.setattr(pb_mod, "terminate_owned_executor", common_mod.terminate_owned_executor)
+    try:
+        with patch.object(subprocess, "Popen", side_effect=serial_launch), \
+             patch.object(subprocess, "run", side_effect=uncertain_query):
+            result = pb_mod.run_pytest_on_files(tmp_path, ["test_wait.py"], timeout=2)
+    finally:
+        for proc in launched:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait(timeout=5)
+    assert not result["passed"] and result["timed_out"]
+    assert result["cleanup_status"] == "HOLD"
+    assert result["cleanup_release_evidence"] is None
+
+
+@pytest.mark.usefixtures("mock_routing_record")
+def test_native_real_pytest_assertion_blocks_public_phase_b(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "reports/control_plane").mkdir(parents=True)
+    (repo / "mu/tests").mkdir(parents=True)
+    (repo / "reports/control_plane/plan.md").write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+    (repo / "mu/tests/test_failure.py").write_text('def test_failure():\n assert False, "PUBLIC_GATE_NEGATIVE"\n')
+    selected = ["mu/tests/test_failure.py"]
+    with patch.dict(sys.modules, {"phase_b_implementer": _make_mock_impl()}), \
+         patch.object(pb_mod, "_collect_changed_files", return_value=selected), \
+         patch.object(pb_mod, "_collect_wave_owned_files", return_value=selected), \
+         patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0}), \
+         patch.object(pb_mod, "run_bridge_review", return_value={
+             "exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "native-pytest",
+         }), \
+         patch.object(pb_mod, "_stage_files") as stage, \
+         patch.object(pb_mod, "run_pre_commit_supervisor") as supervisor, \
+         patch.object(pb_mod, "prepare_commit_handoff") as handoff:
+        result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md")
+    assert result["status"] == "error" and result["step"] == "final_pytest_gate", result
+    assert result["pytest_result"]["failure_kind"] == "nonzero_exit"
+    assert "PUBLIC_GATE_NEGATIVE" in result["errors"][0]
+    # The existing pre-review boundary stages once before bridge review. A
+    # failed real gate must never reach final staging, approval or handoff.
+    stage.assert_called_once_with(repo, [*selected, "reports/control_plane/plan.md"])
+    supervisor.assert_not_called()
+    handoff.assert_not_called()
+
+
+@pytest.mark.usefixtures("mock_routing_record")
+@pytest.mark.parametrize("observation", ["complete", "failed", "partial"])
+def test_native_pytest_cleanup_admission_through_public_main(
+    native_pytest_hanging_tree, monkeypatch, capsys, observation, interruption="timeout", reentry=False,
+):
+    """Real pytest -> Phase B CLI -> recovery, with only unrelated actors stubbed."""
+    recovery = load_module("recovery_gate", _EXECUTORS_DIR / "recovery_gate.py")
+    monkeypatch.setitem(sys.modules, "recovery_gate", recovery)
+    real_recovery_loop = recovery.run_recovery_loop
+    repo, launched = native_pytest_hanging_tree
+    plan = "reports/control_plane/plan.md"
+    (repo / plan).parent.mkdir(parents=True)
+    (repo / plan).write_text("# Plan\nPhase-A-Lock: LOCKED\n")
+    selected = ["mu/tests/test_hanging.py"]
+    (repo / "mu/tests").mkdir(parents=True)
+    (repo / "test_hanging.py").rename(repo / selected[0])
+    impl = _make_mock_impl()
+    monkeypatch.setitem(sys.modules, "phase_b_implementer", impl)
+    checkpoint = repo / ".agent_bus/executors/phase_b_state.json"
+    if reentry:
+        checkpoint.parent.mkdir(parents=True)
+        checkpoint.write_text(json.dumps({
+            "plan_path": plan, "completed_step": "needs_phase_b_reentry", "wave_id": "plan",
+            "bridge_rounds": 1,
+            "bridge_scope_fingerprint": pb_mod._bridge_scope_fingerprint(repo, selected),  # ANTICHEAT_OK: authentic disposable reentry checkpoint binding
+            "deferred_packet_path": None, "implementer_changed": selected,
+            "executor_created": [], "baseline_wave_files": [], "all_non_blocking": [],
+            "finding_history": [], "reentry_findings": "Fix the thing",
+        }))
+    observed = {}
+    real_runner = pb_mod.run_pytest_on_files
+    real_run = subprocess.run
+    real_release = common_mod.terminate_owned_executor
+
+    def run_short_gate(root, targets, **kwargs):
+        observed["checkpoint"] = checkpoint.read_bytes()
+        observed["stages"] = stage.call_count
+        error = None
+        try:
+            native = real_runner(root, targets, timeout=5)
+        except pb_mod.PytestCleanupHoldError as exc:
+            error = exc
+            native = exc.pytest_result
+            observed["traceback"] = "".join(traceback.format_exception(exc))
+            assert isinstance(exc.__cause__, (KeyboardInterrupt, OSError))
+        observed["native"] = native
+        observed["bus"] = {p: p.read_bytes() for p in (repo / ".agent_bus").rglob("*") if p.is_file()}
+        # Prompt warming may read fixed entries before the gate. Measure only
+        # effects after this actual cleanup result reaches the consumer.
+        observed["effect_counts"] = {name: effect.call_count for name, effect in effects.items()}
+        if observation == "complete":
+            assert_native_pytest_tree_stopped(repo, launched)
+        else:
+            pids = {int(pid) for p in repo.glob("*.pids") for pid in p.read_text().split()}
+            assert len(pids) == 8
+            for pid in pids:
+                os.kill(pid, 0)  # The cleanup refusal leaves real children alive.
+            mutations = {p: p.read_bytes() for p in repo.glob("*.mutation")}
+            time.sleep(0.1)
+            assert all(p.read_bytes() != value for p, value in mutations.items())
+        if error is not None:
+            raise error
+        return native
+
+    def release(proc, owner, **kwargs):
+        if observation == "complete":
+            with complete_process_observation(common_mod):
+                return real_release(proc, owner, **kwargs)
+
+        def uncertain_query(command, **query_kwargs):
+            if command[:1] == ["ps"]:
+                if observation == "failed":
+                    raise subprocess.CalledProcessError(1, command)
+                return subprocess.CompletedProcess(command, 0, "", "")
+            return real_run(command, **query_kwargs)
+
+        with patch.object(subprocess, "run", side_effect=uncertain_query):
+            return real_release(proc, owner, **kwargs)
+
+    def git_root(command, **kwargs):
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(repo), "")
+        return real_run(command, **kwargs)
+
+    learned = MagicMock(return_value=recovery.LearnedMatch(
+        failure_class=recovery.FailureClass.STALE_EXECUTOR_STATE,
+        tier=1, pattern_id="fixture-stale-route", action="clear_stale_executor_state",
+    ))
+    fix = MagicMock(return_value={"fixed": True, "action": "fixture_retry", "detail": "released control"})
+    # A stale learned route would otherwise admit a fix and return CLI success.
+    # It cannot override unreleased workers; no real provider is ever invoked.
+    effects = {name: MagicMock() for name in (
+        "_load_session_fixed_entries", "_begin_recovery_status", "_finish_recovery_status",
+        "_update_recovery_status", "observe_outcome", "run_recovery_loop",
+    )}
+    monkeypatch.setattr(recovery, "check_learned_patterns", learned)
+    monkeypatch.setitem(recovery._TIER1_FIXES, recovery.FailureClass.STALE_EXECUTOR_STATE, fix)  # ANTICHEAT_OK: fixture recovery effect; admission and native cleanup are real
+    for name, effect in effects.items():
+        monkeypatch.setattr(recovery, name, effect)
+    monkeypatch.setattr(subprocess, "run", git_root)
+    monkeypatch.setattr(pb_mod, "run_pytest_on_files", run_short_gate)
+    monkeypatch.setattr(pb_mod, "terminate_owned_executor", release)
+    original_select = pb_mod.selectors.DefaultSelector.select
+
+    def interrupt_after_workers_ready(selector, timeout=None):
+        if len(list(repo.glob("*.pids"))) == len(list(repo.glob("*.mutation"))) == 4:
+            if interruption == "cancellation":
+                raise KeyboardInterrupt("public cancellation")
+            raise OSError("public producer error")
+        return original_select(selector, timeout)
+
+    if interruption != "timeout":
+        monkeypatch.setattr(pb_mod.selectors.DefaultSelector, "select", interrupt_after_workers_ready)
+
+    def bridge_go(*args, **kwargs):
+        if reentry:
+            kwargs["on_started"]()
+        return {"exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "cleanup-admission"}
+
+    monkeypatch.setattr(sys, "argv", ["phase_b_executor.py", "--plan", plan, "--json"])
+    with patch.object(pb_mod, "_collect_changed_files", return_value=selected), \
+         patch.object(pb_mod, "_collect_wave_owned_files", return_value=selected), \
+         patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0}), \
+         patch.object(pb_mod, "run_bridge_review", side_effect=bridge_go), \
+         patch.object(pb_mod, "_stage_files") as stage, \
+         patch.object(pb_mod, "run_pre_commit_supervisor") as supervisor, \
+         patch.object(pb_mod, "prepare_commit_handoff") as handoff:
+        code = pb_mod.main()
+    transported = capsys.readouterr().out
+    result = json.loads(transported)
+    assert result["step"] == ("reentry_pytest_gate" if reentry else "final_pytest_gate"), result
+    assert result["pytest_result"] == observed["native"]
+    assert result["pytest_result"]["timed_out"] is (interruption == "timeout")
+    assert checkpoint.read_bytes() == observed["checkpoint"]
+    assert json.loads(observed["checkpoint"])["completed_step"] == (
+        "needs_phase_b_reentry" if reentry else "bridge_converged")
+    assert impl.invoke_implementer.call_count == 1
+    if reentry:
+        assert stage.call_count == observed["stages"]
+    else:
+        stage.assert_called_once_with(repo, [*selected, plan])
+    supervisor.assert_not_called()
+    handoff.assert_not_called()
+    if observation == "complete":
+        assert result["pytest_result"]["cleanup_status"] == "released"
+        assert result["pytest_result"]["cleanup_release_evidence"]["root_pid"] == launched[0].pid
+        assert code == 0 and result["recovery"]["recovered"] is True
+        learned.assert_called_once()
+        fix.assert_called_once()
+    else:
+        assert result["pytest_result"]["cleanup_status"] == "HOLD"
+        assert result["pytest_result"]["cleanup_release_evidence"] is None
+        if reentry:
+            assert pb_mod.ordinary_bridge_fix_failure_blocks_recovery(repo, result) is True
+            assert "recovery" not in result
+            assert code == 1 and result["hold"] is True and result["retry_allowed"] is False
+        else:
+            assert code == 1 and result["recovery"]["recovered"] is False
+            assert result["recovery"]["hold"] is True and not result["recovery"]["exhausted"]
+        # Replay only the actual public JSON plus actual producer traceback to
+        # both recovery consumers. Traceback prose supplies no authority.
+        outer_result = {"status": "failed", "step": "phase_b", "exit_code": 1,
+                        "stdout": transported, "stderr": observed.get("traceback", "")}
+        for entry in (recovery.attempt_recovery, real_recovery_loop):
+            refused = entry(repo, outer_result, "public-cleanup-transport")
+            assert refused["hold"] and not refused["recovered"] and not refused["exhausted"]
+            assert refused["pytest_result"] == observed["native"]
+        for channel in ("stdout", "stderr"):
+            assert "NATIVE_" in result["pytest_result"][channel]
+            assert "output bytes omitted" in result["pytest_result"][channel]
+            assert len(result["pytest_result"][channel]) < 65736
+        if interruption != "timeout":
+            assert "PytestCleanupHoldError" in observed["traceback"]
+            assert result["pytest_result"]["failure_kind"] == (
+                "interrupted" if interruption == "cancellation" else "producer_error")
+        learned.assert_not_called()
+        fix.assert_not_called()
+        assert {name: effect.call_count for name, effect in effects.items()} == observed["effect_counts"]
+        assert {p: p.read_bytes() for p in (repo / ".agent_bus").rglob("*") if p.is_file()} == observed["bus"]
+
+
+@pytest.mark.usefixtures("mock_routing_record")
+@pytest.mark.parametrize("observation", ["failed", "partial"])
+@pytest.mark.parametrize("interruption", ["cancellation", "producer_error"])
+def test_native_pytest_interrupted_cleanup_through_public_main(
+    native_pytest_hanging_tree, monkeypatch, capsys, observation, interruption,
+):
+    test_native_pytest_cleanup_admission_through_public_main(
+        native_pytest_hanging_tree, monkeypatch, capsys, observation, interruption,
+    )
+
+
+@pytest.mark.usefixtures("mock_routing_record")
+@pytest.mark.parametrize("observation", ["failed", "partial"])
+def test_native_pytest_reentry_cancellation_preserves_checkpoint(
+    native_pytest_hanging_tree, monkeypatch, capsys, observation,
+):
+    test_native_pytest_cleanup_admission_through_public_main(
+        native_pytest_hanging_tree, monkeypatch, capsys, observation, "cancellation", reentry=True,
+    )
+
+
+@pytest.mark.parametrize("observation", ["failed", "partial"])
+@pytest.mark.parametrize("transport", ["direct", "wrapped", "cleanup_error"])
+def test_native_pytest_typed_exception_main_transport(
+    native_pytest_hanging_tree, monkeypatch, capsys, observation, transport,
+):
+    """Public main must serialize even an exception escaping a gate consumer."""
+    repo, launched = native_pytest_hanging_tree
+    checkpoint = repo / ".agent_bus/executors/phase_b_state.json"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_text('{"completed_step":"bridge_converged"}\n')
+    before = checkpoint.read_bytes()
+    recovery = load_module("recovery_gate", _EXECUTORS_DIR / "recovery_gate.py")
+    monkeypatch.setitem(sys.modules, "recovery_gate", recovery)
+    learned = MagicMock(side_effect=AssertionError("unreleased producer entered learning"))
+    monkeypatch.setattr(recovery, "check_learned_patterns", learned)
+    real_run = subprocess.run
+    real_select = pb_mod.selectors.DefaultSelector.select
+    real_release = common_mod.terminate_owned_executor
+    observed = {}
+
+    def query(command, **kwargs):
+        if command[:1] == ["ps"]:
+            if observation == "failed":
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(command, 0, str(repo), "")
+        return real_run(command, **kwargs)
+
+    def release(*args, **kwargs):
+        result = real_release(*args, **kwargs)
+        assert result is None
+        if transport == "cleanup_error":
+            raise OSError("release observer error")
+        return result
+
+    def cancel(selector, timeout=None):
+        if len(list(repo.glob("*.pids"))) == len(list(repo.glob("*.mutation"))) == 4:
+            raise KeyboardInterrupt("main transport cancellation")
+        return real_select(selector, timeout)
+
+    def gate(*args, **kwargs):
+        try:
+            return pb_mod.run_pytest_on_files(repo, ["test_hanging.py"], timeout=5)
+        except pb_mod.PytestCleanupHoldError as exc:
+            observed["native"] = exc.pytest_result
+            observed["traceback"] = "".join(traceback.format_exception(exc))
+            if transport == "wrapped":
+                raise RuntimeError("gate consumer failed") from exc
+            raise
+
+    monkeypatch.setattr(subprocess, "run", query)
+    monkeypatch.setattr(pb_mod, "terminate_owned_executor", release)
+    monkeypatch.setattr(pb_mod.selectors.DefaultSelector, "select", cancel)
+    monkeypatch.setattr(pb_mod, "run_phase_b", gate)
+    monkeypatch.setattr(sys, "argv", ["phase_b_executor.py", "--json", "--dispatcher-owned-recovery"])
+    assert pb_mod.main() == 1
+    wire = capsys.readouterr().out
+    result = json.loads(wire)
+    assert result["hold"] is True and result["retry_allowed"] is False
+    assert result["pytest_result"] == observed["native"]
+    assert result["pytest_result"]["cleanup_status"] == "HOLD"
+    assert result["pytest_result"]["cleanup_release_evidence"] is None
+    assert result["pytest_result"]["interruption"]["type"] == "KeyboardInterrupt"
+    if transport == "cleanup_error":
+        assert result["pytest_result"]["cleanup_error"]["type"] == "OSError"
+        assert "release observer error" in result["pytest_result"]["cleanup_error"]["traceback"]
+    assert "main transport cancellation" in observed["traceback"]
+    for stream in ("stdout", "stderr"):
+        outer = {"status": "failed", stream: wire,
+                 "stderr" if stream == "stdout" else "stdout": observed["traceback"]}
+        for entry in (recovery.attempt_recovery, recovery.run_recovery_loop):
+            refused = entry(repo, outer, "main-transport")
+            assert refused["hold"] and not refused["recovered"] and not refused["exhausted"]
+            assert refused["pytest_result"] == observed["native"]
+    learned.assert_not_called()
+    assert checkpoint.read_bytes() == before
+    pids = {int(pid) for p in repo.glob("*.pids") for pid in p.read_text().split()}
+    assert len(pids) == 8 and len(launched) == 1
+    for pid in pids:
+        os.kill(pid, 0)

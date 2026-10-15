@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from subprocess import Popen as PopenProcess
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, PropertyMock
 
@@ -17665,18 +17666,22 @@ class TestLaneMonitorLifecycle:
     def test_lane_monitor_cleanup_reaps_in_flight_spawn(self, tmp_path):
         monitor = dispatch_mod._LaneMonitor(tmp_path, ".agent_bus-lane1")  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
         order = []
-        proc = MagicMock(spec=subprocess.Popen)
-        proc.poll.return_value = None
-        proc.wait.side_effect = lambda *a, **k: order.append("reap")
-        monitor._spawn_proc = proc  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
-        with patch.object(dispatch_mod, "_lane_owner_loop_pids", return_value=[]), \
+        with patch.object(dispatch_mod.subprocess, "Popen") as mock_popen, \
+             patch.object(dispatch_mod, "_lane_owner_loop_pids", return_value=[]), \
              patch.object(dispatch_mod, "_ps_command_lines", return_value=[]), \
              patch.object(dispatch_mod, "_tmux_kill_session",
                           side_effect=lambda session: order.append(("kill", session))):
+            # Use the class captured at import time, even while the shared
+            # subprocess.Popen is patched; a Mock cannot itself be a spec.
+            proc = MagicMock(spec=PopenProcess)
+            proc.poll.return_value = None
+            proc.wait.side_effect = lambda *a, **k: order.append("reap")
+            monitor._spawn_proc = proc  # ANTICHEAT_OK: lane monitor lifecycle is the regression target
             monitor.cleanup()
             monitor.cleanup()  # idempotent: the second call is a no-op
         assert order == ["reap", ("kill", "rcx-pipeline-lane1")]
         proc.wait.assert_called_once()
+        mock_popen.assert_not_called()
 
     # (h) A lane configured with a non-default tmux_session is probed/cleaned by
     #     the CONFIGURED name, not the hardcoded rcx-pipeline-laneN.
