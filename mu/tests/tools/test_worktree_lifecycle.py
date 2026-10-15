@@ -228,8 +228,9 @@ def owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch):
 
     The old fixture daemonized its controller into PID 1. Keep its actual
     parent alive and waitable throughout adoption, with a fixture-only cleanup
-    backstop. Production ps, signals, pane ownership and absence stay real.
-    This establishes a positive premise, not the cause of historical CI holds.
+    backstop. A matching zombie gets a fresh child-exit notification to this
+    controller so it can reap before lifecycle acknowledges absence. All ps
+    results, pane ownership and PID-absence checks remain real.
     """
     from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher
     real_run = subprocess.run
@@ -256,7 +257,7 @@ def owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch):
             with pytest.MonkeyPatch.context() as setup:
                 setup.setattr(subprocess, "run", start_controller)
                 with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as watcher:
-                    setup.undo()  # All production observations use real subprocess.run.
+                    setup.undo()
                     run, pane, old, tails, log = watcher
                     assert controller is not None and controller.poll() is None
                     assert int(run("display-message", "-p", "-t", pane, "#{pid}")) == controller.pid
@@ -266,7 +267,26 @@ def owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch):
                     assert child["ppid"] == controller.pid
                     (tmp_path / "controller-identity.json").write_text(json.dumps(
                         {"controller": parent, "watcher": child, "tails": tails}, indent=2) + "\n")
-                    yield watcher
+                    query = ["ps", "-ww", "-p", str(old.pid), "-o", "pid=,ppid=,lstart=,command="]
+
+                    def observe_and_reap(command, *args, **kwargs):
+                        observation = real_run(command, *args, **kwargs)
+                        if command == query and observation.returncode == 0 and not observation.stderr:
+                            fields = observation.stdout.rstrip("\n").split(None, 7)
+                            if (len(fields) == 8 and fields[0] == str(child["pid"])
+                                    and fields[1] == str(child["ppid"])
+                                    and " ".join(fields[2:7]) == child["started"]
+                                    and "<defunct>" in fields[7]):
+                                # Only the real parent can waitpid this child.
+                                # Wake tmux's reaper, but return the zombie row
+                                # unchanged: the next OS probe must prove absence.
+                                assert controller.poll() is None, "Fixture reaper exited during adoption"
+                                os.kill(controller.pid, signal.SIGCHLD)
+                        return observation
+
+                    with pytest.MonkeyPatch.context() as reaping:
+                        reaping.setattr(subprocess, "run", observe_and_reap)
+                        yield watcher
                     assert controller.poll() is None, "Fixture reaper exited during adoption"
         finally:
             if controller is not None:
@@ -442,10 +462,17 @@ def test_finished_generated_reader_releases_within_native_completion_budget(nati
 
 
 @pytest.mark.parametrize("obstruction", [None, "writer", "unknown-reader"])
-def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_path, monkeypatch, obstruction):
+@pytest.mark.parametrize("pause_reaper", [False, True], ids=["normal-reaper", "delayed-reaper"])
+def test_pre_update_live_raw_tail_adopts_before_native_claim(
+        native_lane, tmp_path, monkeypatch, obstruction, pause_reaper):
+    from mu.tests.tools.test_pipeline_monitor_autofollow import _wait_for
     primary, lane, _, env = native_lane
     blocker = None
     with owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
+        original = observed_process_identity(old.pid)
+        controller = original["ppid"]
+        real_kill = os.kill
+        notifications = []
         if obstruction:
             blocker = subprocess.Popen([sys.executable, "-c",
                 "import json,os,sys; f=open(os.environ['READER_TEST_PATH'],os.environ['READER_TEST_MODE']); "
@@ -468,7 +495,34 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
                     f"D{descriptor['device']:x}\ni{descriptor['inode']}\nn{log}\n"))))
         try:
             directory = register_from_exited_owner(lane, env, status="success")
-            result = lifecycle.complete_pending(directory, delay=0)
+            authority = {p: p.read_bytes() for p in directory.glob("*.json")}
+
+            def delay_reaping_until_notified(pid, signum):
+                if pid == old.pid and signum == signal.SIGTERM:
+                    real_kill(controller, signal.SIGSTOP)
+                    _wait_for(lambda: subprocess.run(
+                        ["ps", "-p", str(controller), "-o", "stat="], check=True,
+                        capture_output=True, text=True, timeout=10).stdout.strip().startswith("T"))
+                if pid == controller and signum == signal.SIGCHLD and not notifications:
+                    # Hold the actual parent until the fixture observes its
+                    # unreaped child. No retirement claim may precede reaping.
+                    state = subprocess.run(["ps", "-p", str(old.pid), "-o", "stat="],
+                        check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+                    assert state.startswith("Z"), state
+                    assert not list(directory.glob("attempt-*"))
+                    assert not (directory / "reader-release.json").exists()
+                    assert all(p.read_bytes() == raw for p, raw in authority.items())
+                    notifications.append(pid)
+                    real_kill(pid, signum)
+                    return real_kill(controller, signal.SIGCONT)
+                return real_kill(pid, signum)
+
+            with monkeypatch.context() as fault:
+                if pause_reaper:
+                    fault.setattr(os, "kill", delay_reaping_until_notified)
+                result = lifecycle.complete_pending(directory, delay=0)
+            if pause_reaper:
+                assert notifications == [controller], result
             if obstruction is None:
                 references = []
                 if result["state"] != "COMPLETE":
@@ -479,6 +533,7 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
             if obstruction:
                 assert result["state"] == "ESCALATED", result
                 assert result.get("attempts_exhausted") == 3, result.get("reason", result)
+                assert len(list(directory.glob("attempt-*/claim.json"))) == lifecycle.MAX_ATTEMPTS
                 assert "Open target files/processes or uncertain lsof evidence" in result["reason"], result
                 assert lane.exists() and blocker.poll() is None
             else:
@@ -491,12 +546,15 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
             assert len(release["watcher_adoptions"]) == 1, release
             adoption = release["watcher_adoptions"][0]
             assert adoption["previous"]["pid"] == old.pid, adoption
+            assert adoption["previous"] == original, adoption
             assert adoption["current"]["pid"] != old.pid, adoption
             for pid in [old.pid, *tails]:
                 with pytest.raises(ProcessLookupError):
                     os.kill(pid, 0)
             receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
         finally:
+            if pause_reaper:
+                real_kill(controller, signal.SIGCONT)
             if blocker is not None:
                 blocker.communicate(input="done\n", timeout=10)
     assert lifecycle.complete_pending(directory, delay=0) == result

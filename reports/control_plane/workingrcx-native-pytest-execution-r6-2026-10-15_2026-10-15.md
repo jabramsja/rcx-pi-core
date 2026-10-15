@@ -148,21 +148,10 @@ FOUNDER_OVERRIDE:workingrcx-native-pytest-execution-r6-2026-10-15
 - Evidence command: `PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal -p no:cacheprovider --import-mode=importlib mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_executor_dispatch.py --tb=short --durations=20`.
 - Evidence delta: Admission states expected behavior only. Record actual pre-fix reproductions and post-fix commands, source hashes, return codes and limitations in owned implementation evidence. No retroactive test or merge claim..
 - Evidence handles:
+  - `candidate_authority_receipt`: `.agent_bus-native-pytest-execution-r6-20261015/meta/candidate_authority_receipts/workingrcx-native-pytest-execution-r6-2026-10-15/commit-pre-supervisor.json`
   - `indicator`: `reports/l4_wave_indicators/workingrcx-native-pytest-execution-r6-2026-10-15.json`
 - Current staged files:
-  - `CHANGELOG.md`
-  - `TASKS.md`
-  - `mu/tests/tools/test_commit_executor_post_merge_cleanup.py`
-  - `mu/tests/tools/test_commit_executor_receipt.py`
-  - `mu/tests/tools/test_executor_dispatch.py`
-  - `mu/tests/tools/test_launch_wave.py`
-  - `mu/tests/tools/test_phase_b_executor.py`
-  - `mu/tests/tools/test_recovery_gate.py`
   - `mu/tests/tools/test_worktree_lifecycle.py`
-  - `mu/tools/executors/commit_executor.py`
-  - `mu/tools/executors/phase_b_executor.py`
-  - `mu/tools/executors/recovery_gate.py`
   - `reports/control_plane/workingrcx-native-pytest-execution-r6-2026-10-15_2026-10-15.md`
-  - `reports/control_plane/workingrcx-native-pytest-execution-r6-2026-10-15_implementation_evidence.json`
   - `reports/l4_wave_indicators/workingrcx-native-pytest-execution-r6-2026-10-15.json`
 <!-- COMMIT_PATH_TRUTH_REFRESH:end -->
