@@ -298,12 +298,34 @@ def wave_repo(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     _git(repo, "init", "-q")
+    # Detached maintenance from fixture commits can remove maintenance.lock
+    # during full-repository snapshots. Disable it before the first commit;
+    # keep every Git control file covered by the no-write assertions.
+    _git(repo, "config", "maintenance.auto", "false")
     _git(repo, "config", "user.email", "test@example.com")
     _git(repo, "config", "user.name", "test")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "init")
     monkeypatch.setattr(lw, "SCRIPT_DIR", launcher_source)
     return repo
+
+
+def test_disposable_wave_fixture_disables_detached_maintenance_before_commit(tmp_path, monkeypatch):
+    trace = tmp_path / "git-trace.jsonl"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    wave_repo.__wrapped__(repo, monkeypatch)
+    events = [json.loads(line) for line in trace.read_text().splitlines()]
+    commands = [event["argv"] for event in events if event.get("event") == "start"]
+    assert any("commit" in command for command in commands)
+    assert not any("maintenance" in event.get("argv", []) or "gc" in event.get("argv", [])
+                   for event in events if event.get("event") == "child_start")
+    configured = subprocess.check_output(
+        ["git", "config", "--local", "--get", "maintenance.auto"], cwd=repo, text=True)
+    assert configured.strip() == "false"
+    # Administrative bytes remain included in the structural no-write tests.
+    assert (repo / ".git/config").is_file() and (repo / ".git/index").is_file()
 
 
 def make_config(**overrides):

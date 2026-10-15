@@ -2,17 +2,20 @@
 from __future__ import annotations
 
 import copy
+import shutil
 import fcntl, io, json, os, re, shlex, sqlite3, subprocess, sys, threading, time
 import traceback
+import textwrap
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
-from contextlib import contextmanager, redirect_stdout, redirect_stderr
+from contextlib import contextmanager, nullcontext, redirect_stdout, redirect_stderr
 import pytest
 
 from mu.tests.tools.module_loader import load_module
 from mu.tests.tools.test_commit_executor_local_review import carrier, carrier_repository, local_terminal_attempt
+from mu.tests.tools.test_executor_common import complete_process_observation
 
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
 _OBSERVABILITY_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "observability"
@@ -69,6 +72,78 @@ def test_local_review_prose_does_not_override_unrelated_transient_recovery(tmp_p
     outcome = rg_mod.fix_transient_rate_limit(tmp_path, result=result)
     assert outcome["fixed"] is True
     assert len(slept) == 1 and 0 < slept[0] <= rg_mod.RATE_LIMIT_BACKOFF_MAX_S
+
+
+@pytest.mark.parametrize("entry", ["attempt_recovery", "run_recovery_loop"])
+@pytest.mark.parametrize("transport", ["direct", "stdout", "stderr"])
+@pytest.mark.parametrize("field", ["pytest_result", "validator_result"])
+@pytest.mark.parametrize("bus_name", [".agent_bus", ".agent_bus-cleanup-hold"])
+def test_pytest_cleanup_hold_precedes_recovery_effects(
+    tmp_path, monkeypatch, entry, transport, field, bus_name,
+):
+    """The structured stop survives transport and never consumes recovery state."""
+    native = {"passed": False, "timed_out": True, "failure_kind": "timeout",
+              "cleanup_status": "HOLD", "cleanup_release_evidence": None}
+    payload = {"status": "error", "step": "final_pytest_gate", field: native,
+               "errors": ["pytest timed out; stale executor state; index.lock"]}
+    result = payload if transport == "direct" else {
+        "executor": "phase_b_executor", "status": "failed", "exit_code": 1,
+        transport: "[phase-b] diagnostic\n" + json.dumps(payload),
+    }
+    before_result = copy.deepcopy(result)
+    bus = tmp_path / bus_name
+    for name, contents in {
+        "executors/phase_b_state.json": {"completed_step": "bridge_converged", "owner": "completed"},
+        "executors/phase_b_launch_tracker_restore_v1.json": {"status": "restored"},
+        "recovery/recovery_status.json": {"active": False, "state": "tier3_exhausted"},
+        "recovery/recovery_log.json": [{"wave_id": "cleanup", "outcome": "failed"}],
+    }.items():
+        path = bus / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(contents))
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    effects = []
+
+    def no_effect(*args, **kwargs):
+        effects.append((args, kwargs))
+        raise AssertionError("cleanup HOLD entered recovery effects")
+
+    for name in ("check_learned_patterns", "_load_session_fixed_entries", "_begin_recovery_status",
+                 "_load_recovery_log", "_load_recovery_status", "observe_outcome",
+                 "_resolve_recovery_agent_invocation", "_run_delegate_implementer_action"):
+        monkeypatch.setattr(rg_mod, name, no_effect)
+    for _ in range(2):
+        outcome = getattr(rg_mod, entry)(tmp_path, result, "cleanup", bus_dir=bus_name)
+        assert outcome["recovered"] is False and outcome["hold"] is True
+        assert outcome["retry_allowed"] is False and outcome["exhausted"] is False
+        assert outcome["action"] == "pytest_cleanup_hold" and outcome["tier"] == 4
+        assert outcome["pytest_result"] == native
+        if entry == "run_recovery_loop":
+            assert outcome["iterations"] == 0 and outcome["log"] == []
+    assert rg_mod.classify_failure(result) == FailureClass.TERMINAL_POLICY
+    assert result == before_result and effects == []
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("diagnostic", [
+    "pytest cleanup_status HOLD in an earlier run",
+    'Example: {"status":"error","pytest_result":{"cleanup_status":"HOLD"}}',
+    json.dumps({"type": "prompt", "status": "error", "pytest_result": {"cleanup_status": "HOLD"}}),
+    'Traceback (most recent call last):\n  PytestCleanupHoldError: HOLD: interrupted pytest process release is unverified',
+    json.dumps({"type": "item.completed", "item": {"status": "error", "pytest_result": {"cleanup_status": "HOLD"}}}),
+    {"type": "provider", "stdout": json.dumps({"status": "error", "pytest_result": {"cleanup_status": "HOLD"}})},
+])
+def test_pytest_cleanup_hold_prose_does_not_block_recovery(tmp_path, monkeypatch, diagnostic):
+    class AdmissionReached(Exception):
+        pass
+
+    def admitted(*args, **kwargs):
+        raise AdmissionReached
+
+    monkeypatch.setattr(rg_mod, "check_learned_patterns", admitted)
+    with pytest.raises(AdmissionReached):
+        result = diagnostic if isinstance(diagnostic, dict) else {"status": "failed", "stderr": diagnostic}
+        rg_mod.attempt_recovery(tmp_path, result, "cleanup-control")
 
 
 @pytest.fixture
@@ -9438,7 +9513,7 @@ class TestHybridValidatorContract:
         assert "1 passed" in result["stdout"], output
 
     @pytest.mark.parametrize("targets, caller_timeout, expected_timeout, parallel", [
-        (["mu/tests/tools/test_recovery_gate.py"], 45, 45, False),
+        (["mu/tests/tools/test_recovery_gate.py"], 45, 45, True),
         (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 300, 900, True),
         (["mu/tests/tools/test_workingrcx_fleet_apply.py"], 1800, 1800, True),
         (["mu/tests/tools/test_workingrcx_fleet_apply.py",
@@ -9465,15 +9540,25 @@ class TestHybridValidatorContract:
             captured["kwargs"] = kwargs
             return subprocess.CompletedProcess(args, 0, "", "")
 
-        with patch.object(rg_mod.subprocess, "run", side_effect=fake_run):
+        native = targets == ["mu/tests/tools/test_recovery_gate.py"]
+        real_popen = subprocess.Popen
+
+        def argv_only_process(args, **kwargs):
+            # Builder-only fixture: execute a harmless process, recording the
+            # actual owned launch arguments. Real pytest selection is tested
+            # through the delegate producer/consumer below.
+            captured["args"] = list(args)
+            captured["kwargs"] = kwargs
+            return real_popen([sys.executable, "-c", "pass"], **kwargs)
+
+        with patch.object(rg_mod.subprocess, "Popen" if native else "run",
+                          side_effect=argv_only_process if native else fake_run):
             result = rg_mod._run_pytest_targeted_validator(  # ANTICHEAT_OK: validator builder contract
-                tmp_path,
-                targets=targets,
-                timeout=caller_timeout,
+                tmp_path, targets=targets, timeout=caller_timeout,
             )
 
         assert result["passed"] is True
-        assert captured["args"][:7] == [
+        assert captured["args"][:7] == ([sys.executable, "-u", "-m", "pytest", "-n", "4", "--dist"] if native else [
             sys.executable,
             "-m",
             "pytest",
@@ -9481,11 +9566,14 @@ class TestHybridValidatorContract:
             "--tb=short",
             "-p",
             "no:cacheprovider",
-        ]
+        ])
         assert captured["args"][-len(targets):] == targets
         assert result["targets"] == targets
-        assert captured["kwargs"]["timeout"] == expected_timeout
-        if parallel:
+        assert (result["timeout_seconds"] if native else captured["kwargs"]["timeout"]) == expected_timeout
+        if native:
+            assert captured["args"][7:13] == ["worksteal", "--max-worker-restart=0", "--maxfail=0", "--tb=short", "-p", "no:cacheprovider"]
+            assert captured["kwargs"]["start_new_session"] is True
+        elif parallel:
             assert captured["args"][7:11] == ["-n", "4", "--dist", "worksteal"]
         else:
             assert "-n" not in captured["args"]
@@ -23227,3 +23315,482 @@ class TestPrConflictingModuleImports:
             "recovery_gate.py must not have any top-level import of "
             f"commit_executor; found: {offending}"
         )
+
+
+@pytest.fixture
+def bounded_native_delegate(retained_native_scratch, tmp_path_factory, monkeypatch):
+    """Real delegate admission/checkpoints/pytest; only the code-writing actor is local."""
+    case = retained_native_scratch
+    records = tmp_path_factory.mktemp('bounded-native-observations')
+    targets = ['mu/tests/tools/test_phase_b_executor.py', 'mu/tests/tools/test_recovery_gate.py']
+    module = FakeHybridImplementerModule()
+    config = {'hybrid_recovery_enabled': True, 'timeouts': {'recovery_implementer': 1200}}
+    original_actor = module.invoke_implementer
+
+    def distinct_actor_artifact(*args, **kwargs):
+        result = original_actor(*args, **kwargs)
+        job = 'impl-native-' + str(len(module.invoke_calls))
+        (case.root / ('.scratch/phase_b_implementer_output_' + result['job_id'] + '.txt')).rename(
+            case.root / ('.scratch/phase_b_implementer_output_' + job + '.txt'))
+        result['job_id'] = job
+        return result
+
+    module.invoke_implementer = distinct_actor_artifact
+    monkeypatch.setattr(rg_mod, 'load_executor_config', lambda root: config)
+    monkeypatch.setattr(rg_mod, '_load_phase_b_implementer_module', lambda root: module)
+    # Reuse the actual public runner module, including its real process releaser.
+    from mu.tests.tools.test_phase_b_executor import pb_mod, common_mod
+    monkeypatch.setitem(sys.modules, 'phase_b_executor', pb_mod)
+    monkeypatch.setattr(pb_mod, 'terminate_owned_executor', common_mod.terminate_owned_executor)
+    (case.root / 'conftest.py').write_text(textwrap.dedent(f'''
+        import hashlib, json, os, tempfile
+        from pathlib import Path
+        import pytest
+        from hypothesis import settings
+        records = Path({str(records)!r})
+        settings.register_profile('ci_fast', max_examples=7)
+        settings.load_profile(os.environ.get('HYPOTHESIS_PROFILE', 'default'))
+        initialization = Path(tempfile.mkdtemp()) / 'initialization'
+        initialization.write_text('retained')
+        def pytest_collection_finish(session):
+            worker = getattr(session.config, 'workerinput', {{}}).get('workerid', 'serial')
+            (records / ('collection-' + worker + '.json')).write_text(
+                json.dumps([item.nodeid for item in session.items]))
+        @pytest.fixture(autouse=True)
+        def record_execution(request, tmp_path):
+            assert initialization.read_text() == 'retained'
+            assert tmp_path.resolve().is_relative_to((Path(os.environ['TMPDIR']) / 'pytest').resolve())
+            assert Path(os.environ['XDG_CACHE_HOME']).is_dir()
+            name = hashlib.sha256(request.node.nodeid.encode()).hexdigest()
+            run = os.environ.get('PYTEST_XDIST_TESTRUNUID', 'serial')
+            with (records / ('ran-' + run + '-' + name + '.json')).open('x') as stream:
+                json.dump(dict(nodeid=request.node.nodeid,
+                    workers=os.environ.get('PYTEST_XDIST_WORKER_COUNT'),
+                    seed=os.environ.get('PYTHONHASHSEED'),
+                    profile=os.environ.get('HYPOTHESIS_PROFILE'),
+                    examples=settings.default.max_examples), stream)
+    '''))
+    (case.root / targets[0]).write_text(textwrap.dedent('''
+        import os, time, pytest
+        @pytest.mark.parametrize('case', range(40))
+        def test_native(case):
+            if case == 0:
+                assert os.environ['NATIVE_FAIL'] == '0', 'HYBRID_NATIVE_ASSERTION'
+            time.sleep(0.01)
+    '''))
+    (case.root / targets[1]).write_text('def test_recovery():\n    assert True\n')
+    (case.root / 'pytest.ini').write_text('[pytest]\n')
+    (case.root / 'mu/tests/tools/test_unselected.py').write_text('raise AssertionError("unselected")\n')
+    monkeypatch.setenv('PYTEST_ADDOPTS', '--basetemp=.scratch/unadmitted-pytest')
+    monkeypatch.setenv('NATIVE_FAIL', '0')
+    launched = []
+    real_popen = subprocess.Popen
+
+    def observe_launch(command, **kwargs):
+        proc = real_popen(command, **kwargs)
+        if 'pytest' in command[:4]:
+            launched.append((proc, list(command), kwargs))
+        return proc
+
+    monkeypatch.setattr(subprocess, 'Popen', observe_launch)
+
+    def run():
+        return rg_mod._run_delegate_implementer_action(  # ANTICHEAT_OK: actual admitted delegate producer and native validator consumer
+            case.root, result={'status': 'failed', 'step': 'run_pre_push_script'},
+            wave_id='bounded-native', step='run_pre_push_script',
+            response=make_delegate_response(validation_spec=[{'validator': 'pytest_targeted', 'targets': targets}]),
+            explanation='native validation after completed implementation',
+        )
+
+    yield SimpleNamespace(case=case, records=records, targets=targets, module=module,
+                          config=config, run=run, launched=launched, pb=pb_mod, common=common_mod)
+    # Backstop only for this fixture's newly launched session, after assertions.
+    for proc, command, kwargs in launched:
+        if kwargs.get('start_new_session'):
+            import signal
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        elif proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=5)
+    # Held validator directories outlive the call. Remove only this fixture's
+    # directories, after the real children have disappeared (zombies count as
+    # present); assertion failures must not turn into destructive teardown.
+    pids = {int(pid) for p in records.glob('*.pids') for pid in p.read_text().split()}
+    deadline = time.monotonic() + 5
+    while pids and time.monotonic() < deadline:
+        for pid in list(pids):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                pids.remove(pid)
+        if pids:
+            time.sleep(0.02)
+    assert not pids, f'Fixture children remain; preserve validator directories: {pids}'
+    for _, _, kwargs in launched:
+        for key in ('TMPDIR', 'XDG_CACHE_HOME'):
+            path = Path(kwargs['env'][key])
+            if path.exists():
+                shutil.rmtree(path)
+
+
+@pytest.mark.parametrize('profile', [None, 'ci_fast'])
+@pytest.mark.parametrize('failfast', [None, 'ini', 'env'])
+def test_bounded_native_delegate_complete_collection_profiles_and_failfast(
+    bounded_native_delegate, monkeypatch, profile, failfast,
+):
+    lane = bounded_native_delegate
+    if profile is None:
+        monkeypatch.delenv('HYPOTHESIS_PROFILE', raising=False)
+        monkeypatch.delenv('RCX_CI', raising=False)
+    else:
+        monkeypatch.setenv('HYPOTHESIS_PROFILE', profile)
+        monkeypatch.setenv('RCX_CI', '1')
+    if failfast:
+        monkeypatch.setenv('NATIVE_FAIL', '1')
+        options = '-x --maxfail=1 -n auto --max-worker-restart=3'
+        if failfast == 'ini':
+            (lane.case.root / 'pytest.ini').write_text('[pytest]\naddopts = ' + options + '\n')
+        else:
+            monkeypatch.setenv('PYTEST_ADDOPTS', options + ' --basetemp=.scratch/unadmitted-pytest')
+    result = lane.run()
+    native = result['validator_result']
+    assert native.get('worker_count') == 4, result
+    assert native['timeout_seconds'] == 300
+    assert native['passed'] is (failfast is None), result
+    assert result['ok'] is (failfast is None), result
+    assert native['exit_code'] == (0 if failfast is None else 1)
+    assert native['targets'] == lane.targets
+    assert native['command'][-2:] == lane.targets
+    assert '--maxfail=0' in native['command'] and '--max-worker-restart=0' in native['command']
+    collections = list(lane.records.glob('collection-gw*.json'))
+    assert len(collections) == 4
+    nodes = json.loads(collections[0].read_text())
+    assert len(nodes) == 41 and len(set(nodes)) == 41
+    assert all(json.loads(p.read_text()) == nodes for p in collections)
+    executed = [json.loads(p.read_text()) for p in lane.records.glob('ran-*.json')]
+    assert sorted(row['nodeid'] for row in executed) == sorted(nodes)
+    assert {row['workers'] for row in executed} == {'4'}
+    assert {row['seed'] for row in executed} == {'0'}
+    assert {row['profile'] for row in executed} == {profile}
+    assert {row['examples'] for row in executed} == ({100} if profile is None else {7})
+    if failfast:
+        assert 'HYBRID_NATIVE_ASSERTION' in native['stdout']
+        assert '1 failed, 40 passed' in native['stdout']
+    assert len(lane.module.invoke_calls) == len(lane.launched) == 1
+    assert result['implementer_result']['status'] == 'success'
+    assert result['pre_validation_audit']['observed_drift'] == ['mu/tools/executors/recovery_gate.py']
+    assert result['final_audit']['observed_drift'] == ['mu/tools/executors/recovery_gate.py']
+    env = lane.launched[0][2]['env']
+    ownership = native['validator_environment']
+    assert ownership['owner_token'] in env[ownership['owner_env']].split(':')
+    assert ownership['tmp_root'] == env['TMPDIR']
+    assert ownership['cache_root'] == env['XDG_CACHE_HOME']
+    assert not Path(env['TMPDIR']).exists() and not Path(env['XDG_CACHE_HOME']).exists()
+    assert not Path(ownership['ownership_path']).exists()
+    assert not (lane.case.root / '.pytest_cache').exists()
+    assert not (lane.case.root / '.scratch/unadmitted-pytest').exists()
+    assert lane.case.evidence.read_bytes() == b'{"owner":"native-sync","mode":384}\n'
+
+
+def assert_bounded_native_children_stopped(lane):
+    pids = {int(pid) for p in lane.records.glob('*.pids') for pid in p.read_text().split()}
+    assert len(pids) == 8
+    mutations = {p: p.read_bytes() for p in lane.records.glob('*.mutation')}
+    assert len(mutations) == 4
+    time.sleep(0.2)
+    assert all(p.read_bytes() == value for p, value in mutations.items())
+    for pid in pids | {lane.launched[0][0].pid}:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+@pytest.mark.parametrize('observation', ['complete', 'failed', 'partial', 'exited-controller'])
+@pytest.mark.parametrize('cancel', [False, True, 'producer_error'], ids=['timeout', 'cancellation', 'producer_error'])
+def test_bounded_native_delegate_lifetime_stops_or_retries_only_after_release(
+    bounded_native_delegate, monkeypatch, observation, cancel, validation_wrapper=None, entry="loop",
+):
+    lane = bounded_native_delegate
+    target = lane.case.root / lane.targets[0]
+    target.write_text(textwrap.dedent(f'''
+        import json, os, subprocess, sys, time, pytest
+        from pathlib import Path
+        @pytest.mark.parametrize('case', range(8))
+        def test_wait(case):
+            worker = os.environ['PYTEST_XDIST_WORKER']
+            path = Path({str(lane.records)!r}) / (worker + '.mutation')
+            active_files = [Path(os.environ[key]) / ('active-' + worker)
+                            for key in ('TMPDIR', 'XDG_CACHE_HOME')]
+            for active in active_files:
+                active.write_text('ready')
+            (path.with_suffix('.files')).write_text(json.dumps([str(p) for p in active_files]))
+            child = subprocess.Popen([sys.executable, '-u', '-c',
+                'import pathlib,time; p=pathlib.Path(' + repr(str(path)) + '); '
+                'active_files=' + repr([str(p) for p in active_files]) + '; '
+                'end=time.monotonic()+30\\nwhile time.monotonic()<end:\\n '
+                'value=str(time.monotonic()); '
+                '[pathlib.Path(f).write_text(value) for f in active_files]; '
+                'p.write_text(value); time.sleep(0.02)'])
+            (path.with_suffix('.pids')).write_text(str(os.getpid()) + ' ' + str(child.pid))
+            time.sleep(30)
+    '''))
+    with (lane.case.root / 'conftest.py').open('a') as stream:
+        stream.write(textwrap.dedent('''
+            def pytest_sessionstart(session):
+                if hasattr(session.config, 'workerinput'):
+                    return
+                os.write(1, b'HYBRID_HEAD\\n' + b'o' * 90000 + b'\\nHYBRID_TAIL\\n')
+                os.write(2, b'HYBRID_ERR_HEAD\\n' + b'e' * 90000 + b'\\nHYBRID_ERR_TAIL\\n')
+            def pytest_sessionfinish(session, exitstatus):
+                # Keep this controller live until owned cleanup kills it;
+                # xdist may otherwise exit while descendants are signaled.
+                if exitstatus and not hasattr(session.config, 'workerinput'):
+                    import time
+                    time.sleep(30)
+        '''))
+    # Lower only this disposable test's deadline, observing the unchanged
+    # delegate cap first. Selection, execution and cleanup remain production.
+    real_runner = lane.pb.run_pytest_on_files
+    deadlines = []
+    observed = {}
+
+    def protected_files():
+        return {p: p.read_bytes() for p in lane.case.root.rglob('*') if p.is_file()}
+
+    def short_deadline(root, targets, *, timeout, env):
+        deadlines.append(timeout)
+        ownership_path = Path(env['TMPDIR']) / 'validator-owner.json'
+        observed['ownership_bytes'] = ownership_path.read_bytes()
+        try:
+            return real_runner(root, targets, timeout=5, env=env)
+        except lane.pb.PytestCleanupHoldError as exc:
+            import traceback
+            observed['traceback'] = ''.join(traceback.format_exception(exc))
+            observed['native'] = exc.pytest_result
+            if validation_wrapper == 'runtime':
+                raise RuntimeError('delegate validator transport') from exc
+            if validation_wrapper == 'timeout':
+                raise subprocess.TimeoutExpired('delegate validator transport', 5) from exc
+            raise
+        finally:
+            observed['protected'] = protected_files()
+
+    monkeypatch.setattr(lane.pb, 'run_pytest_on_files', short_deadline)
+    real_run = subprocess.run
+    real_release = lane.common.terminate_owned_executor
+
+    def release(proc, owner, **kwargs):
+        if observation == 'exited-controller':
+            proc.kill()
+            proc.wait(timeout=5)
+            return real_release(proc, owner, **kwargs)
+
+        def query(command, **query_kwargs):
+            if command[:1] == ['ps']:
+                if observation == 'failed':
+                    raise subprocess.CalledProcessError(1, command)
+                return subprocess.CompletedProcess(command, 0, '', '')
+            return real_run(command, **query_kwargs)
+        if observation == 'complete':
+            return real_release(proc, owner, **kwargs)
+        with patch.object(subprocess, 'run', side_effect=query):
+            return real_release(proc, owner, **kwargs)
+
+    monkeypatch.setattr(lane.pb, 'terminate_owned_executor', release)
+    original_select = lane.pb.selectors.DefaultSelector.select
+    interrupted = False
+
+    def cancel_after_workers_ready(selector, timeout=None):
+        nonlocal interrupted
+        if not interrupted and len(list(lane.records.glob('*.pids'))) == len(list(lane.records.glob('*.mutation'))) == 4:
+            interrupted = True
+            if cancel == 'producer_error':
+                raise OSError('hybrid producer error')
+            raise KeyboardInterrupt('hybrid cancellation')
+        return original_select(selector, timeout)
+
+    if cancel:
+        monkeypatch.setattr(lane.pb.selectors.DefaultSelector, 'select', cancel_after_workers_ready)
+    # Exercise the actual loop -> delegate -> spec -> owned runner transport.
+    # Provider decisions alone are fixtures; no validator outcome is fabricated.
+    observed_popen = subprocess.Popen
+    decisions = []
+    response = make_delegate_response(validation_spec=[{'validator': 'pytest_targeted', 'targets': lane.targets}])
+
+    def provider(command, **kwargs):
+        if command[:1] == ['codex']:
+            decisions.append(command)
+            return FakePopen(stdout=json.dumps(response), pid=6200 + len(decisions))
+        return observed_popen(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, 'Popen', provider)
+    original_actor = lane.module.invoke_implementer
+
+    def actor(root, prompt, **kwargs):
+        if lane.module.invoke_calls:
+            assert_bounded_native_children_stopped(lane)
+            # The second completed actor repairs the disposable failing test.
+            target.write_text('def test_repaired():\n    assert True\n')
+        return original_actor(root, prompt, **kwargs)
+
+    monkeypatch.setattr(lane.module, 'invoke_implementer', actor)
+    response['commands'][0]['files_in_scope'].append(lane.targets[0])
+
+    def recover():
+        failure = {'status': 'failed', 'step': 'run_pre_push_script', 'stderr': 'FAILED native fixture'}
+        if entry == 'attempt':
+            return rg_mod.attempt_recovery(lane.case.root, failure, 'bounded-native')
+        return rg_mod.run_recovery_loop(lane.case.root, failure, 'bounded-native', max_iterations=3)
+
+    # The coherent-snapshot positive fixture must end before raw failed/partial
+    # query injections. Those negatives exercise the unmodified observer.
+    with complete_process_observation(lane.common) if observation == 'complete' else nullcontext() as observations:
+        if cancel and observation == 'complete':
+            error_type = OSError if cancel == 'producer_error' else KeyboardInterrupt
+            with pytest.raises(error_type, match='hybrid cancellation|hybrid producer error'):
+                recover()
+        else:
+            result = recover()
+    if cancel and observation == 'complete':
+        assert len(decisions) == len(lane.module.invoke_calls) == len(lane.launched) == 1
+        assert_bounded_native_children_stopped(lane)
+    else:
+        timed_out = result['log'][0]['validator_result']
+        assert timed_out['timed_out'] is (not cancel)
+        assert timed_out['exit_code'] == (-1 if cancel else 124)
+        assert timed_out['failure_kind'] == (
+            'producer_error' if cancel == 'producer_error' else 'interrupted' if cancel else 'timeout')
+        assert timed_out['timeout_seconds'] == 5
+        assert timed_out['cleanup_status'] == ('released' if observation == 'complete' else 'HOLD'), {
+            'controller_exit_code': lane.launched[0][0].returncode,
+            'release': timed_out['cleanup_release_evidence'], 'observations': observations,
+        }
+        assert (timed_out['cleanup_release_evidence'] is not None) is (observation == 'complete')
+        for channel in ('stdout', 'stderr'):
+            assert 'output bytes omitted' in timed_out[channel]
+            assert 'TAIL' in timed_out[channel] and 'HEAD' in timed_out[channel]
+            assert len(timed_out[channel]) < 65736
+        if cancel:
+            assert 'PytestCleanupHoldError' in observed['traceback']
+            assert timed_out['interruption'] == observed['native']['interruption']
+        else:
+            assert 'hybrid validator timed out' in timed_out['stderr']
+        assert result['recovered'] is (observation == 'complete'), result
+        assert result['iterations'] == (2 if observation == 'complete' else 1)
+        assert len(decisions) == len(lane.module.invoke_calls) == len(lane.launched) == result['iterations']
+        if observation != 'complete':
+            assert result['hold'] is True and result['exhausted'] is False
+            assert result['retry_allowed'] is False
+            assert result['pytest_result'] == timed_out
+            assert protected_files() == observed['protected']
+            env = lane.launched[0][2]['env']
+            roots = [Path(env[key]) for key in ('TMPDIR', 'XDG_CACHE_HOME')]
+            assert all(root.is_dir() for root in roots), (
+                'Unverified release must preserve both validator directories', roots)
+            active_files = [Path(name) for p in lane.records.glob('*.files')
+                            for name in json.loads(p.read_text())]
+            assert len(active_files) == 8
+            assert all(p.is_file() for p in active_files)
+            ownership = timed_out['validator_environment']
+            assert ownership['tmp_root'] == env['TMPDIR']
+            assert ownership['cache_root'] == env['XDG_CACHE_HOME']
+            assert ownership['repo_root'] == str(lane.case.root)
+            assert ownership['targets'] == lane.targets
+            assert ownership['owner_token'] in env[ownership['owner_env']].split(':')
+            ownership_path = Path(ownership['ownership_path'])
+            assert ownership_path.read_bytes() == observed['ownership_bytes']
+            assert json.loads(ownership_path.read_text()) == ownership
+            pids = {int(pid) for p in lane.records.glob('*.pids') for pid in p.read_text().split()}
+            assert len(pids) == 8
+            for pid in pids:
+                os.kill(pid, 0)
+            mutations = {p: p.read_bytes() for p in [*lane.records.glob('*.mutation'), *active_files]}
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline and any(p.read_bytes() == value for p, value in mutations.items()):
+                time.sleep(0.02)
+            assert all(p.read_bytes() != value for p, value in mutations.items())
+            transported = {'status': 'failed', 'step': 'phase_b', 'exit_code': 1,
+                           'stdout': json.dumps(result), 'stderr': observed.get('traceback', '')}
+            for entry in (rg_mod.attempt_recovery, rg_mod.run_recovery_loop):
+                refused = entry(lane.case.root, transported, 'bounded-native')
+                assert refused['hold'] and not refused['recovered'] and not refused['exhausted']
+                assert refused['pytest_result'] == timed_out
+                assert refused['pytest_result']['validator_environment'] == ownership
+            assert protected_files() == observed['protected']
+            assert ownership_path.read_bytes() == observed['ownership_bytes']
+        else:
+            assert result['log'][1]['validator_result']['passed'] is True
+    if observation == 'complete':
+        for _, _, kwargs in lane.launched:
+            assert not Path(kwargs['env']['TMPDIR']).exists()
+            assert not Path(kwargs['env']['XDG_CACHE_HOME']).exists()
+    assert deadlines == [300] * len(lane.launched)
+
+
+@pytest.mark.parametrize('observation', ['failed', 'partial'])
+@pytest.mark.parametrize('validation_wrapper', ['runtime', 'timeout'])
+def test_bounded_native_delegate_wrapped_validation_exception_retains_hold(
+    bounded_native_delegate, monkeypatch, observation, validation_wrapper,
+):
+    test_bounded_native_delegate_lifetime_stops_or_retries_only_after_release(
+        bounded_native_delegate, monkeypatch, observation, True, validation_wrapper, entry="attempt",
+    )
+
+
+@pytest.mark.parametrize('drift', ['source', 'index', 'authority'])
+@pytest.mark.parametrize('when', ['actor', 'validator'])
+def test_bounded_native_delegate_drift_holds_before_another_actor(
+    bounded_native_delegate, monkeypatch, drift, when,
+):
+    lane = bounded_native_delegate
+    authority = lane.case.root / 'mu/tools/executors/executor_config.json'
+    authority.write_text('{"hybrid_recovery_enabled":true}\n')
+    before_authority = authority.read_bytes()
+    original_actor = lane.module.invoke_implementer
+    original_runner = lane.pb.run_pytest_on_files
+
+    def mutate():
+        if drift == 'source':
+            (lane.case.root / 'mu/tools/executors/executor_common.py').write_text('unowned drift\n')
+        elif drift == 'index':
+            subprocess.run(['git', 'add', 'mu/tools/executors/recovery_gate.py'], cwd=lane.case.root,
+                           check=True, capture_output=True)
+        else:
+            authority.write_text('{"hybrid_recovery_enabled":false}\n')
+
+    def actor(*args, **kwargs):
+        result = original_actor(*args, **kwargs)
+        if when == 'actor':
+            mutate()
+        return result
+
+    def validator(*args, **kwargs):
+        result = original_runner(*args, **kwargs)
+        if when == 'validator':
+            mutate()
+        return result
+
+    monkeypatch.setattr(lane.module, 'invoke_implementer', actor)
+    monkeypatch.setattr(lane.pb, 'run_pytest_on_files', validator)
+    observed_popen = subprocess.Popen
+    decisions = []
+
+    def provider(command, **kwargs):
+        if command[:1] == ['codex']:
+            decisions.append(command)
+            return FakePopen(stdout=json.dumps(make_delegate_response(
+                validation_spec=[{'validator': 'pytest_targeted', 'targets': lane.targets}])), pid=6300)
+        return observed_popen(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, 'Popen', provider)
+    result = rg_mod.run_recovery_loop(lane.case.root, {'status': 'failed', 'step': 'run_pre_push_script',
+        'stderr': 'FAILED native fixture'}, 'bounded-native-drift', max_iterations=3)
+    assert result['hold'] is True and not result['recovered'] and result['exhausted'], result
+    assert result['iterations'] == len(decisions) == len(lane.module.invoke_calls) == 1
+    assert len(lane.launched) == (1 if when == 'validator' else 0)
+    assert result['log'][0]['implementer_status'] == 'success'
+    assert result['log'][0]['detail']
+    if drift != 'authority':
+        assert authority.read_bytes() == before_authority

@@ -4844,12 +4844,8 @@ def _run_pytest_on_files(
     # 2026-04-21, and the same commit gate exhausted the old 300s budget on
     # 2026-05-05. Keep enough slack that the gate fails on test truth, not an
     # undersized commit-executor budget.
-    # On 2026-09-27 the complete fleet module still exceeded 900s serially
-    # after bounding its fixtures. The declared fleet/classification suite ran
-    # 463 tests in 281.30s with four xdist workers. Use that bounded execution
-    # policy whenever the exact full module is selected, including mixed gates.
-    # Keep every selector, the existing finite budget and the marker/import mode.
-    full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in test_files
+    # Share the owned four-worker runner with native Phase B. Keep this
+    # consumer's exact selectors, finite allocations, marker filter and -x.
     # The preserved lifecycle diagnostic took 260.699s on 2026-10-04;
     # Phase B testcase time totaled 305.332s on 2026-10-09. Both exceed the
     # ordinary 240s allocation. Only these exact full modules get finite slack;
@@ -4863,73 +4859,52 @@ def _run_pytest_on_files(
         selector_budgets.get(selector, 240)
         for selector in test_files
     ))
-    command = [
-        sys.executable,
-        "-m",
-        "pytest",
-        "-x",
-        "--tb=short",
-        "--import-mode=importlib",
-        "-m",
-        "not slow and not fuzzer",
-        *(["-n", "4", "--dist", "worksteal"] if full_fleet else []),
-        *test_files,
-    ]
+    from phase_b_executor import run_pytest_on_files, pytest_cleanup_hold_from_exception
+
+    started = time.monotonic()
+    selection = ["--import-mode=importlib", "-m", "not slow and not fuzzer", *test_files]
+    env = _commit_validation_env({
+        "PYTHONHASHSEED": "0", "RCX_CI": "1", "HYPOTHESIS_PROFILE": "ci_fast",
+    })
     try:
-        result = subprocess.run(
-            command,
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
+        result = run_pytest_on_files(
+            repo_root,
+            selection,
             timeout=effective_timeout,
-            # Validation child: build the env through the commit-owned validation
-            # constructor so the live pipeline lane bus and every invocation-owned
-            # role/pager override are dropped (AFTER the pytest determinism pins
-            # are applied) and the repository's own tests resolve their temporary
-            # .agent_bus and default routing instead of the live pipeline lane.
-            # This helper backs the Step 8b pre-commit targeted pytest gate and
-            # the Step 15 bot-remediation targeted pytest gate -- both commit-owned
-            # validation children reproduced leaking a namespaced live lane and a
-            # live pager route override.
-            env=_commit_validation_env(
-                {
-                    "PYTHONHASHSEED": "0",
-                    "RCX_CI": "1",
-                    "HYPOTHESIS_PROFILE": "ci_fast",
-                }
-            ),
+            fail_fast=True,
+            env=env,
         )
-        passed = result.returncode == 0 or _pytest_only_deselected_by_marker_filter(
-            result.returncode,
-            result.stdout,
-            result.stderr,
-        )
-        return {
-            "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "passed": passed,
-            **({"command": command, "timeout_seconds": effective_timeout} if not passed else {}),
-        }
-    except subprocess.TimeoutExpired as exc:
-        # TimeoutExpired may carry bytes even with text=True. Retain all
-        # available pytest progress, including both ends of long streams.
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8", errors="backslashreplace")
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", errors="backslashreplace")
-        return {
-            "exit_code": -1,
-            "stdout": stdout,
-            "stderr": f"pytest timed out after {effective_timeout}s" + (f"\n{stderr}" if stderr else ""),
-            "passed": False,
-            "command": command,
-            "timeout_seconds": effective_timeout,
-            "timed_out": True,
-        }
+        remaining = effective_timeout - (time.monotonic() - started)
+        if (result["exit_code"] == 5 and not result["stderr"].strip()
+                and result.get("cleanup_status") != "HOLD" and remaining > 0):
+            # Preserve the existing all-deselected fast-shard policy using
+            # actual serial collection, within the SAME finite allocation.
+            # No tests execute twice; empty/error collections still fail.
+            probe = run_pytest_on_files(
+                repo_root, selection, timeout=remaining, env=env,
+                fail_fast=True, collect_only=True,
+            )
+            if probe.get("cleanup_status") == "HOLD":
+                return {**probe, "execution_result": result}
+            result = {**result, "selection_probe": probe,
+                      "passed": _pytest_only_deselected_by_marker_filter(
+                          probe["exit_code"], probe["stdout"], probe["stderr"],
+                      )}
+    except BaseException as exc:
+        result = pytest_cleanup_hold_from_exception(exc)
+        if result is None:
+            raise
+    if result.get("timed_out"):
+        result = {**result, "stderr": "\n".join(part for part in (
+            f"pytest timed out after {effective_timeout}s", result["stderr"],
+        ) if part)}
+    return result
+
+
+def _pytest_cleanup_hold(result: dict[str, Any]) -> bool:
+    """Only structured producer evidence can stop commit continuation."""
+    native = result.get("pytest_result")
+    return isinstance(native, dict) and native.get("cleanup_status") == "HOLD"
 
 
 def _pytest_only_deselected_by_marker_filter(returncode: int, stdout: str, stderr: str) -> bool:
@@ -4976,6 +4951,9 @@ def _run_bot_remediation_staged_test_gate(
             )
         pytest_result = _run_pytest_on_files(repo_root, test_files)
         result["pytest_gate"] = pytest_result
+        if pytest_result.get("cleanup_status") == "HOLD":
+            from phase_b_executor import PytestCleanupHoldError
+            return {**result, **PytestCleanupHoldError(pytest_result).result, "passed": False}
         if not pytest_result["passed"]:
             stderr = (pytest_result.get("stderr") or "").strip()
             stdout = (pytest_result.get("stdout") or "").strip()
@@ -15086,6 +15064,10 @@ def _attempt_bot_finding_remediation(
                 repo_root,
                 log=log,
             )
+            if _pytest_cleanup_hold(staged_test_gate):
+                return {**staged_test_gate, "step": "bot_remediation_pytest",
+                        "steps_completed": result["steps_completed"], "pr_number": pr_number,
+                        "remediation_rounds_attempted": round_num}
             if not staged_test_gate["passed"]:
                 gate_errors = list(staged_test_gate.get("errors") or [])
                 invalidated = _invalidate_bot_remediation_hook_receipt(
@@ -18105,8 +18087,15 @@ def _run_post_commit_pipeline(
             continuation_path=continuation_path, log=log,
         )
         return returned
+    except BaseException as exc:
+        from phase_b_executor import PytestCleanupHoldError, pytest_cleanup_hold_from_exception
+        native = pytest_cleanup_hold_from_exception(exc)
+        if native is None:
+            raise
+        returned = PytestCleanupHoldError(native).result
+        return returned
     finally:
-        if result.get("pr_lifecycle"):
+        if result.get("pr_lifecycle") and not _pytest_cleanup_hold(returned or {}):
             merge_sha = (returned or {}).get("merge_sha") or result.get("merge_sha")
             merged = bool(
                 result.get("remote_pr_merged")
@@ -22550,6 +22539,10 @@ def _run_commit_pipeline_impl(
     if commit_test_files:
         log(f"Step 8b: running pytest on {len(commit_test_files)} affected test file(s)")
         pytest_result = _run_pytest_on_files(repo_root, commit_test_files)
+        if pytest_result.get("cleanup_status") == "HOLD":
+            from phase_b_executor import PytestCleanupHoldError
+            return {**PytestCleanupHoldError(pytest_result).result,
+                    "step": "run_pre_commit_script", "steps_completed": result["steps_completed"]}
         if not pytest_result["passed"]:
             stderr = (pytest_result.get("stderr") or "").strip()
             stdout = (pytest_result.get("stdout") or "").strip()
@@ -22574,6 +22567,7 @@ def _run_commit_pipeline_impl(
                 "stdout": pytest_result.get("stdout") or "",
                 "stderr": pytest_result.get("stderr") or "",
                 "failure_command": diagnostic,
+                "pytest_result": pytest_result,
                 "steps_completed": result["steps_completed"],
             }
 
@@ -23165,7 +23159,11 @@ def run_commit_pipeline(
             verbose=verbose,
             skip_supervisor=skip_supervisor,
         )
-    except BaseException:
+    except BaseException as exc:
+        from phase_b_executor import PytestCleanupHoldError, pytest_cleanup_hold_from_exception
+        native = pytest_cleanup_hold_from_exception(exc)
+        if native is not None:
+            return PytestCleanupHoldError(native).result
         if lifecycle_owner is not None:
             try:
                 terminal = lifecycle.request_completion(lifecycle_owner, status="commit_unwound")
@@ -23173,6 +23171,8 @@ def run_commit_pipeline(
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
                 print(f"[commit] Native completion INCOMPLETE at {lifecycle_owner}: {exc}", file=sys.stderr)
         raise
+    if _pytest_cleanup_hold(result):
+        return result
     _maybe_demote_completed_handoff_state_for_commit_retry(
         repo_root=repo_root,
         handoff=handoff,
@@ -23447,18 +23447,25 @@ def main() -> int:
                 )
                 return 1
 
-    result = held_resume if held_resume is not None else run_commit_pipeline(
-        handoff,
-        repo_root=repo_root,
-        verbose=args.verbose,
-        skip_supervisor=args.skip_supervisor,
-        bus_dir=args.bus_dir,
-    )
+    try:
+        result = held_resume if held_resume is not None else run_commit_pipeline(
+            handoff,
+            repo_root=repo_root,
+            verbose=args.verbose,
+            skip_supervisor=args.skip_supervisor,
+            bus_dir=args.bus_dir,
+        )
+    except BaseException as exc:
+        from phase_b_executor import PytestCleanupHoldError, pytest_cleanup_hold_from_exception
+        native = pytest_cleanup_hold_from_exception(exc)
+        if native is None:
+            raise
+        result = PytestCleanupHoldError(native).result
 
     if args.json:
         # A held result must survive diagnostic prefixes through the
         # unchanged dispatcher's per-line JSON parser.
-        print(json.dumps(result, indent=None if result.get("failure_class") ==
+        print(json.dumps(result, indent=None if _pytest_cleanup_hold(result) or result.get("failure_class") ==
                          "protected_merge_observation_hold" else 2))
     else:
         status = result.get("status", "unknown")
@@ -23478,6 +23485,9 @@ def main() -> int:
             print(f"[commit-executor] Bot findings: {len(result['bot_findings'])}")
             for bf in result["bot_findings"]:
                 print(f"  - {bf['author']}: {bf['body'][:100]}...")
+
+    if _pytest_cleanup_hold(result):
+        return 1
 
     # Standalone recovery: route recoverable non-success standalone exits
     # through recovery_gate so bounded repairs can be diagnosed and retried.

@@ -222,6 +222,83 @@ def observed_process_identity(pid):
     return dict(pid=pid, ppid=int(fields[1]), started=" ".join(fields[2:7]), command=fields[7])
 
 
+@contextmanager
+def owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch):
+    """Own a foreground tmux reaper for the real legacy pane fixture.
+
+    The old fixture daemonized its controller into PID 1. Keep its actual
+    parent alive and waitable throughout adoption, with a fixture-only cleanup
+    backstop. A matching zombie gets a fresh child-exit notification to this
+    controller so it can reap before lifecycle acknowledges absence. All ps
+    results, pane ownership and PID-absence checks remain real.
+    """
+    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher
+    real_run = subprocess.run
+    controller = None
+    with (tmp_path / "controller.log").open("wb") as output:
+        def start_controller(command, *args, **kwargs):
+            nonlocal controller
+            if "new-session" in command and "-S" in command:
+                assert controller is None
+                socket = command[command.index("-S") + 1]
+                controller = subprocess.Popen(
+                    [command[0], "-D", "-f", os.devnull, "-S", socket],
+                    cwd=primary, env=kwargs["env"], start_new_session=True,
+                    stdout=output, stderr=output,
+                )
+                deadline = time.monotonic() + 5
+                while not Path(socket).exists() and time.monotonic() < deadline:
+                    assert controller.poll() is None
+                    time.sleep(0.01)
+                assert Path(socket).exists(), "Foreground fixture controller did not start"
+            return real_run(command, *args, **kwargs)
+
+        try:
+            with pytest.MonkeyPatch.context() as setup:
+                setup.setattr(subprocess, "run", start_controller)
+                with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as watcher:
+                    setup.undo()
+                    run, pane, old, tails, log = watcher
+                    assert controller is not None and controller.poll() is None
+                    assert int(run("display-message", "-p", "-t", pane, "#{pid}")) == controller.pid
+                    parent = observed_process_identity(controller.pid)
+                    child = observed_process_identity(old.pid)
+                    assert parent["ppid"] == os.getpid()
+                    assert child["ppid"] == controller.pid
+                    (tmp_path / "controller-identity.json").write_text(json.dumps(
+                        {"controller": parent, "watcher": child, "tails": tails}, indent=2) + "\n")
+                    query = ["ps", "-ww", "-p", str(old.pid), "-o", "pid=,ppid=,lstart=,command="]
+
+                    def observe_and_reap(command, *args, **kwargs):
+                        observation = real_run(command, *args, **kwargs)
+                        if command == query and observation.returncode == 0 and not observation.stderr:
+                            fields = observation.stdout.rstrip("\n").split(None, 7)
+                            if (len(fields) == 8 and fields[0] == str(child["pid"])
+                                    and fields[1] == str(child["ppid"])
+                                    and " ".join(fields[2:7]) == child["started"]
+                                    and "<defunct>" in fields[7]):
+                                # Only the real parent can waitpid this child.
+                                # Wake tmux's reaper, but return the zombie row
+                                # unchanged: the next OS probe must prove absence.
+                                assert controller.poll() is None, "Fixture reaper exited during adoption"
+                                os.kill(controller.pid, signal.SIGCHLD)
+                        return observation
+
+                    with pytest.MonkeyPatch.context() as reaping:
+                        reaping.setattr(subprocess, "run", observe_and_reap)
+                        yield watcher
+                    assert controller.poll() is None, "Fixture reaper exited during adoption"
+        finally:
+            if controller is not None:
+                if controller.poll() is None:
+                    controller.terminate()
+                try:
+                    controller.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    controller.kill()
+                    controller.wait(timeout=5)
+
+
 @pytest.mark.parametrize("filename", ["neighbor's.log", "neighbor live.log", "neighbor's live.log"])
 def test_unrelated_literal_log_filename_does_not_hold_discovery_or_completion(native_lane, tmp_path, filename):
     primary, lane, _, env = native_lane
@@ -287,11 +364,11 @@ def test_related_literal_log_filename_retains_hold_and_claim_evidence(native_lan
 
 @pytest.mark.parametrize("folder", ["watcher's", "watcher folder", "watcher's folder"])
 def test_literal_watcher_path_requires_unambiguous_live_owner(native_lane, tmp_path, monkeypatch, folder):
-    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher, _watcher_tails
+    from mu.tests.tools.test_pipeline_monitor_autofollow import _watcher_tails
     primary, lane, _, env = native_lane
     watcher_root = tmp_path / folder
     watcher_root.mkdir()
-    with stale_live_watcher(watcher_root, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
+    with owned_stale_live_watcher(watcher_root, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
         observed = observed_process_identity(old.pid)
         assert observed["command"].endswith(str(watcher_root / "rcx_log_watcher.sh"))
         assert lifecycle.monitor_reader_protocol("reader-test") is False
@@ -385,11 +462,17 @@ def test_finished_generated_reader_releases_within_native_completion_budget(nati
 
 
 @pytest.mark.parametrize("obstruction", [None, "writer", "unknown-reader"])
-def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_path, monkeypatch, obstruction):
-    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher
+@pytest.mark.parametrize("pause_reaper", [False, True], ids=["normal-reaper", "delayed-reaper"])
+def test_pre_update_live_raw_tail_adopts_before_native_claim(
+        native_lane, tmp_path, monkeypatch, obstruction, pause_reaper):
+    from mu.tests.tools.test_pipeline_monitor_autofollow import _wait_for
     primary, lane, _, env = native_lane
     blocker = None
-    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
+    with owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
+        original = observed_process_identity(old.pid)
+        controller = original["ppid"]
+        real_kill = os.kill
+        notifications = []
         if obstruction:
             blocker = subprocess.Popen([sys.executable, "-c",
                 "import json,os,sys; f=open(os.environ['READER_TEST_PATH'],os.environ['READER_TEST_MODE']); "
@@ -412,7 +495,34 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
                     f"D{descriptor['device']:x}\ni{descriptor['inode']}\nn{log}\n"))))
         try:
             directory = register_from_exited_owner(lane, env, status="success")
-            result = lifecycle.complete_pending(directory, delay=0)
+            authority = {p: p.read_bytes() for p in directory.glob("*.json")}
+
+            def delay_reaping_until_notified(pid, signum):
+                if pid == old.pid and signum == signal.SIGTERM:
+                    real_kill(controller, signal.SIGSTOP)
+                    _wait_for(lambda: subprocess.run(
+                        ["ps", "-p", str(controller), "-o", "stat="], check=True,
+                        capture_output=True, text=True, timeout=10).stdout.strip().startswith("T"))
+                if pid == controller and signum == signal.SIGCHLD and not notifications:
+                    # Hold the actual parent until the fixture observes its
+                    # unreaped child. No retirement claim may precede reaping.
+                    state = subprocess.run(["ps", "-p", str(old.pid), "-o", "stat="],
+                        check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+                    assert state.startswith("Z"), state
+                    assert not list(directory.glob("attempt-*"))
+                    assert not (directory / "reader-release.json").exists()
+                    assert all(p.read_bytes() == raw for p, raw in authority.items())
+                    notifications.append(pid)
+                    real_kill(pid, signum)
+                    return real_kill(controller, signal.SIGCONT)
+                return real_kill(pid, signum)
+
+            with monkeypatch.context() as fault:
+                if pause_reaper:
+                    fault.setattr(os, "kill", delay_reaping_until_notified)
+                result = lifecycle.complete_pending(directory, delay=0)
+            if pause_reaper:
+                assert notifications == [controller], result
             if obstruction is None:
                 references = []
                 if result["state"] != "COMPLETE":
@@ -423,6 +533,7 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
             if obstruction:
                 assert result["state"] == "ESCALATED", result
                 assert result.get("attempts_exhausted") == 3, result.get("reason", result)
+                assert len(list(directory.glob("attempt-*/claim.json"))) == lifecycle.MAX_ATTEMPTS
                 assert "Open target files/processes or uncertain lsof evidence" in result["reason"], result
                 assert lane.exists() and blocker.poll() is None
             else:
@@ -435,16 +546,65 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
             assert len(release["watcher_adoptions"]) == 1, release
             adoption = release["watcher_adoptions"][0]
             assert adoption["previous"]["pid"] == old.pid, adoption
+            assert adoption["previous"] == original, adoption
             assert adoption["current"]["pid"] != old.pid, adoption
             for pid in [old.pid, *tails]:
                 with pytest.raises(ProcessLookupError):
                     os.kill(pid, 0)
             receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
         finally:
+            if pause_reaper:
+                real_kill(controller, signal.SIGCONT)
             if blocker is not None:
                 blocker.communicate(input="done\n", timeout=10)
     assert lifecycle.complete_pending(directory, delay=0) == result
     assert all(p.read_bytes() == raw for p, raw in receipts.items())
+
+
+def test_real_defunct_watcher_with_paused_reaper_holds_before_claim(native_lane, tmp_path, monkeypatch):
+    primary, lane, _, env = native_lane
+    with owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (run, pane, old, tails, _):
+        controller = int(run("display-message", "-p", "-t", pane, "#{pid}"))
+        original = observed_process_identity(old.pid)
+        assert original["ppid"] == controller
+        real_kill = os.kill
+
+        def pause_reaper_at_signal(pid, signum):
+            if pid == old.pid and signum == signal.SIGTERM:
+                real_kill(controller, signal.SIGSTOP)
+            return real_kill(pid, signum)
+
+        directory = register_from_exited_owner(lane, env, status="success")
+        authority = {p: p.read_bytes() for p in directory.glob("*.json")}
+        try:
+            with pytest.MonkeyPatch.context() as fault:
+                fault.setattr(os, "kill", pause_reaper_at_signal)
+                result = lifecycle.complete_pending(directory, delay=0)
+            zombie = observed_process_identity(old.pid)
+            assert zombie["ppid"] == controller and zombie["started"] == original["started"]
+            assert "defunct" in zombie["command"]
+            os.kill(old.pid, 0)  # A zombie is still present, never release proof.
+            assert result["state"] == "ESCALATED", result
+            assert "Old log watcher exit not acknowledged" in result["reason"]
+            assert not list(directory.glob("attempt-*"))
+            assert not (directory / "reader-release.json").exists()
+            assert lane.exists()
+            assert all(p.read_bytes() == raw for p, raw in authority.items())
+            receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+        finally:
+            real_kill(controller, signal.SIGCONT)
+        deadline = time.monotonic() + 5
+        for pid in [old.pid, *tails]:
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.01)
+            else:
+                pytest.fail(f"Fixture controller did not reap {pid} after resuming")
+        assert lifecycle.complete_pending(directory, delay=0) == result
+        assert {p: p.read_bytes() for p in directory.rglob("*.json")} == receipts
 
 
 @pytest.mark.parametrize("unobservable", ["ps-present", "still-present", "permission-denied"])

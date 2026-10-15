@@ -76,6 +76,77 @@ def _noop_log(msg: str) -> None:
     pass
 
 
+@pytest.fixture
+def native_pytest_output(monkeypatch, tmp_path):
+    """Exercise the owned pipe reader and real release with a disposable writer.
+
+    Consumer tests assert the full allocation before using a two-second local
+    timeout. Only the child program is substituted; output draining, ownership,
+    signals, reaping and result transport run through the production producer.
+    Real four-worker selection is covered by the mixed-policy controls below
+    and the receipt suite's bounded commit tests.
+    """
+    import phase_b_executor as native
+    import executor_common
+    from mu.tests.tools.test_executor_common import complete_process_observation
+
+    producer = native.run_pytest_on_files
+    real_popen = subprocess.Popen
+
+    def capture(root, selection, *, stdout, stderr, exit_code, **kwargs):
+        raw = {name: value if isinstance(value, bytes) else (value or "").encode()
+               for name, value in (("stdout", stdout), ("stderr", stderr))}
+        for name, value in raw.items():
+            (tmp_path / (name + ".bin")).write_bytes(value)
+        program = (
+            "import sys,time; from pathlib import Path; "
+            "sys.stdout.buffer.write(Path(sys.argv[1]).read_bytes()); sys.stdout.flush(); "
+            "sys.stderr.buffer.write(Path(sys.argv[2]).read_bytes()); sys.stderr.flush(); "
+            + ("time.sleep(60)" if exit_code == -1 else f"sys.exit({exit_code})")
+        )
+        launched = []
+
+        def launch(command, **options):
+            if command[1:4] != ["-u", "-m", "pytest"]:
+                return real_popen(command, **options)
+            proc = real_popen([sys.executable, "-u", "-c", program,
+                              str(tmp_path / "stdout.bin"), str(tmp_path / "stderr.bin")], **options)
+            launched.append(proc)
+            return proc
+
+        try:
+            with monkeypatch.context() as child, complete_process_observation(executor_common):
+                child.setattr(subprocess, "Popen", launch)
+                result = producer(root, selection, **{**kwargs, "timeout": 2} if exit_code == -1 else kwargs)
+            assert len(launched) == 1
+            assert result["exit_code"] == exit_code, result
+            assert result["cleanup_status"] == ("released" if exit_code == -1 else "not_needed"), result
+            assert launched[0].poll() is not None
+            with pytest.raises(ProcessLookupError):
+                os.kill(launched[0].pid, 0)
+            if exit_code == -1:
+                assert result["cleanup_release_evidence"]["root_pid"] == launched[0].pid
+                assert result["timeout_seconds"] == 2
+            for name, value in raw.items():
+                assert result["output_bytes"][name] == len(value)
+                assert result["output_limit_bytes_per_stream"] == 64 * 1024
+                if len(value) <= 64 * 1024:
+                    assert result[name] == value.decode("utf-8", errors="replace")
+                else:
+                    assert result[name].startswith(value[:32].decode())
+                    assert result[name].endswith(value[-32:].decode())
+                    assert "output bytes omitted" in result[name]
+                    assert len(result[name].encode()) < 64 * 1024 + 200
+            return result
+        finally:
+            for proc in launched:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
+
+    return capture
+
+
 def test_retirement_terminal_uses_surviving_primary_and_preserves_detached_source(retirement_fleet):
     f = retirement_fleet
     source = f.targets[0]
@@ -195,32 +266,32 @@ def test_retirement_terminal_uses_surviving_primary_and_preserves_detached_sourc
 def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
     tmp_path, monkeypatch, selectors, caller_timeout, expected_budget,
 ):
-    """Exercise the real runner through its subprocess boundary without waiting."""
+    """Pin the commit consumer's exact policy at the public owned producer."""
+    import phase_b_executor as native
     calls = []
+    produced = {"exit_code": 0, "stdout": "selected tests passed\n", "stderr": "",
+                "passed": True, "worker_count": 4, "timeout_seconds": expected_budget}
 
-    def run(args, **kwargs):
-        calls.append((args, kwargs))
-        return SimpleNamespace(returncode=0, stdout="selected tests passed\n", stderr="")
+    def run(root, selection, **kwargs):
+        calls.append((root, selection, kwargs))
+        return produced
 
-    monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    monkeypatch.setattr(native, "run_pytest_on_files", run)
     monkeypatch.setenv("RCX_AGENT_BUS_DIR", ".agent_bus-live-fleet-wave")
     monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "codex")
     result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: observe the real shared runner's deadline and complete subprocess selection.
         tmp_path, selectors, timeout=caller_timeout,
     )
 
-    assert result == {"exit_code": 0, "stdout": "selected tests passed\n",
-                      "stderr": "", "passed": True}
+    assert result == produced
     assert len(calls) == 1
-    args, kwargs = calls[0]
-    parallel = ["-n", "4", "--dist", "worksteal"] if (
-        "mu/tests/tools/test_workingrcx_fleet_apply.py" in selectors) else []
-    assert args == [commit_mod.sys.executable, "-m", "pytest", "-x", "--tb=short",
-                    "--import-mode=importlib", "-m", "not slow and not fuzzer", *parallel, *selectors]
-    assert kwargs["cwd"] == tmp_path
+    root, selection, kwargs = calls[0]
+    assert selection == ["--import-mode=importlib", "-m", "not slow and not fuzzer", *selectors]
+    assert root == tmp_path
     assert kwargs["timeout"] == expected_budget
     assert math.isfinite(kwargs["timeout"]) and kwargs["timeout"] > 0
-    assert kwargs["check"] is False
+    assert kwargs["fail_fast"] is True
+    assert "collect_only" not in kwargs
     assert kwargs["env"]["PYTHONHASHSEED"] == "0"
     assert kwargs["env"]["RCX_CI"] == "1"
     assert kwargs["env"]["HYPOTHESIS_PROFILE"] == "ci_fast"
@@ -251,20 +322,33 @@ def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
 def test_targeted_pytest_budget_keeps_nonzero_failure_output(
     tmp_path, monkeypatch, selectors, expected_budget, returncode, stdout, stderr,
 ):
+    import phase_b_executor as native
     calls = []
+    produced = {"exit_code": returncode, "stdout": stdout, "stderr": stderr,
+                "passed": False, "command": ["fixture-pytest", *selectors],
+                "timeout_seconds": expected_budget, "cleanup_status": "not_needed"}
 
-    def run(args, **kwargs):
-        calls.append(args)
-        assert kwargs["timeout"] == expected_budget
-        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+    def run(root, selection, **kwargs):
+        calls.append(kwargs)
+        assert root == tmp_path
+        assert selection == ["--import-mode=importlib", "-m", "not slow and not fuzzer", *selectors]
+        assert kwargs["fail_fast"] is True
+        if len(calls) == 1:
+            assert kwargs["timeout"] == expected_budget
+            return produced
+        assert returncode == 5 and kwargs["collect_only"] is True
+        assert 0 < kwargs["timeout"] <= expected_budget
+        return {**produced, "worker_count": 0, "timeout_seconds": kwargs["timeout"]}
 
-    monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    monkeypatch.setattr(native, "run_pytest_on_files", run)
     result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: larger module budgets must not turn failed or empty collection into success.
         tmp_path, selectors,
     )
-    assert result == {"exit_code": returncode, "stdout": stdout,
-                      "stderr": stderr, "passed": False,
-                      "command": calls[0], "timeout_seconds": expected_budget}
+    assert {key: result[key] for key in produced} == produced
+    assert len(calls) == (2 if returncode == 5 else 1)
+    if returncode == 5:
+        assert result["selection_probe"]["passed"] is False
+        assert result["selection_probe"]["worker_count"] == 0
 
 
 @pytest.mark.parametrize("selectors, caller_timeout, expected_budget", [
@@ -293,31 +377,45 @@ def test_targeted_pytest_budget_keeps_nonzero_failure_output(
      "first\n" + ".\n" * 40000 + "last\n", "first err\n" + "!\n" * 40000 + "last err\n"),
     ("first\n" + ".\n" * 40000 + "last\n", "first err\n" + "!\n" * 40000 + "last err\n",
      "first\n" + ".\n" * 40000 + "last\n", "first err\n" + "!\n" * 40000 + "last err\n"),
-    (b"progress \xe2\x9c\x93\xff\n", "error\n", "progress \u2713\\xff\n", "error\n"),
+    (b"progress \xe2\x9c\x93\xff\n", "error\n", "progress \u2713\ufffd\n", "error\n"),
     (None, b"stderr only\n", "", "stderr only\n"),
     ("stdout only\n", None, "stdout only\n", ""),
 ], ids=["none", "long-bytes", "long-text", "mixed-invalid-utf8", "stderr-only", "stdout-only"])
 def test_targeted_pytest_timeout_reports_selected_budget(
-    tmp_path, monkeypatch, selectors, caller_timeout, expected_budget,
+    tmp_path, monkeypatch, native_pytest_output, selectors, caller_timeout, expected_budget,
     stdout, stderr, expected_stdout, expected_stderr,
 ):
+    import phase_b_executor as native
     calls = []
 
-    def run(args, **kwargs):
-        calls.append(args)
+    def run(root, selection, **kwargs):
         assert kwargs["timeout"] == expected_budget
         assert math.isfinite(kwargs["timeout"]) and kwargs["timeout"] > 0
-        raise subprocess.TimeoutExpired(args, timeout=kwargs["timeout"], output=stdout, stderr=stderr)
+        assert kwargs["fail_fast"] is True
+        assert selection == ["--import-mode=importlib", "-m", "not slow and not fuzzer", *selectors]
+        produced = native_pytest_output(root, selection, stdout=stdout, stderr=stderr, exit_code=-1, **kwargs)
+        calls.append(produced)
+        return produced
 
-    monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    monkeypatch.setattr(native, "run_pytest_on_files", run)
     result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: the real runner must still fail closed at its selected finite deadline.
         tmp_path, selectors, timeout=caller_timeout,
     )
-    assert result == {
-        "exit_code": -1, "stdout": expected_stdout,
-        "stderr": f"pytest timed out after {expected_budget}s" + (f"\n{expected_stderr}" if expected_stderr else ""),
-        "passed": False, "command": calls[0], "timeout_seconds": expected_budget, "timed_out": True,
-    }
+    assert len(calls) == 1
+    produced = calls[0]
+    for name, expected in (("stdout", expected_stdout), ("stderr", expected_stderr)):
+        if len(expected.encode()) <= 64 * 1024:
+            assert produced[name] == expected
+        else:
+            assert produced[name].startswith(expected[:32]) and produced[name].endswith(expected[-32:])
+            assert "output bytes omitted" in produced[name]
+            assert len(produced[name].encode()) < 64 * 1024 + 200
+    assert result == {**produced, "stderr": f"pytest timed out after {expected_budget}s"
+                     + (f"\n{produced['stderr']}" if produced["stderr"] else "")}
+    assert result["exit_code"] == -1 and result["passed"] is False and result["timed_out"] is True
+    assert result["command"] == [sys.executable, "-u", "-m", "pytest", "-n", "4", "--dist", "worksteal",
+                                 "--max-worker-restart=0", "-x", "--tb=short", "--import-mode=importlib",
+                                 "-m", "not slow and not fuzzer", *selectors]
 
 
 @pytest.mark.parametrize("returncode, stdout, stderr, passed", [
@@ -329,21 +427,36 @@ def test_targeted_pytest_timeout_reports_selected_budget(
 def test_targeted_pytest_preserves_marker_only_deselection_semantics(
     tmp_path, monkeypatch, returncode, stdout, stderr, passed,
 ):
-    monkeypatch.setattr(commit_mod.subprocess, "run", lambda *a, **kw: SimpleNamespace(
-        returncode=returncode, stdout=stdout, stderr=stderr,
-    ))
+    import phase_b_executor as native
+    calls = []
+    def run(root, selection, **kwargs):
+        calls.append(kwargs)
+        assert root == tmp_path
+        assert selection == ["--import-mode=importlib", "-m", "not slow and not fuzzer",
+                             "mu/tests/tools/test_phase_b_executor.py"]
+        assert kwargs["fail_fast"] is True
+        if len(calls) == 1:
+            assert kwargs["timeout"] == 600 and "collect_only" not in kwargs
+        else:
+            assert kwargs["collect_only"] is True and 0 < kwargs["timeout"] <= 600
+        return {"exit_code": returncode, "stdout": stdout, "stderr": stderr,
+                "passed": returncode == 0, "cleanup_status": "not_needed"}
+    monkeypatch.setattr(native, "run_pytest_on_files", run)
     result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: verify existing success and intentional marker-only collection semantics.
         tmp_path, ["mu/tests/tools/test_phase_b_executor.py"],
     )
     assert result["passed"] is passed
     assert (result["exit_code"], result["stdout"], result["stderr"]) == (returncode, stdout, stderr)
+    assert len(calls) == (2 if returncode == 5 and not stderr else 1)
 
 
 @pytest.mark.parametrize("outcome", ["timeout-bytes", "timeout-text", "timeout-none", "failed", "interrupted", "empty"])
-def test_step8b_public_pipeline_retains_complete_pytest_failure(tmp_path, monkeypatch, outcome):
+def test_step8b_public_pipeline_retains_complete_pytest_failure(tmp_path, monkeypatch, native_pytest_output, outcome):
     # Reuse the receipt suite's disposable Git/receipt fixtures. The real
     # pipeline, selector, runner and failure boundary execute; isolate the
-    # supervisor, pager and pytest process, and prohibit landing side effects.
+    # supervisor/pager and child program, and prohibit landing side effects.
+    # The bounded output and timeout release come from real owned processes.
+    import phase_b_executor as native
     from mu.tests.tools.test_commit_executor_receipt import (  # ANTICHEAT_OK: reuse disposable receipt fixtures for public Step8b coverage.
         _setup_repo, _make_new_schema_handoff,
     )
@@ -369,7 +482,7 @@ def test_step8b_public_pipeline_retains_complete_pytest_failure(tmp_path, monkey
     monkeypatch.setattr(commit_mod, "emit_pipeline_agent_event", lambda *a, **kw: {"status": "disabled"})
     real_run = subprocess.run
     commands = []
-    pytest_commands = []
+    pytest_results = []
     stdout = " first pytest progress\n" + "collected progress\n" * 6000 + "last pytest progress \n"
     stderr = " first pytest stderr\n" + "diagnostic line\n" * 6000 + "last pytest stderr \n"
     exit_code = {"failed": 1, "interrupted": 2, "empty": 5}.get(outcome, -1)
@@ -382,52 +495,60 @@ def test_step8b_public_pipeline_retains_complete_pytest_failure(tmp_path, monkey
         assert args[0] != "gh", args
         assert args[:2] not in (["git", "commit"], ["git", "push"], ["git", "merge"]), args
         assert Path(kwargs["cwd"]).resolve() == repo.resolve(), args
-        if args[1:3] == ["-m", "pytest"]:
-            pytest_commands.append(args)
-            assert args[-1:] == [selector]
-            assert kwargs["timeout"] == 600
-            assert kwargs["env"]["RCX_CI"] == "1"
-            if outcome.startswith("timeout"):
-                output = stdout.encode() if outcome == "timeout-bytes" else stdout
-                errors = stderr.encode() if outcome == "timeout-bytes" else stderr
-                raise subprocess.TimeoutExpired(args, timeout=600,
-                    output=output if outcome != "timeout-none" else None,
-                    stderr=errors if outcome != "timeout-none" else None)
-            return SimpleNamespace(returncode=exit_code, stdout=stdout, stderr=stderr)
         return real_run(args, **kwargs)
 
+    def run_pytest(root, selection, **kwargs):
+        assert root == repo
+        assert selection == ["--import-mode=importlib", "-m", "not slow and not fuzzer", selector]
+        assert kwargs["timeout"] == 600 and kwargs["fail_fast"] is True
+        assert kwargs["env"]["RCX_CI"] == "1"
+        output = stdout.encode() if outcome == "timeout-bytes" else stdout
+        errors = stderr.encode() if outcome == "timeout-bytes" else stderr
+        produced = native_pytest_output(root, selection, stdout=output, stderr=errors,
+                                        exit_code=exit_code, **kwargs)
+        pytest_results.append(produced)
+        return produced
+
     monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    monkeypatch.setattr(native, "run_pytest_on_files", run_pytest)
     before_head = _git(["rev-parse", "HEAD"], cwd=repo).stdout
     result = commit_mod.run_commit_pipeline(
         _make_new_schema_handoff(files_to_stage=[selector]), repo_root=repo,
     )
     assert result["status"] == "error" and result["step"] == "run_pre_commit_script", result
-    assert len(supervisor_calls) == len(pytest_commands) == 1
+    assert len(supervisor_calls) == len(pytest_results) == 1
     assert "validate_receipt" in result["steps_completed"]
     assert "git_commit" not in result["steps_completed"]
     assert _git(["rev-parse", "HEAD"], cwd=repo).stdout == before_head
-    assert result["stdout"] == stdout
-    expected_stderr = ("pytest timed out after 600s" + ("\n" + stderr if stderr else "")) if exit_code == -1 else stderr
+    produced = pytest_results[0]
+    assert result["stdout"] == produced["stdout"]
+    expected_stderr = ("pytest timed out after 600s" + ("\n" + produced["stderr"] if produced["stderr"] else "")) if exit_code == -1 else produced["stderr"]
     assert result["stderr"] == expected_stderr
     assert "earlier supervisor chatter" not in result["stdout"] + result["stderr"]
     diagnostic = result["failure_command"]
-    command = shlex.join(pytest_commands[0])
+    command = shlex.join(produced["command"])
     assert diagnostic["command"] == command
-    assert diagnostic["argv"] == pytest_commands[0]
+    assert diagnostic["argv"] == produced["command"]
     assert diagnostic["command_sha256"] == hashlib.sha256(command.encode()).hexdigest()
-    assert diagnostic["timeout_seconds"] == 600
+    # The consumer passed the unchanged 600s budget above. Diagnostics retain
+    # the actual producer deadline, shortened only by this fixture.
+    assert diagnostic["timeout_seconds"] == (2 if exit_code == -1 else 600)
     assert diagnostic["outcome"] == ("timeout" if exit_code == -1 else "failed")
     assert diagnostic["exit_code"] == exit_code
-    # Recovery transports JSON. Complete streams must survive serialization.
+    # Recovery transports JSON. The complete bounded result must survive it.
     transported = json.loads(json.dumps(result))
-    assert transported["stdout"] == stdout and transported["stderr"] == expected_stderr
+    assert transported["stdout"] == produced["stdout"] and transported["stderr"] == expected_stderr
+    assert transported["pytest_result"] == {**produced, "stderr": expected_stderr}
 
 
 def test_targeted_pytest_empty_selection_starts_no_process(tmp_path, monkeypatch):
+    import phase_b_executor as native
     def run(*args, **kwargs):
         raise AssertionError("Empty test selection must not start a subprocess")
 
     monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    monkeypatch.setattr(commit_mod.subprocess, "Popen", run)
+    monkeypatch.setattr(native, "run_pytest_on_files", run)
     result = commit_mod._run_pytest_on_files(tmp_path, [])  # ANTICHEAT_OK: preserve the existing empty-selection contract.
     assert result == {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
 

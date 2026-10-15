@@ -4,6 +4,48 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-15
+
+### Native pytest execution R6 (Phase B implementation)
+
+- Re-entry: preserve native validator temporary/cache roots and their pre-launch
+  ownership receipt on returned or exception-transported cleanup HOLD. Real
+  descendants now write into both roots; controls verify continued progress,
+  byte-exact ownership and public HOLD transport before any further recovery.
+  Verified-release and completed-validator paths still clean their directories.
+  Two pre-fix reproductions retain the directory-deletion race and lost-directory
+  failures; the first also records a corrected fixture import error. Focused
+  coverage passes 35 tests in 18.64s; the exact repaired-source seven-module gate
+  passes 5,271 tests in 604.21s, exit 0, with unchanged source hashes. The
+  unchanged scoped integrity checker also passes.
+- Carry all ten admitted source/test donors after independently verifying
+  original/restored hashes, modes and fresh `b7597254` parent comparisons.
+  Retain the committed `af6a161e` improvements and unfinished dispatcher fix.
+- Reproduce the lane-monitor `InvalidSpecError` under a shared `Popen` patch
+  on byte-identical fresh-parent/af6 test source. Capture the real process class
+  before patching and retain reap-before-session-kill, idempotence and no-spawn
+  assertions; the explicit collision regression now passes.
+- Use the bounded four-worker native producer at Phase B, delegated validation
+  and mechanical/bot commit consumers. Keep selectors, profiles, environment
+  isolation, finite budgets, fail-fast policy and bounded head/tail diagnostics.
+  Typed cleanup HOLD survives wrapped exceptions and public JSON transport
+  before recovery, staging, lifecycle, checkpoint or budget side effects.
+- Disable disposable Git maintenance before fixture commits while retaining all
+  administrative bytes in no-write snapshots. Own the real watcher controller
+  and reaper; retain defunct/live/unknown absence refusals. Poll for actual
+  detached-child heartbeat progress within a finite deadline. Historical Linux
+  failure causes remain unproved; production lifecycle guards are unchanged.
+- Initial candidate controls passed 295 tests in 98.28s; the explicit collision
+  regression and unchanged scoped integrity checker pass. The exact complete
+  seven-module gate passed 5,271 tests in 589.29s before the directory-HOLD repair,
+  exit 0, with unchanged source
+  hashes throughout the run. Every failure, command, source hash
+  and output receipt belongs in
+  `reports/control_plane/workingrcx-native-pytest-execution-r6-2026-10-15_implementation_evidence.json`.
+  Preserve 268 tracker IDs, 44 ordered owners and captured Ra bytes. Native
+  governance, current-head CI/review, landing and separate PRIMARY sync remain
+  outer-owned and unclaimed.
+
 ## 2026-10-13
 
 ### Native timeout recovery R4 (Phase B implementation)
