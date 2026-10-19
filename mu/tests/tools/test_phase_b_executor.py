@@ -18,6 +18,7 @@ import io
 import json
 import os
 import re
+import selectors
 import signal
 import sqlite3
 import subprocess
@@ -122,7 +123,10 @@ def late_native_retry_lane(tmp_path, monkeypatch, request):
             "calls": calls, "boundary": ValidationBoundary, "control": control}
 
 
-def _run_late_native_dispatch(fixture, monkeypatch, *, mutate=None, released=True, before_consumer=None, surface=False):
+def _run_late_native_dispatch(
+    fixture, monkeypatch, *, mutate=None, released=True, before_consumer=None,
+    coherent_consumer=False, surface=False,
+):
     dispatch, repo = fixture["dispatch"], fixture["repo"]
     invocations, consumers, restored = [], [], []
     admissions = []
@@ -145,9 +149,11 @@ def _run_late_native_dispatch(fixture, monkeypatch, *, mutate=None, released=Tru
         assert invocations[-1] == "phase_b_executor.py"
         route = json.loads(args[args.index("--routing-record") + 1])
         if len(invocations) == 2 and before_consumer is not None:
-            # End the complete-observation premise before any adversarial
-            # consumer mutation, especially failed/partial-query injection.
-            complete_boundary.close()
+            # Only the unchanged positive consumer keeps its coherent census.
+            # Every adverse callback restores real two-query observation BEFORE
+            # mutation, including failed/partial queries and foreign proof.
+            if not coherent_consumer:
+                complete_boundary.close()
             before_consumer(route)
         owner = uuid.uuid4().hex
         try:
@@ -207,6 +213,103 @@ def _run_late_native_dispatch(fixture, monkeypatch, *, mutate=None, released=Tru
     assert admissions, observations
     assert admissions[0]["recovered"] is True
     return invocations, consumers, restored
+
+
+@pytest.mark.parametrize("coherent_consumer", [False, True], ids=["adverse", "positive"])
+@pytest.mark.parametrize("abort_at", [None, "callback", "consumer"])
+def test_native_late_observation_boundary_lifetime(
+    late_native_retry_lane, monkeypatch, coherent_consumer, abort_at,
+):
+    """Observe the real census calls and restore the boundary on every exit."""
+    fixture = late_native_retry_lane
+    observer = common_mod.observe_executor_processes
+    real_run, real_consumer = subprocess.run, pb_mod.run_phase_b
+    queries, probes, released_pids, entries = [], [], [], []
+    protected = {}
+
+    class BoundaryAbort(BaseException):
+        pass  # Escape dispatcher error handling to exercise ExitStack teardown.
+
+    def record_query(args, *a, **kw):
+        if args[0] == "ps":
+            queries.append(list(args))
+        return real_run(args, *a, **kw)
+
+    def consume(*a, **kw):
+        entries.append(common_mod.observe_executor_processes is not observer)
+        if len(entries) == 2:
+            assert entries[-1] is coherent_consumer
+            if abort_at == "consumer":
+                raise BoundaryAbort("consumer")
+        return real_consumer(*a, **kw)
+
+    def before_consumer(route):
+        assert (common_mod.observe_executor_processes is not observer) is coherent_consumer
+        proof = route["native_late_checkpoint"]["release_evidence"]
+        released_pids.extend(member["pid"] for member in proof["members"])
+        # Two successive observations each query the OS afresh. The positive
+        # premise uses one full snapshot per observation; the adverse boundary
+        # exposes the original separate graph/identity queries and their races.
+        for _ in range(2):
+            start = len(queries)
+            observation = common_mod.observe_executor_processes(proof["owner"], cwd=fixture["repo"])
+            actual = queries[start:]
+            full = ["ps", "axeww", "-o", "pid=,ppid=,lstart=,stat=,command="]
+            if coherent_consumer:
+                assert actual == [full]
+                assert observation.complete, observation.error
+            else:
+                assert actual[:2] == [["ps", "-axo", "pid=,ppid="], full]
+            probes.append(dict(queries=actual, complete=observation.complete, error=observation.error))
+        protected.update({path: path.read_bytes() for path in (
+            fixture["repo"] / "TASKS.md", fixture["canonical"], fixture["spec_path"],
+            fixture["repo"] / ".agent_bus/executors/phase_b_state.json",
+        )})
+        if abort_at == "callback":
+            raise BoundaryAbort("callback")
+        if not coherent_consumer and abort_at is None:
+            def failed_query(args, *a, **kw):
+                if args[0] == "ps":
+                    raise subprocess.CalledProcessError(1, args)
+                return record_query(args, *a, **kw)
+            monkeypatch.setattr(subprocess, "run", failed_query)
+
+    monkeypatch.setattr(subprocess, "run", record_query)
+    monkeypatch.setattr(pb_mod, "run_phase_b", consume)
+    try:
+        if abort_at:
+            with pytest.raises(BoundaryAbort, match=abort_at):
+                _run_late_native_dispatch(
+                    fixture, monkeypatch, before_consumer=before_consumer,
+                    coherent_consumer=coherent_consumer,
+                )
+        else:
+            _, consumers, _ = _run_late_native_dispatch(
+                fixture, monkeypatch, before_consumer=before_consumer,
+                coherent_consumer=coherent_consumer,
+            )
+            if coherent_consumer:
+                assert consumers == ["final_validation", "final_validation"]
+            else:
+                assert consumers[1]["status"] == "error"
+                assert consumers[1]["step"] == "native_late_checkpoint"
+                assert "process observation unavailable or malformed" in str(consumers[1])
+        assert len(probes) == 2
+        assert entries == ([True] if abort_at == "callback" else [True, coherent_consumer])
+        if abort_at or not coherent_consumer:
+            assert all(path.read_bytes() == raw for path, raw in protected.items())
+            assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 1}
+    finally:
+        assert common_mod.observe_executor_processes is observer
+        assert released_pids
+        for pid in released_pids:
+            with pytest.raises(ProcessLookupError):
+                os.kill(pid, 0)
+    receipt = dict(coherent_consumer=coherent_consumer, abort_at=abort_at,
+                   probes=probes, released_pids=released_pids, all_absent=True,
+                   observer_restored=common_mod.observe_executor_processes is observer)
+    (fixture["repo"] / "consumer-observation-boundary.json").write_text(json.dumps(receipt) + "\n")
+    print(json.dumps(receipt))
 
 
 @pytest.mark.parametrize("late_native_retry_lane", [None, ".agent_bus-late-retry"], indirect=True)
@@ -620,6 +723,53 @@ def test_native_late_retry_drift_holds_before_cleanup_or_consumer(late_native_re
         assert (path.read_bytes() if path.exists() else None) == raw
 
 
+@pytest.mark.parametrize("setup_fault,diagnostic", [
+    ("readiness-timeout", "did not become ready"),
+    ("early-exit", "exited before readiness"),
+    ("missing-owner", "observations"),
+])
+def test_foreign_proof_setup_failure_is_visible_and_cleans_real_child(
+    late_native_retry_lane, monkeypatch, request, setup_fault, diagnostic,
+):
+    fixture = late_native_retry_lane
+    repo = fixture["repo"]
+    protected = {path: path.read_bytes() for path in (
+        repo / "TASKS.md", fixture["canonical"], fixture["spec_path"],
+        repo / fixture["implementation_path"], repo / fixture["plan_path"],
+    )}
+    index = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo)
+    observer = common_mod.observe_executor_processes
+    real_popen = subprocess.Popen
+    children = []
+
+    def start_child(args, **kwargs):
+        # Alter only this real setup child. The producer's ps queries, signals
+        # and absence probes must continue to use the actual subprocess API.
+        monkeypatch.setattr(subprocess, "Popen", real_popen)
+        if setup_fault == "readiness-timeout":
+            args = [*args[:-1], "import time; time.sleep(60)"]
+        elif setup_fault == "early-exit":
+            args = [*args[:-1], "raise SystemExit(0)"]
+        else:
+            kwargs["env"].pop(common_mod.EXECUTOR_PROCESS_OWNER_ENV)
+        child = real_popen(args, **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", start_child)
+    with pytest.raises(AssertionError, match=diagnostic):
+        test_native_late_direct_consumer_revalidates_before_mutation(
+            fixture, monkeypatch, request, "proof-from-another-launch",
+        )
+    assert len(children) == 1
+    assert children[0].poll() is not None
+    assert children[0].stdout.closed
+    assert common_mod.observe_executor_processes is observer
+    assert fixture["calls"] == {"implementer": 0, "sdk": 0, "bridge": 0, "validation": 0}
+    assert all(path.read_bytes() == raw for path, raw in protected.items())
+    assert subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo) == index
+
+
 @pytest.mark.parametrize("fault", [
     "unchanged", "source", "index", "seal", "restored", "wrong-bus", "missing-release",
     "false-release", "release-type", "checkpoint-hash", "malformed-release", "unknown-release-field",
@@ -635,8 +785,54 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
     protected = {}
     admitted_routes = []
     protected_index = []
+    unrelated = None
+    process_observer = common_mod.observe_executor_processes
+
+    if fault == "proof-from-another-launch":
+        # Valid foreign evidence is positive setup. Keep failures outside the
+        # dispatcher's error handler, which would otherwise mask them as a
+        # missing consumer result. End this observation boundary before dispatch.
+        owner = uuid.uuid4().hex
+        proc = subprocess.Popen(
+            [sys.executable, "-B", "-c",
+             "import os,time; os.write(1, b'ready\\n'); time.sleep(60)"],
+            stdout=subprocess.PIPE,
+            start_new_session=True,
+            env={**os.environ, common_mod.EXECUTOR_PROCESS_OWNER_ENV: owner},
+        )
+        try:
+            assert proc.stdout is not None
+            with selectors.DefaultSelector() as ready:
+                ready.register(proc.stdout, selectors.EVENT_READ)
+                assert ready.select(timeout=5), (
+                    "foreign proof process did not become ready", proc.pid, proc.poll(),
+                )
+                assert os.read(proc.stdout.fileno(), 6) == b"ready\n", (
+                    "foreign proof process exited before readiness", proc.pid, proc.poll(),
+                )
+            with complete_process_observation(common_mod) as observations:
+                unrelated = common_mod.terminate_owned_executor(proc, owner, cwd=repo)
+                assert unrelated is not None, {"pid": proc.pid, "observations": observations}
+                assert unrelated["owner"] == owner and unrelated["root_pid"] == proc.pid
+                assert any(member["pid"] == proc.pid for member in unrelated["members"])
+            assert common_mod.observe_executor_processes is process_observer
+            assert proc.poll() is not None, "foreign proof process was not reaped"
+        finally:
+            try:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
+            finally:
+                if proc.stdout is not None:
+                    proc.stdout.close()
 
     def mutate_after_admission(route):
+        if fault == "unchanged":
+            # Recording protected bytes is positive setup, not an adverse
+            # injection: the fresh coherent census must reach this consumer.
+            assert common_mod.observe_executor_processes is not process_observer
+        else:
+            assert common_mod.observe_executor_processes is process_observer
         admitted_routes.append(json.loads(json.dumps(route)))
         if fault == "source": (repo / fixture["implementation_path"]).write_text("foreign\n")
         elif fault == "index": subprocess.run(["git", "add", "TASKS.md"], cwd=repo, check=True, capture_output=True)
@@ -656,20 +852,9 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
         elif fault == "proof-owner-type": route["native_late_checkpoint"]["release_evidence"]["owner"] = None
         elif fault == "proof-owner-changed": route["native_late_checkpoint"]["release_evidence"]["owner"] = uuid.uuid4().hex
         elif fault == "proof-from-another-launch":
-            owner = uuid.uuid4().hex
-            proc = subprocess.Popen(
-                [sys.executable, "-B", "-c", "import time; time.sleep(60)"],
-                start_new_session=True,
-                env={**os.environ, common_mod.EXECUTOR_PROCESS_OWNER_ENV: owner},
-            )
-            try:
-                unrelated = common_mod.terminate_owned_executor(proc, owner, cwd=repo)
-                assert unrelated is not None
-                route["native_late_checkpoint"]["release_evidence"] = unrelated
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-                proc.wait(timeout=5)
+            assert unrelated is not None
+            assert unrelated["owner"] != route["native_late_checkpoint"]["release_evidence"]["owner"]
+            route["native_late_checkpoint"]["release_evidence"] = unrelated
         elif fault == "proof-member": route["native_late_checkpoint"]["release_evidence"]["members"] = []
         elif fault == "proof-pid-reuse":
             proof = route["native_late_checkpoint"]["release_evidence"]
@@ -714,8 +899,11 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
 
     invocations, consumers, _ = _run_late_native_dispatch(
         fixture, monkeypatch, before_consumer=mutate_after_admission,
+        coherent_consumer=fault == "unchanged",
     )
+    assert common_mod.observe_executor_processes is process_observer
     assert len(invocations) == 2
+    assert len(consumers) == 2, {"consumers": consumers, "calls": fixture["calls"]}
     if fault == "unchanged":
         assert consumers == ["final_validation", "final_validation"]
         assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 2}
