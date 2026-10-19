@@ -1,6 +1,7 @@
 {
   "wave_id": "workingrcx-private-tmux-fixture-r3-2026-10-19",
-  "status": "Phase B-local implementation and paired validation complete; ready for outer native review. Actual native refreshed wave_evidence and all landing stages pending.",
+  "status": "Historical Phase B-local implementation and paired validation receipts retained; artifact hashes refreshed for PR #1339 remediation round 1. No current-head validation or landing approval is claimed by this refresh.",
+  "evidence_scope": "Validation receipts, packet predicates, tracker reconciliation, preservation checks, final_source_audit, invariant tuple, handoff and completed_utc describe the original Phase B-local run ending 2026-10-19T21:44:57.863164+00:00. Their recorded hashes and outcomes are historical and have not been rewritten to match later artifacts. current_source_sha256 and final_artifact_sha256 describe the supplied PR checkout at remediation; refreshing hashes does not transfer the historical validations to those bytes.",
   "base": "b75972546901e3a09e08047f1a10c7684bf875bd",
   "branch": "jabramsja/workingrcx-private-tmux-fixture-r3-2026-10-19",
   "baseline_source_sha256": {
@@ -8744,14 +8745,16 @@
     "mu/tools/executors/launch_wave.py": "b93ca9cb1d270c19654aa6272ddb234443a27e9569bffa100c0c0aaccd7273e6",
     "mu/tools/observability/pipeline_monitor.sh": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
     "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
-    "TASKS.md": "bd944582e109c1d01fe7f1bc37e6c08f952c49eeabd3eeab3f4dc81b2b7242bb",
+    "TASKS.md": "345a96b5fdbf24c70b695eb54ed716596af426f07fbebc012cded8a0909e9e95",
     "STATUS.md": "70f14bfad9bcbf68101455d6e8df5323b0bdc3fd3b100135fb9a5fcd664931be",
     "CHANGELOG.md": "bf6a6e50cddbe614d289e94f9dd4ed3a2b1ca7997cefb9c1a6b649c00d16c542",
     "conftest.py": "b1927d777a5fabfd32ed05cd01e357292ee0aebddf8234516b7c007ebb7dbe17",
     "pyproject.toml": "9d0a22e08a2793b19f10da839296d08ce2e569f7f4128153549734b756c84fa6"
   },
-  "source_hashes_stable_across_full_gate_sweep_and_handoff": true,
+  "source_hashes_stable_across_full_gate_sweep_and_handoff": false,
+  "source_hash_stability_scope": "The retained full-gate and independent-sweep receipts record matching before/after source hashes. The refreshed PR checkout does not match that snapshot: TASKS.md changed after those runs. The generated packet also differs from every retained packet predicate. No current-byte gate or packet-predicate result was produced during remediation.",
   "paired_full_validation": {
+    "scope": "Historical complete_six_module_gate and identical_independent_six_module_sweep receipts, bound to their embedded source_sha256_before/after maps; not validation of the refreshed TASKS.md or packet.",
     "complete_gate_passed": 1704,
     "independent_sweep_passed": 1704,
     "exact_identical_commands": true,
@@ -8769,6 +8772,7 @@
     "collection_only_used_as_execution": false
   },
   "final_source_audit": {
+    "scope": "Historical implementer handoff only, as of completed_utc; these unchanged/pending claims do not describe the later PR checkout or its index.",
     "base_branch_config_packet_unchanged": true,
     "raw_index_unchanged": true,
     "Ra_and_restoration_state_unchanged": true,
@@ -8779,7 +8783,7 @@
     "only_three_test_modules_executable_edits": true,
     "growth_cap_exact_noop": true,
     "indicator": "outer native builder pending; no handwritten artifact",
-    "packet": "preexisting native packet unchanged byte-for-byte"
+    "packet": "Preexisting native packet was recorded unchanged byte-for-byte at the original implementer handoff; the later packet differs, as recorded by final_artifact_sha256 and artifact_refresh."
   },
   "invariant_tuple": {
     "runtime_substrate_delta": "none",
@@ -8789,6 +8793,7 @@
     "debt": "unchanged; no production source changes"
   },
   "handoff": {
+    "scope": "Original implementer handoff at completed_utc; pending stages and tracker observations below are historical, not a current PR or pipeline status report.",
     "outer_owned_required": [
       "actual refreshed wave_evidence result on reviewed source",
       "native independent review and final pytest",
@@ -8812,10 +8817,22 @@
   "final_artifact_sha256": {
     "reports/control_plane/workingrcx-private-tmux-fixture-r3-2026-10-19_fixture_contract.json": "47e3fdef615ef4196319f6695ed22cfca2c7c9a5f23f1ef687607339865939c2",
     "reports/deferred/non_blocking/workingrcx-private-tmux-fixture-r3-2026-10-19_remaining_obligations.md": "dc1fd01fdd61c62f9222fa68f4ecfe7bb6a9c5be438aed7b2754e5a0575d95a9",
-    "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/private-tmux-fixture-r3-20261019/reports/control_plane/workingrcx-private-tmux-fixture-r3-2026-10-19_2026-10-19.md": "c8c147fc8c72fa9dab98ed312277d1c9bdfe11006f09e3ae885c58c51798a7d5"
+    "reports/control_plane/workingrcx-private-tmux-fixture-r3-2026-10-19_2026-10-19.md": "7aa3ed14bf5f7f58b40c5acbdba3470065de5ad292d0cceba5cdbec2386caa98"
+  },
+  "artifact_refresh": {
+    "context": "PR #1339 bot-remediation round 1",
+    "method": "SHA-256 computed directly from the supplied checkout file bytes for all 20 current_source_sha256 entries and all 3 final_artifact_sha256 entries. Git/index state was not inspected; git commands, tests and hooks were not run.",
+    "changed_since_implementation_handoff_sha256": {
+      "TASKS.md": "bd944582e109c1d01fe7f1bc37e6c08f952c49eeabd3eeab3f4dc81b2b7242bb",
+      "reports/control_plane/workingrcx-private-tmux-fixture-r3-2026-10-19_2026-10-19.md": "c8c147fc8c72fa9dab98ed312277d1c9bdfe11006f09e3ae885c58c51798a7d5"
+    },
+    "other_manifest_entries_match_implementation_handoff": true,
+    "validation_limit": "Hash reconciliation only. Original test outputs, source hashes, packet predicates and completion time are preserved. Current-byte validation and the current-config packet predicate remain owned by the native pipeline; this edit supplies neither a new pass nor approval."
   },
   "post_gate_reporting_changes": [
-    "Only fixture_contract validation_status and implementation_evidence were finalized; all gate-bound test/source/documentation inputs remain exact."
+    "At the original implementer handoff, fixture_contract validation_status and implementation_evidence were finalized. The retained gate receipts bind the source/documentation snapshot at that time.",
+    "The supplied PR checkout also contains later TASKS.md and generated-packet bytes. Their current hashes are recorded above; the packet contains native indicator-scope, tracker-field and commit-path refresh blocks. These differences invalidate a claim that all gate-bound documentation and packet bytes remained exact through the PR checkout.",
+    "Remediation round 1 changes only this evidence manifest: refresh the two stale hashes, use a repo-relative packet path, and distinguish historical receipts from current file bytes. No tests or packet predicates were rerun."
   ],
   "files_changed_by_implementer": [
     "TASKS.md",
@@ -8829,5 +8846,5 @@
     "reports/deferred/non_blocking/workingrcx-private-tmux-fixture-r3-2026-10-19_remaining_obligations.md"
   ],
   "preexisting_native_packet": "reports/control_plane/workingrcx-private-tmux-fixture-r3-2026-10-19_2026-10-19.md",
-  "scope_check": "PASS: exactly nine implementer-owned paths plus the untouched preexisting launcher packet; no undeclared tracked or untracked edits."
+  "scope_check": "Historical implementer handoff reported exactly nine implementer-owned paths plus the then-untouched launcher packet. Remediation edits only this evidence manifest; no current git/index scope audit or unchanged-packet claim is made."
 }
