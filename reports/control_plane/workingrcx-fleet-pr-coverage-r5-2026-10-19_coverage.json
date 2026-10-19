@@ -1,0 +1,664 @@
+{
+  "comparison_commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+  "manifest_sha256": "8d422cdc636bc1593d6ee37adef4f4241ad8648956b6159925c7f60b7292b130",
+  "repository": {
+    "id": "R_kgDOQvy8bg",
+    "nameWithOwner": "jabramsja/rcx-pi-core",
+    "url": "https://github.com/jabramsja/rcx-pi-core"
+  },
+  "schema_version": 2,
+  "targets": [
+    {
+      "coverage": [
+        {
+          "hunks": [
+            {
+              "header": "@@ -4,6 +4,27 @@ This file is a selected historical changelog, not the complete current",
+              "reason": "The 2026-10-04 changelog is historical local-implementation chronology. Its useful exact-budget, selection and failure guarantees are present in the merged replacement ancestry, as the cited implementation and assertion bodies show. Its proposed PR1329/five-target/Mu order is not current launch authority. The new CHANGELOG records actual PR1334 landing and current fixture-and-coverage work; row38 retains useful-work ownership, and row40 accounting is in reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4897,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+                  "start": 4833
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 230,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+                  "start": 112
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4932,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "e0f816e3209a48ab707099a03b2febf177154774b1e807f9c2e0942b445f61b7",
+                  "start": 4899
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 320,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+                  "start": 233
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 22583,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "6dca66d8eb17eca79aece0f7ffd87f22ea7649ddf6282f10e59a8eb2bcaf884d",
+                  "start": 22549
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "b031e9ae422964120756e2a266533707bafed0db346825203a0508e6296e8097"
+            }
+          ],
+          "patch_sha256": "a80fd5a78d1068eea5e99005df80f8644aa33676cafa9786e9799f0c73642ed4",
+          "path": "CHANGELOG.md",
+          "reason": "The 2026-10-04 changelog is historical local-implementation chronology. Its useful exact-budget, selection and failure guarantees are present in the merged replacement ancestry, as the cited implementation and assertion bodies show. Its proposed PR1329/five-target/Mu order is not current launch authority. The new CHANGELOG records actual PR1334 landing and current fixture-and-coverage work; row38 retains useful-work ownership, and row40 accounting is in reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+          "references": [
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 4897,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+              "start": 4833
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 230,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+              "start": 112
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 4932,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "e0f816e3209a48ab707099a03b2febf177154774b1e807f9c2e0942b445f61b7",
+              "start": 4899
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 320,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+              "start": 233
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 22583,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "6dca66d8eb17eca79aece0f7ffd87f22ea7649ddf6282f10e59a8eb2bcaf884d",
+              "start": 22549
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -11,7 +11,9 @@ Founder model selection (2026-09-11): every selected local model-bearing pipelin",
+              "reason": "Original current-to-historical checkpoint transition is superseded by actual PR1334 MERGED lineage and the new PR1330 coverage checkpoint. The 108-pass/260.699s R2 diagnostic remains historical, not fresh validation. Exact 600/900/240 policy and caller floor survive; original cleanup, PR1325, Mu and held PRIMARY obligations remain owned without reactivating the old sequence. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4897,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+                  "start": 4833
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 230,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+                  "start": 112
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3912,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "1786e969fcd1cdf70788b274af9e881d0f732ba5227b13b63eab14ddd4a36225",
+                  "start": 3841
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3931,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "95c235192888fc43e98f477936707772e77aa99ad20dcdaa1a2367af9ac29e4b",
+                  "start": 3915
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4157,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "57611a1d00336cd2dea44d33df5a301bbfd1a98f1dd3ffae33950f9aecdae106",
+                  "start": 4083
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "7c6f3582557b1ad9b1b36ada08c858ec8a06ce04f383eca99262d852fca83a1d"
+            },
+            {
+              "header": "@@ -528,9 +530,11 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Original row38 budget-wave owner and bounded implementation are retained as history. Current row38 owns this fixture-and-coverage wave; the source-unchanged budget behavior is already in PR1334 ancestry. Native explicit target/task/wave/packet, retained-branch and committed-authority predicates prevent the historical packet or old approval from authorizing a fresh terminal action. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4897,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+                  "start": 4833
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 230,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+                  "start": 112
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3912,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "1786e969fcd1cdf70788b274af9e881d0f732ba5227b13b63eab14ddd4a36225",
+                  "start": 3841
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3931,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "95c235192888fc43e98f477936707772e77aa99ad20dcdaa1a2367af9ac29e4b",
+                  "start": 3915
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4157,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "57611a1d00336cd2dea44d33df5a301bbfd1a98f1dd3ffae33950f9aecdae106",
+                  "start": 4083
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "c4cb721a27504733289adfb6eb3ea3406507e4a190821e72efd228e2c4d6f781"
+            },
+            {
+              "header": "@@ -562,7 +566,7 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Original working to-do sequencing is historical and superseded: this independent PR1330 subset may proceed from actual landed PR1334 without waiting for unmerged R19, retention, Mu or the other five PRs. The useful failure/selection behavior and preservation-before-terminal-action obligations survive in the cited landed code. Updated TASKS retains separate owners and leaves landing/sync/plan/apply/verify pending. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4897,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+                  "start": 4833
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 230,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+                  "start": 112
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3912,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "1786e969fcd1cdf70788b274af9e881d0f732ba5227b13b63eab14ddd4a36225",
+                  "start": 3841
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3931,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "95c235192888fc43e98f477936707772e77aa99ad20dcdaa1a2367af9ac29e4b",
+                  "start": 3915
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4157,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "57611a1d00336cd2dea44d33df5a301bbfd1a98f1dd3ffae33950f9aecdae106",
+                  "start": 4083
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "360c8a9d3a21b26909c788a61a75f063271aad8890a890ae5fa7212e8b1b7a2e"
+            },
+            {
+              "header": "@@ -689,6 +693,8 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "The missing original row40 report is replaced by the real current-wave artifact reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md. Partial timeout output retention and Step8b propagation are implemented and asserted in PR1334 ancestry; unchanged undersized recovery reinspection remains a bounded advisory under the SAME row40 owner. The cited recovery validator still uses a separate caller budget (up to 300s for ordinary delegated validation), and retry_requested is not a successful rerun. This mapping accounts for an original deferred obligation; it does not assert that generic repeat suppression landed. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4932,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "2e285e869ef09d7a9e8bf40a586da0c2c9056eac6af59932a2e49244f9b238c8",
+                  "start": 4915
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 22583,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "6dca66d8eb17eca79aece0f7ffd87f22ea7649ddf6282f10e59a8eb2bcaf884d",
+                  "start": 22549
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 423,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "b9964ad5537d8a7074c424d9e26382697bd6b1b6fe7ba80de9d51b16cfe8050e",
+                  "start": 342
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 8951,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "5673c05a2ba33cf4289d42d96280f43cdf5dc84d63479455d9334b44721bbc41",
+                  "start": 8895
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 9185,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "0543a235b859aca358402edb759419b35a9709d461c9959b2933ad7ca373c95d",
+                  "start": 9145
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 10055,
+                  "path": "mu/tools/executors/recovery_gate.py",
+                  "sha256": "4f903c3de2bb2509715a16b3e73cfe336791d199cc9816450f469d034fecd420",
+                  "start": 9940
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 9185,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "f9295f4acddd31e13c88d8f07f63664d84cc43c69bf4be37e369648e1a03747c",
+                  "start": 9124
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "36d739bb9fbbc7ab8c86054b42e79223e1cf93defae0702499d87961ad0bb980"
+            },
+            {
+              "header": "@@ -846,7 +852,7 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Original single-lane wording names the historical budget wave and is superseded by this admitted native lane. TASKS preserves that old rule as history and names only the current coverage wave; source branches remain read-only. Native committed-input, explicit-owner and consumed-intent checks remain binding for any later terminal action. No old continuation or original PR merge is authorized by this mapping. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3912,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "1786e969fcd1cdf70788b274af9e881d0f732ba5227b13b63eab14ddd4a36225",
+                  "start": 3841
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3931,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "95c235192888fc43e98f477936707772e77aa99ad20dcdaa1a2367af9ac29e4b",
+                  "start": 3915
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4157,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "57611a1d00336cd2dea44d33df5a301bbfd1a98f1dd3ffae33950f9aecdae106",
+                  "start": 4083
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "9f2e9cbdd2aac1dfd6a8817062e80ff85ac59703180bf5b9f6be36063628e0f1"
+            },
+            {
+              "header": "@@ -1870,6 +1876,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "Original 2026-10-04 tracker note is historical local package/indicator provenance only. It is preserved on the exact source branch and in candidate Ra history; it grants no current approval or L4 proof. The native version-2 owner/packet and committed-input guards require this fresh wave. The 2026-10-19 note remains outer-owned under native launch-tracker restoration; no duplicate note is inserted by the implementer. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3912,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "1786e969fcd1cdf70788b274af9e881d0f732ba5227b13b63eab14ddd4a36225",
+                  "start": 3841
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 3931,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "95c235192888fc43e98f477936707772e77aa99ad20dcdaa1a2367af9ac29e4b",
+                  "start": 3915
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4157,
+                  "path": "mu/tools/executors/pr_disposition_executor.py",
+                  "sha256": "57611a1d00336cd2dea44d33df5a301bbfd1a98f1dd3ffae33950f9aecdae106",
+                  "start": 4083
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "28d392b6243a266e6e84ab8b7e5d35bb41cda24e486b790e3824bebbc2c44f6b"
+            }
+          ],
+          "patch_sha256": "3d1fe53d482ba19f247a7a26c2c4802af92cb3876a6917901a7c49b0d8551236",
+          "path": "TASKS.md",
+          "reason": "All six original tracker hunks are accounted for below. Budget implementation and failure obligations are in landed code/tests; the original queue order and local tracker approval are historical. Current TASKS preserves 268 IDs, 44 ordered owners and candidate Ra, reconciles captured PRIMARY outside Ra, keeps row38 as this exact PR1330 owner and row40 as deferred-topic owner, and preserves every held transaction, stash and source branch. No other PR is a terminal target. The native lifecycle owner/committed-authority guards cited here enforce those boundaries; mutable TASKS is deliberately not used as a comparison-byte reference. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+          "references": [
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 4897,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+              "start": 4833
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 230,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+              "start": 112
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 3912,
+              "path": "mu/tools/executors/pr_disposition_executor.py",
+              "sha256": "1786e969fcd1cdf70788b274af9e881d0f732ba5227b13b63eab14ddd4a36225",
+              "start": 3841
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 3931,
+              "path": "mu/tools/executors/pr_disposition_executor.py",
+              "sha256": "95c235192888fc43e98f477936707772e77aa99ad20dcdaa1a2367af9ac29e4b",
+              "start": 3915
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 4157,
+              "path": "mu/tools/executors/pr_disposition_executor.py",
+              "sha256": "57611a1d00336cd2dea44d33df5a301bbfd1a98f1dd3ffae33950f9aecdae106",
+              "start": 4083
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -130,6 +130,32 @@ def test_retirement_terminal_uses_surviving_primary_and_preserves_detached_sourc",
+              "reason": "All thirteen added lifecycle/mixed/node/alternate-path selector rows survive at the same values. Current test body asserts one subprocess, exact full argv including markers/import mode and full-fleet-only four-worker arguments, cwd, finite selected deadline, check=False, three deterministic environment pins and absent live bus/pager overrides. Both mixed orders, 1800s floor and 240s node/path negatives remain; additional Phase B rows do not replace them.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 230,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+                  "start": 112
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4897,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "314d22a43ac5eeb20c3aa7d8748147436c5d43c2e6f5192da0fd91b19915837b",
+                  "start": 4851
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "e9f66898f4dea85f4878b0480e07671e6a4352a77ebbd1951819e15490586634"
+            },
+            {
+              "header": "@@ -168,28 +194,51 @@ def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(",
+              "reason": "All four original failure selector rows crossed with exit codes 1,2,3,4,5 survive with exact raw stdout/stderr and passed=False. Current equality assertion additionally requires command and timeout_seconds. All seven original timeout selector/caller-floor rows survive; the actual subprocess timeout is asserted before raising TimeoutExpired. New six-way output cases include None/None (the original empty-output case), long bytes/text, invalid UTF-8 and one-sided streams; they strengthen retention rather than omit failure assertions.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 320,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+                  "start": 233
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4932,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "e0f816e3209a48ab707099a03b2febf177154774b1e807f9c2e0942b445f61b7",
+                  "start": 4899
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "1d3f9e68b56aee4e064963bc9a974eb9c1f3233f96115d8708de3ce8c9140fe3"
+            },
+            {
+              "header": "@@ -197,7 +246,7 @@ def test_fleet_pytest_timeout_reports_selected_budget(",
+              "reason": "The timeout helper call still uses the parametrized selectors and caller timeout instead of a hardcoded fleet selector. The None/None case still asserts exit -1, empty stdout, the exact selected finite deadline in stderr and passed=False; added command/timeout/timed_out fields and partial-output cases preserve that original failure contract. Step8b still returns an error before commit on failed/timed-out pytest.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 320,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "805c926e27cf1112e8c83d635341499db731e7e78d3776eae19f33088cb23b80",
+                  "start": 270
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4932,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "2e285e869ef09d7a9e8bf40a586da0c2c9056eac6af59932a2e49244f9b238c8",
+                  "start": 4915
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 22583,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "6dca66d8eb17eca79aece0f7ffd87f22ea7649ddf6282f10e59a8eb2bcaf884d",
+                  "start": 22549
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "98c961052ac2f03c4df40b3688118a4d966c110d7637596bbc11449878bcb206"
+            }
+          ],
+          "patch_sha256": "91d070e399dd12a0354d938a7956d19caf07097e7e91398500b0f9a1112cfa1f",
+          "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+          "reason": "All three original test hunks have corresponding parameter rows AND actual assertion bodies in the landed replacement ancestry. The current tests add Phase B budgets, lossless timeout diagnostics and failure metadata without dropping the original selection, budget, environment, nonzero or timeout guarantees. This is source-level semantic coverage; this wave executes its declared docs/disposition/Phase B gate.",
+          "references": [
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 320,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "ffa0c1c8e8d182cc9ac3cf6e46dd55a87896790e4a94201550c010dfd87931fd",
+              "start": 112
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 423,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "b9964ad5537d8a7074c424d9e26382697bd6b1b6fe7ba80de9d51b16cfe8050e",
+              "start": 342
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -4831,8 +4831,15 @@ def _run_pytest_on_files(",
+              "reason": "The exact original policy is present in merged PR1334 ancestry: literal full lifecycle path 600s, literal full fleet path 900s, every unlisted selector 240s, and max(caller timeout, sum of per-selector allocations)). Exact membership prevents basename/alternate-path/node expansion; only full fleet enables four workers/worksteal. Current code also allocates 600s to the independently landed exact Phase B module, without changing the original selector values or floor. It preserves argv, marker/import policy, validation environment and nonzero/timeout propagation; Step8b holds before commit. This is inherited landed behavior, not a claim PR1334 first introduced every line or that original PR1330 merged.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4897,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+                  "start": 4833
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 230,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+                  "start": 112
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4932,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "e0f816e3209a48ab707099a03b2febf177154774b1e807f9c2e0942b445f61b7",
+                  "start": 4899
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 320,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+                  "start": 233
+                },
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 22583,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "6dca66d8eb17eca79aece0f7ffd87f22ea7649ddf6282f10e59a8eb2bcaf884d",
+                  "start": 22549
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "b493e520e05002547921aea6d12d6fd0c54aeefa84ea22e78e2d70bd64ee9054"
+            }
+          ],
+          "patch_sha256": "39edb6351c6bac31f1e5ee2276d0343388b94d0fa0570bfc9626f6d42a51f80f",
+          "path": "mu/tools/executors/commit_executor.py",
+          "reason": "The exact original policy is present in merged PR1334 ancestry: literal full lifecycle path 600s, literal full fleet path 900s, every unlisted selector 240s, and max(caller timeout, sum of per-selector allocations)). Exact membership prevents basename/alternate-path/node expansion; only full fleet enables four workers/worksteal. Current code also allocates 600s to the independently landed exact Phase B module, without changing the original selector values or floor. It preserves argv, marker/import policy, validation environment and nonzero/timeout propagation; Step8b holds before commit. This is inherited landed behavior, not a claim PR1334 first introduced every line or that original PR1330 merged.",
+          "references": [
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 4897,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+              "start": 4833
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 230,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+              "start": 112
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 4932,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "e0f816e3209a48ab707099a03b2febf177154774b1e807f9c2e0942b445f61b7",
+              "start": 4899
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 320,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+              "start": 233
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 22583,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "6dca66d8eb17eca79aece0f7ffd87f22ea7649ddf6282f10e59a8eb2bcaf884d",
+              "start": 22549
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,125 @@",
+              "reason": "Historical locked Phase A/Phase B packet for the unmerged original wave, including its generated scope/L4/commit refresh sections. Its 600s policy and regression obligations are covered explicitly by the code/test mappings; its missing-report obligation is now accounted for in reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md. Its old queue, packet lock, pending-supervisor state and approval fields cannot authorize this fresh wave. It remains preserved evidence, not a missing product delivery or current authority. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "ed7a8dde15bac5ab3910955e9b9011b157abbac64c3d5ce0d16a355da3a616a5"
+            }
+          ],
+          "patch_sha256": "904a12eedb79784454cca54602b206ac948233be57cf5d3b6517f3221a4fb3ed",
+          "path": "reports/control_plane/workingrcx-lifecycle-gate-budget-r1-2026-10-04_2026-10-04.md",
+          "reason": "Historical locked Phase A/Phase B packet for the unmerged original wave, including its generated scope/L4/commit refresh sections. Its 600s policy and regression obligations are covered explicitly by the code/test mappings; its missing-report obligation is now accounted for in reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md. Its old queue, packet lock, pending-supervisor state and approval fields cannot authorize this fresh wave. It remains preserved evidence, not a missing product delivery or current authority. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,105 @@",
+              "reason": "Historical original implementation evidence: the archived 108-pass R2 timing diagnosis and recorded 231-pass local gate are retained as originally recorded, not rerun or represented as current validation. Its implementation/assertion guarantees map to the landed code/tests above. Its stale absent deferred-report reference is superseded by reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md under row40. Its pending native outputs remain historical; this wave supplies its own evidence and awaits independent native review/CI/landing. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "a57cd136f466683ff5f21c8034d86ebdb32b217e2bbc94468bdc98ff6b73a20e"
+            }
+          ],
+          "patch_sha256": "2ff1fa7234d9dec6922813701424ce3c62a32ab9d9755ca827f8eb91fba22fb4",
+          "path": "reports/control_plane/workingrcx-lifecycle-gate-budget-r1-2026-10-04_implementation_evidence.json",
+          "reason": "Historical original implementation evidence: the archived 108-pass R2 timing diagnosis and recorded 231-pass local gate are retained as originally recorded, not rerun or represented as current validation. Its implementation/assertion guarantees map to the landed code/tests above. Its stale absent deferred-report reference is superseded by reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md under row40. Its pending native outputs remain historical; this wave supplies its own evidence and awaits independent native review/CI/landing. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "Historical native indicator measured on 2026-10-04 against original comparison 35f7c225a25025aec893230c072754cf7d7c76fc. Its timings, parity count, collector provenance and host delta are original-wave evidence only, never copied as a current measurement, approval or semantic proof. The outer native collector must generate this wave's own indicator and Step5e state against the actual staged package. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "6588bb5720705638d933919cfc4e03309093a2d477da7ae01f62ab85f8a5cbd5"
+            }
+          ],
+          "patch_sha256": "c3f353e1c7daf7ce40e242436e5d0e5b892534290a9c1ca013e3e0ba7dfc09d0",
+          "path": "reports/l4_wave_indicators/workingrcx-lifecycle-gate-budget-r1-2026-10-04.json",
+          "reason": "Historical native indicator measured on 2026-10-04 against original comparison 35f7c225a25025aec893230c072754cf7d7c76fc. Its timings, parity count, collector provenance and host delta are original-wave evidence only, never copied as a current measurement, approval or semantic proof. The outer native collector must generate this wave's own indicator and Step5e state against the actual staged package. Exact original source remains at refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04, head 817e470362ef632b60ab13bb4321571676f564ee; original base 35f7c225a25025aec893230c072754cf7d7c76fc.",
+          "references": [],
+          "resolution": "evidence_only"
+        }
+      ],
+      "evidence_refs": [
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/source-recovery-record.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/original-contribution-inventory.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-r5-live-inputs-20261019/original-pr.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-r5-live-inputs-20261019/replacement-pr.json",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_implementation_evidence.json",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md"
+      ],
+      "owner": {
+        "packet": "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md",
+        "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+        "wave_id": "workingrcx-fleet-pr-coverage-r5-2026-10-19"
+      },
+      "preservation_ref": "refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04",
+      "replacement": {
+        "head": "51f575945e2bd3563cc8d0a77506c5ae0f78c432",
+        "id": "PR_kwDOQvy8bs8AAAABIUBvmQ",
+        "merge": "b75972546901e3a09e08047f1a10c7684bf875bd",
+        "number": 1334
+      },
+      "source_base": "35f7c225a25025aec893230c072754cf7d7c76fc",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04",
+        "headRefOid": "817e470362ef632b60ab13bb4321571676f564ee",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABGipA2w",
+        "mergedAt": null,
+        "number": 1330,
+        "state": "OPEN"
+      }
+    }
+  ],
+  "wave_id": "workingrcx-fleet-pr-coverage-r5-2026-10-19"
+}

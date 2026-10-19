@@ -1,0 +1,1097 @@
+{
+  "admission_startup": {
+    "actual_results": {
+      "pr1330-r5-startup-attest.log": {
+        "actual_exit_code": 0,
+        "sha256": "12298af5536b805e7e0d1d2060ff43313e846fa8a759c98f0d4ae0a9ea3b07f4"
+      },
+      "pr1330-r5-startup-guard.log": {
+        "actual_exit_code": 1,
+        "sha256": "604305ce09c45adf21194fd1aaa057918675382054510c42a7b9598c3e04c2d0"
+      }
+    },
+    "limit": "Admission receipts only, not an all-green claim or a newly executed startup gate.",
+    "nonzero_checks": [
+      {
+        "command": "./tools/checks/check_docs_consistency.sh",
+        "exit_code": 1,
+        "reason": "Docs registry/placement report issues; STATUS freshness warning also recorded at admission."
+      },
+      {
+        "command": "python3 tools/session/check_codex_startup_state.py",
+        "exit_code": 1,
+        "reason": "Local binary/model-cache drift reported by the admission guard; no binary, model-cache, hook, Claude or backup edits authorized here."
+      }
+    ],
+    "record": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/startup-and-environment.json",
+    "record_sha256": "b2cf7dc8f975e57fb18db5568d9c852c32025dc1dab9a53f924f5df609b50948",
+    "rerun_inside_implementer": false
+  },
+  "admitted_inputs": {
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r4-prepush-failure-diagnostic.json": {
+      "mode": 420,
+      "sha256": "d6b0d7ca97e2e6307c6033f5760b43654dec3f31535d1182d52d3c5ae1743ff7"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r4-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r4-20261019/mu/tests/tools/test_phase_b_executor.py": {
+      "mode": 420,
+      "sha256": "f1de6d1192c563a7c1333d6af5ebc3bd2f9894cfbe826db6dd0379a1e46757c2"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r4-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r4-20261019/reports/control_plane/workingrcx-fleet-pr-coverage-r4-2026-10-19_coverage.json": {
+      "mode": 420,
+      "sha256": "3f25102657e5d0f263992b6205a27a4582fbfaf34604c7ae08540070899b7063"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r4-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r4-20261019/reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r4-2026-10-19_row40_advisories.md": {
+      "mode": 420,
+      "sha256": "24b48efeee81a03658175f771bf36d6a9ddc0044584f4fb50df6c987fcd33d6f"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/PRIMARY-TASKS.md": {
+      "mode": 420,
+      "sha256": "730ee54dbfc88492e4b79a0eaf09d5586459eaaea560ecd429afed914044c918"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/frozen-wave-config.json": {
+      "mode": 420,
+      "sha256": "8b3b4e08de782cff8cb3ac03ead1989b387b7a04c41388738da17e528f0598eb"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/original-contribution-inventory.json": {
+      "mode": 420,
+      "sha256": "c90e2b8976c7033bf9bbd52b0853022f2ce517b79fb6961d275359d0c1d40d96"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/quota.json": {
+      "mode": 420,
+      "sha256": "2d23432a4d33af8d536a326b55189329c4443592bd912731c411a8d8a4e6752d"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/source-recovery-record.json": {
+      "mode": 420,
+      "sha256": "46b368dfd5f5ed23ad3ecdd00a5c66facd987cd31ceb05264e127e53a89e6ef7"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/startup-and-environment.json": {
+      "mode": 420,
+      "sha256": "b2cf7dc8f975e57fb18db5568d9c852c32025dc1dab9a53f924f5df609b50948"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-r5-live-inputs-20261019/original-pr.json": {
+      "mode": 420,
+      "sha256": "f50a17da1a72ad2c50f9ba9eee1298e9c5137fe27cdc742ded847e99bddc5204"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-r5-live-inputs-20261019/replacement-pr.json": {
+      "mode": 420,
+      "sha256": "f308f58cae7bda89f5b1eb40ba1f716b6fefbf8d14c2e9efa57a5838ffc967eb"
+    }
+  },
+  "branch": "jabramsja/workingrcx-fleet-pr-coverage-r5-2026-10-19",
+  "cited_whole_files": {
+    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "12d09a3dfeee0f464d9bbba052fefe1b807ed8b7570a686fc07a827d675d849b",
+    "mu/tests/tools/test_recovery_gate.py": "e13565c6b2d92cfde60cee185af0e44460620c85c0f8616077ee1ddec1faeaac",
+    "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+    "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+    "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+    "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3"
+  },
+  "completed_utc": "2026-10-19T17:00:06.777643+00:00",
+  "coverage": {
+    "file_sha256": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+    "hunk_count": 14,
+    "manifest": "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json",
+    "manifest_sha256": "8d422cdc636bc1593d6ee37adef4f4241ad8648956b6159925c7f60b7292b130",
+    "original_source_record": {
+      "changed_path_blob_sha256": {
+        "CHANGELOG.md": "ea063ed250c1f9b8a175b2d3124cadaf7fb99f692b8e66d159565fa79b5134f0",
+        "TASKS.md": "0c2a4382c0dbee2cf353ad259fb16ccc406057b9145bdff94f056bc6e5631615",
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "17ab09b5c84cde500fc9fccaadee1900fa17dc9264e9f2a4623dc75017c211a1",
+        "mu/tools/executors/commit_executor.py": "df8ff7c93fb7f40b3d7e71d9c9661dbcb6c35a7a4610950254bceda8fd70165d",
+        "reports/control_plane/workingrcx-lifecycle-gate-budget-r1-2026-10-04_2026-10-04.md": "48e8a255cda9b593f069859a56c5d04784541a00aac086e4720eafda1f96ea13",
+        "reports/control_plane/workingrcx-lifecycle-gate-budget-r1-2026-10-04_implementation_evidence.json": "cc023d58ababb3291be539eb8c1723644d1fbaf9bab791ecbf70c3751cffc9b9",
+        "reports/l4_wave_indicators/workingrcx-lifecycle-gate-budget-r1-2026-10-04.json": "7bfacc351175309b19cb0fa15775ddfa1e2e82226dd921a317524cdb919b7a8c"
+      },
+      "limits": "Complete original PR1330 raw commit and tracked HEAD tree, not standalone parent-history reconstruction or original unfinished/untracked historical work; prior fleet history remains in catalog snapshots and original branch/Main Git history is retained. Preserved tracked contribution is not reviewed/merged/closed/retired.",
+      "raw_commit_sha256": "8c3d3d389540321e462b3340277c70102e03ec2009ca22525935e24f8d9d9d22",
+      "restoration": "Restore admission snapshot into an empty review directory. In an empty bare Git store without alternates, index-pack original-pr1330-tree-objects.pack and hash-object -w -t commit original-pr1330-commit.raw; verify original HEAD hash and ls-tree/selected blob hashes. Retained exact original local branch remains the native preservation reference.",
+      "retained_branch": "refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04",
+      "source_base": "35f7c225a25025aec893230c072754cf7d7c76fc",
+      "source_head": "817e470362ef632b60ab13bb4321571676f564ee",
+      "tree": "bd66a13e7a88319d5cf192e02c0637628e8ca241",
+      "tree_objects": 3203
+    },
+    "path_count": 7,
+    "status": "Author implementation mapping; independent native semantic review pending. No prior approval transferred."
+  },
+  "files_authored_or_changed": [
+    "CHANGELOG.md",
+    "STATUS.md",
+    "TASKS.md",
+    "mu/tests/tools/test_phase_b_executor.py",
+    "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json",
+    "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_implementation_evidence.json",
+    "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md"
+  ],
+  "final_bound_sources": {
+    "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+    "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+    "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+    "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+    "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+    "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+    "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+    "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+    "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+    "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+    "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+    "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+    "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+    "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+    "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+    "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+    "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+    "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+    "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+    "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+    "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+    "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+    "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+  },
+  "fixture_implementation": {
+    "boundary": "Observation function identity asserted restored before all 23 consumer fault mutations; no synthetic successful proof.",
+    "cleanup": "finally kills/reaps only owned Popen child and closes stdout, including setup failure; all original consumer calls/index/files assertions retained.",
+    "historical_cause": "Unproved native foreign-proof setup refusal; R4 inner None assertion was masked by downstream consumers[1] IndexError.",
+    "negative_controls": [
+      "readiness-timeout",
+      "early-exit",
+      "missing-owner"
+    ],
+    "production_authority_changed": false,
+    "setup": "Real owner-marked Popen child, bounded five-second ready pipe, real terminate_owned_executor with scoped complete_process_observation, real owner/root/member proof and reaping."
+  },
+  "historical_failure_and_preservation": {
+    "diagnostic": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r4-prepush-failure-diagnostic.json",
+    "full_prepush_result": "1 failed, 13632 passed, 2 skipped in 1341.64s",
+    "limits": "Recorded independent restoration was inspected; no new backup/restore or old executor continuation was run. The old COMMIT_GO applied to historical bytes only and does not transfer to R5. Earlier recovery full-file validation hit 300s without a complete pass; it was not repeated as an unchanged serial loop.",
+    "merged": false,
+    "preservation_record": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r4-terminal-preserved/preservation.json",
+    "preservation_record_sha256": "e708bcd7ff102a0814bcd2ece25cf61545beff545a940cf2f9fdba21448b8ea9",
+    "prior_commit_receipt": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r4-terminal-preserved/native-bus/executors/commit_executor_workingrcx-fleet-pr-coverage-r4-2026-10-19.json",
+    "prior_commit_receipt_sha256": "fcc8cfbbd879b7c806e50a5d31ef27dcc0eb6b3ff05de0c5f9e0e63888a63525",
+    "prior_commit_status": "post_commit_pending",
+    "recorded_raw_index_recovery": {
+      "empty_object_store": "PASS",
+      "objects": 3299,
+      "raw_index_and_entries": "PASS",
+      "temporary_bare_store_removed": true
+    },
+    "recorded_restore_exit_code": 0,
+    "recorded_verification": {
+      "files": 198,
+      "hashes_and_modes": true,
+      "restic_verify": true
+    },
+    "retained_commit": "a25af76e261740b163c5a28c4781cda22162618c",
+    "snapshot": "f206e0ce42948c4359317d0e2e9f213831779bb269d5d1163aa79608141dce5b",
+    "source_retired": false
+  },
+  "invariants": {
+    "authority_sites_after": 217,
+    "authority_sites_before": 217,
+    "production_process_authority_delta": 0,
+    "proof_limit": "Counts are the unchanged canonical/admission baseline; no runtime or authority sources changed. These local gates do not prove L4 completion or architectural progress.",
+    "runtime_substrate_delta": 0,
+    "total_inventory_sites_after": 312,
+    "total_inventory_sites_before": 312,
+    "tracked_host_markers_after": 5,
+    "tracked_host_markers_before": 5
+  },
+  "issues_encountered": [
+    {
+      "diagnosis": "Reproduced import-name collision from explicit-node collection; see supplemental_import_diagnosis for package identity trace and full-file counterfactual control.",
+      "exit_code": 1,
+      "kind": "REDUCED_REPRODUCTION_COLLECTION_ERROR",
+      "limit": "No claim that the old producer-refusal failure was reproduced, diagnosed or explained by the later passes.",
+      "run": "baseline_foreign_proof_reproduction",
+      "summary": "59 passed and one collection error: tests/docs/test_doc_freshness.py could not import tools.docs. This reduced selector set omitted test_pr_disposition_executor.py and selected only one Phase B node. The required full command was not changed and subsequently passed twice."
+    },
+    {
+      "kind": "ADMISSION_STARTUP_NONZERO",
+      "summary": "Admission guard exit 1: docs registry/placement and local startup-state checks failed. Attestation exit 0 is a distinct result. No affected startup surfaces were changed."
+    }
+  ],
+  "limits": [
+    "Native independent review, staging, packet predicate, indicator, Step5e, full prepush, CI, protected merge, PRIMARY sync and lane release remain outer-executor owned and unperformed here.",
+    "Historical producer refusal cause remains unproved. A passing present-day reproduction does not explain the historical failure.",
+    "All six original PRs remain OPEN at admission; this implementer grants no public lifecycle authority."
+  ],
+  "native_outputs_pending": {
+    "growth_cap": {
+      "limit": "No cap edit or native Step5e execution here. Outer executor must validate actual generated indexed postimage or native no-op applicability.",
+      "path": "mu/tests/docs/test_growth_caps.py",
+      "sha256": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+      "worktree_equals_HEAD_and_index": true
+    },
+    "indicator": {
+      "owner": "Outer native collector/stager; no indicator copied or hand-authored by this implementer.",
+      "path": "reports/l4_wave_indicators/workingrcx-fleet-pr-coverage-r5-2026-10-19.json"
+    },
+    "packet": {
+      "normative_body_status_lock_untouched": true,
+      "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md",
+      "sha256": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648"
+    },
+    "pending": [
+      "Canonical tracker-note restoration by outer Phase B",
+      "Native packet predicate on actual locked/staged candidate",
+      "Actual indexed standing-report handoff",
+      "Independent native semantic/fixture review",
+      "Full native prepush and current-head CI",
+      "Protected merge and separately verified PRIMARY synchronization",
+      "Lane release",
+      "Later public PR1330 lifecycle plan/apply/verify; no source retirement"
+    ]
+  },
+  "original_assertion_inspection": {
+    "assertion_contract": "Original selection/argv/cwd/environment/finite-budget/failure guarantees remain. Timeout None/None is retained among strengthened output cases; Step8b asserts exact JSON-transported streams and no commit on failure.",
+    "method": "Read actual original diff and complete current assertion bodies; AST-literal parameter-row subset comparison against exact original Git blob. No execution of budget/recovery suites outside declared Phase B gates.",
+    "parameter_rows": [
+      {
+        "all_original_rows_present": true,
+        "current_rows": 42,
+        "original_rows": 24,
+        "parameters": "selectors, caller_timeout, expected_budget",
+        "test": "test_targeted_pytest_budget_preserves_selectors_and_caller_timeout"
+      },
+      {
+        "all_original_rows_present": true,
+        "current_rows": 6,
+        "original_rows": 4,
+        "parameters": "selectors, expected_budget",
+        "test": "test_targeted_pytest_budget_keeps_nonzero_failure_output"
+      },
+      {
+        "all_original_rows_present": true,
+        "current_rows": 5,
+        "original_rows": 5,
+        "parameters": "returncode, stdout, stderr",
+        "test": "test_targeted_pytest_budget_keeps_nonzero_failure_output"
+      },
+      {
+        "all_original_rows_present": true,
+        "current_rows": 11,
+        "original_rows": 7,
+        "parameters": "selectors, caller_timeout, expected_budget",
+        "test": "test_targeted_pytest_timeout_reports_selected_budget"
+      }
+    ],
+    "source_refs": "supporting_references and cited_whole_files bind exact inspected bytes."
+  },
+  "original_head": "b75972546901e3a09e08047f1a10c7684bf875bd",
+  "post_gate_source_changes": [],
+  "role_and_source_boundary": {
+    "codex_defaults": {
+      "display_name": "Codex GPT-6 Astra max",
+      "model": "gpt-6-astra",
+      "reasoning_effort": "max"
+    },
+    "executor_config_sha256": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+    "no_production_python_edits": true,
+    "role_agents": {
+      "implementer": "codex",
+      "reviewer": "codex"
+    },
+    "source_base": "b75972546901e3a09e08047f1a10c7684bf875bd",
+    "source_base_unchanged": true
+  },
+  "runs": [
+    {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py 'mu/tests/tools/test_phase_b_executor.py::test_native_late_direct_consumer_revalidates_before_mutation[proof-from-another-launch]' --tb=short",
+      "elapsed_seconds": 4.625714291119948,
+      "environment_pins": {
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1"
+      },
+      "exit_code": 1,
+      "harness_budget_seconds": 180,
+      "label": "baseline_foreign_proof_reproduction",
+      "pytest_version": "9.0.2",
+      "source_sha256_after": {
+        "CHANGELOG.md": "e40ddbac5d5b53a5019b770999a258f98502bc8bb71c26890b5771fd924dfbbe",
+        "STATUS.md": "b3adac41f1ddb8506b123f517455017b5c2cc8ca4125ba51d9c15b7078966ce1",
+        "TASKS.md": "c9c4ba1e1f8c8392dba9c9e22c0f0e442b11242e26dd808160c7d86f50e2f57b",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "e833cebdd07104a9be8d2db9bd48dea8dfd9403a61155f6eaf838cf47865682d",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648"
+      },
+      "source_sha256_before": {
+        "CHANGELOG.md": "e40ddbac5d5b53a5019b770999a258f98502bc8bb71c26890b5771fd924dfbbe",
+        "STATUS.md": "b3adac41f1ddb8506b123f517455017b5c2cc8ca4125ba51d9c15b7078966ce1",
+        "TASKS.md": "c9c4ba1e1f8c8392dba9c9e22c0f0e442b11242e26dd808160c7d86f50e2f57b",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "e833cebdd07104a9be8d2db9bd48dea8dfd9403a61155f6eaf838cf47865682d",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648"
+      },
+      "sources_unchanged": true,
+      "started_utc": "2026-10-19T16:44:42.199971+00:00",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "bringing up nodes...\nbringing up nodes...\n\n...........................................................              [100%]\n==================================== ERRORS ====================================\n______________ ERROR collecting tests/docs/test_doc_freshness.py _______________\nImportError while importing test module '/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/tests/docs/test_doc_freshness.py'.\nHint: make sure your test modules/packages have valid Python names.\nTraceback:\ntests/docs/test_doc_freshness.py:37: in <module>\n    from tools.docs.shared_doc_config import (\nE   ModuleNotFoundError: No module named 'tools.docs'\n=========================== short test summary info ============================\nERROR tests/docs/test_doc_freshness.py - ImportError while importing test mod...\n59 passed, 1 error in 4.22s\n",
+      "stdout_sha256": "92222031701d8ea9ef9c078d7228040789be72c50eb0b1223d54fd12e3e0d900",
+      "timed_out": false,
+      "xdist_version": "3.8.0"
+    },
+    {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_phase_b_executor.py::test_native_late_direct_consumer_revalidates_before_mutation mu/tests/tools/test_phase_b_executor.py::test_foreign_proof_setup_failure_is_visible_and_cleans_real_child --tb=short",
+      "elapsed_seconds": 16.538574333069846,
+      "environment_pins": {
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1"
+      },
+      "exit_code": 0,
+      "harness_budget_seconds": 180,
+      "label": "fixture_all_adjacent_faults_and_real_setup_negatives",
+      "pytest_version": "9.0.2",
+      "source_sha256_after": {
+        "CHANGELOG.md": "e40ddbac5d5b53a5019b770999a258f98502bc8bb71c26890b5771fd924dfbbe",
+        "STATUS.md": "b3adac41f1ddb8506b123f517455017b5c2cc8ca4125ba51d9c15b7078966ce1",
+        "TASKS.md": "c9c4ba1e1f8c8392dba9c9e22c0f0e442b11242e26dd808160c7d86f50e2f57b",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648"
+      },
+      "source_sha256_before": {
+        "CHANGELOG.md": "e40ddbac5d5b53a5019b770999a258f98502bc8bb71c26890b5771fd924dfbbe",
+        "STATUS.md": "b3adac41f1ddb8506b123f517455017b5c2cc8ca4125ba51d9c15b7078966ce1",
+        "TASKS.md": "c9c4ba1e1f8c8392dba9c9e22c0f0e442b11242e26dd808160c7d86f50e2f57b",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648"
+      },
+      "sources_unchanged": true,
+      "started_utc": "2026-10-19T16:47:00.910476+00:00",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "bringing up nodes...\nbringing up nodes...\n\n..........................                                               [100%]\n26 passed in 16.18s\n",
+      "stdout_sha256": "3760755810044c0578b5ea2eebb5ba65a630621ef5c84af2501e6fcb054086e3",
+      "timed_out": false,
+      "xdist_version": "3.8.0"
+    },
+    {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -c 'from pathlib import Path\nimport base64, hashlib, json, re, subprocess, sys\nroot=Path.cwd(); wave='\"'\"'workingrcx-fleet-pr-coverage-r5-2026-10-19'\"'\"'\nsys.path.insert(0,str(root/'\"'\"'mu/tools/executors'\"'\"'))\nimport pr_disposition_executor as disposition\nimport phase_b_executor as phase_b\nm=disposition.validate_lifecycle_manifest(root/f'\"'\"'reports/control_plane/{wave}_coverage.json'\"'\"')\nerrors=disposition._lifecycle_coverage_errors(root,m,m['\"'\"'targets'\"'\"'][0])\nassert errors==[], errors\np=root/f'\"'\"'reports/deferred/non_blocking/{wave}_row40_advisories.md'\"'\"'\nbefore=p.read_bytes()\nfindings, packet=phase_b._record_non_blocking_findings(root,wave,[],[])\nassert findings==[] and packet is None and p.read_bytes()==before\ntasks=(root/'\"'\"'TASKS.md'\"'\"').read_bytes()\ne=json.loads((root/f'\"'\"'reports/control_plane/{wave}_implementation_evidence.json'\"'\"').read_text())\nra=tasks[tasks.index(b'\"'\"'## Ra (Resolved / Merged)'\"'\"'):tasks.index(b'\"'\"'## Boundary Question'\"'\"')]\nassert hashlib.sha256(ra).hexdigest()==e['\"'\"'tracker_reconciliation'\"'\"']['\"'\"'candidate_ra_sha256'\"'\"']\nrestore=json.loads((root/'\"'\"'.agent_bus-fleet-pr-coverage-r5-20261019/executors/phase_b_launch_tracker_restore_v1.json'\"'\"').read_text())\nassert all(tasks.count(base64.b64decode(restore[k]))==1 for k in ('\"'\"'left_anchor_b64'\"'\"','\"'\"'right_anchor_b64'\"'\"'))\nassert base64.b64decode(restore['\"'\"'note_b64'\"'\"']) not in tasks\nassert len(set(re.findall(rb'\"'\"'\\[[A-Z][A-Z0-9-]+\\]'\"'\"',tasks)))==268\nassert len(re.findall(rb'\"'\"'^\\d+\\. \\*\\*\\[[A-Za-z0-9-]+\\]'\"'\"',tasks.split(b'\"'\"'## PARKED PIPELINE BACKLOG'\"'\"')[0],re.M))==44\ncap=root/'\"'\"'mu/tests/docs/test_growth_caps.py'\"'\"'\nassert cap.read_bytes()==subprocess.check_output(['\"'\"'git'\"'\"','\"'\"'show'\"'\"','\"'\"'HEAD:mu/tests/docs/test_growth_caps.py'\"'\"'])\nassert cap.read_bytes()==subprocess.check_output(['\"'\"'git'\"'\"','\"'\"'show'\"'\"','\"'\"':mu/tests/docs/test_growth_caps.py'\"'\"'])\nprint(json.dumps(dict(native_manifest_shape='\"'\"'PASS'\"'\"',native_per_path_hunk_coverage_errors=errors,paths=7,hunks=14,\nstanding_cleanup='\"'\"'PASS'\"'\"',standing_sha256=hashlib.sha256(before).hexdigest(),native_cleanup_call='\"'\"'_record_non_blocking_findings(repo_root, wave_id, [], [])'\"'\"',\nactual_index_contains_standing_report=bool(subprocess.check_output(['\"'\"'git'\"'\"','\"'\"'ls-files'\"'\"','\"'\"'--stage'\"'\"','\"'\"'--'\"'\"',str(p.relative_to(root))])),\nnative_Ra_and_restore_anchors='\"'\"'PASS'\"'\"',unique_ids=268,ordered_owners=44,clean_growth_cap_sha256=hashlib.sha256(cap.read_bytes()).hexdigest(),\nlimits='\"'\"'Outer native staging, packet predicate, Step5e applicability and actual indexed handoff remain pending. Mechanical validation grants no independent semantic approval.'\"'\"'),indent=2))\n'",
+      "elapsed_seconds": 1.4485037089325488,
+      "environment_pins": {
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1"
+      },
+      "exit_code": 0,
+      "harness_budget_seconds": 120,
+      "label": "native_manifest_tracker_and_standing_cleanup",
+      "pytest_version": "9.0.2",
+      "source_sha256_after": {
+        "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+        "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+        "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+      },
+      "source_sha256_before": {
+        "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+        "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+        "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+      },
+      "sources_unchanged": true,
+      "started_utc": "2026-10-19T16:52:01.051426+00:00",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "{\n  \"native_manifest_shape\": \"PASS\",\n  \"native_per_path_hunk_coverage_errors\": [],\n  \"paths\": 7,\n  \"hunks\": 14,\n  \"standing_cleanup\": \"PASS\",\n  \"standing_sha256\": \"6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999\",\n  \"native_cleanup_call\": \"_record_non_blocking_findings(repo_root, wave_id, [], [])\",\n  \"actual_index_contains_standing_report\": false,\n  \"native_Ra_and_restore_anchors\": \"PASS\",\n  \"unique_ids\": 268,\n  \"ordered_owners\": 44,\n  \"clean_growth_cap_sha256\": \"6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c\",\n  \"limits\": \"Outer native staging, packet predicate, Step5e applicability and actual indexed handoff remain pending. Mechanical validation grants no independent semantic approval.\"\n}\n",
+      "stdout_sha256": "f94ada9ad5aabdfc07b3833be16a79578d8f53295d90e25a097b3a385ed66bde",
+      "timed_out": false,
+      "xdist_version": "3.8.0"
+    },
+    {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_phase_b_executor.py --tb=short",
+      "elapsed_seconds": 184.67390149994753,
+      "environment_pins": {
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1"
+      },
+      "exit_code": 0,
+      "harness_budget_seconds": 900,
+      "label": "declared_five_module_gate",
+      "pytest_version": "9.0.2",
+      "source_sha256_after": {
+        "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+        "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+        "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+      },
+      "source_sha256_before": {
+        "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+        "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+        "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+      },
+      "sources_unchanged": true,
+      "started_utc": "2026-10-19T16:52:07.986667+00:00",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [  4%]\n........................................................................ [  9%]\n........................................................................ [ 13%]\n........................................................................ [ 18%]\n........................................................................ [ 22%]\n........................................................................ [ 27%]\n........................................................................ [ 32%]\n........................................................................ [ 36%]\n........................................................................ [ 41%]\n........................................................................ [ 45%]\n........................................................................ [ 50%]\n........................................................................ [ 55%]\n........................................................................ [ 59%]\n........................................................................ [ 64%]\n........................................................................ [ 68%]\n........................................................................ [ 73%]\n........................................................................ [ 78%]\n........................................................................ [ 82%]\n........................................................................ [ 87%]\n........................................................................ [ 91%]\n........................................................................ [ 96%]\n........................................................                 [100%]\n1568 passed in 184.22s (0:03:04)\n",
+      "stdout_sha256": "7a6734933161802719a57d9d97b5672e3764c3056dd49709e57abe77d430067b",
+      "timed_out": false,
+      "xdist_version": "3.8.0"
+    },
+    {
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_phase_b_executor.py --tb=short",
+      "elapsed_seconds": 175.72126937494613,
+      "environment_pins": {
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1"
+      },
+      "exit_code": 0,
+      "harness_budget_seconds": 900,
+      "label": "independent_identical_five_module_sweep",
+      "pytest_version": "9.0.2",
+      "source_sha256_after": {
+        "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+        "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+        "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+      },
+      "source_sha256_before": {
+        "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+        "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+        "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+        "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+        "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+        "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+        "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+        "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+        "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+        "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+        "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+        "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+        "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+        "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+        "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+        "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+        "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+        "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+        "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+      },
+      "sources_unchanged": true,
+      "started_utc": "2026-10-19T16:55:19.113367+00:00",
+      "stderr": "",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout": "bringing up nodes...\nbringing up nodes...\n\n........................................................................ [  4%]\n........................................................................ [  9%]\n........................................................................ [ 13%]\n........................................................................ [ 18%]\n........................................................................ [ 22%]\n........................................................................ [ 27%]\n........................................................................ [ 32%]\n........................................................................ [ 36%]\n........................................................................ [ 41%]\n........................................................................ [ 45%]\n........................................................................ [ 50%]\n........................................................................ [ 55%]\n........................................................................ [ 59%]\n........................................................................ [ 64%]\n........................................................................ [ 68%]\n........................................................................ [ 73%]\n........................................................................ [ 78%]\n........................................................................ [ 82%]\n........................................................................ [ 87%]\n........................................................................ [ 91%]\n........................................................................ [ 96%]\n........................................................                 [100%]\n1568 passed in 175.29s (0:02:55)\n",
+      "stdout_sha256": "18950cf2b5a95395a746cbf8430a2848f96442074eab4c74f5e5fcb5d9016628",
+      "timed_out": false,
+      "xdist_version": "3.8.0"
+    }
+  ],
+  "schema_version": 1,
+  "stage": "Phase B implementation; local validation only",
+  "standing_advisory_delivery": {
+    "actual_indexed_handoff": "PENDING outer native staging; report is currently untracked. This is not a staged-delivery claim.",
+    "actual_native_empty_findings_cleanup_survived": true,
+    "optional_bridge_findings_file_created": false,
+    "path": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md",
+    "required_owner": "TASKS.md row40 [FLEET-NATIVE-LIFECYCLE-PREVENTION]",
+    "sha256": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+  },
+  "status": "PHASE_B_LOCAL_GATE_AND_SWEEP_PASSED_NATIVE_REVIEW_AND_LANDING_PENDING",
+  "supplemental_import_diagnosis": {
+    "conclusion": {
+      "causal_control": "In a separate process, replacing only the explicit Phase B node selector with its full file in the same serial collection probe loads the repository tools/__init__.py package and collects all 1521 selected tests without errors. test_pr_disposition_executor.py is absent from both controls, so its omission alone does not explain the failure.",
+      "cause": "Explicit Phase B node selection causes pytest importlib collection to register mu/tests/tools/__init__.py under sys.modules[tools] before the docs module imports tools.docs.shared_doc_config. The cached package points at the test directory, which has no docs subpackage. Moving the repo root to sys.path[0] in test_doc_freshness.py does not replace that cached package.",
+      "evidence": {
+        "failing_binding": {
+          "function": "_import_module_using_spec",
+          "line": 733,
+          "module_name": "tools",
+          "module_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/mu/tests/tools/__init__.py",
+          "source": "/Users/jeffabrams/Library/Python/3.13/lib/python/site-packages/_pytest/pathlib.py",
+          "tools": {
+            "file": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/mu/tests/tools/__init__.py",
+            "path": [
+              "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/mu/tests/tools"
+            ]
+          }
+        },
+        "failing_collected": 59,
+        "failing_collection_exit_code": 2,
+        "failing_docs_import": "tests/docs/test_doc_freshness.py:37",
+        "full_file_binding": {
+          "function": "__getitem__",
+          "line": 84,
+          "module_name": null,
+          "module_path": "",
+          "source": "/Users/jeffabrams/Library/Python/3.13/lib/python/site-packages/_pytest/stash.py",
+          "tools": {
+            "file": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/tools/__init__.py",
+            "path": [
+              "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/tools"
+            ]
+          }
+        },
+        "full_file_collected": 1521,
+        "full_file_collection_exit_code": 0
+      },
+      "limit": "Transparent serial collection diagnostics, not replacement full-gate execution. Original xdist baseline failure and both successful exact full xdist gates remain in runs. No import implementation or selector in the locked full command was changed. This diagnosis has no bearing on the unproved historical R4 process-observation refusal."
+    },
+    "purpose": "Read-only collection tracing requested by the stop hook. The transparent profiler observes tools package identity without replacing import behavior. These serial collection controls do not replace the two exact full xdist gates.",
+    "results": [
+      {
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -c 'import contextlib,io,json,sys\nimport pytest\nevents=[]; last=None\ndef binding():\n    m=sys.modules.get(\"tools\")\n    return None if m is None else {\"file\":getattr(m,\"__file__\",None),\"path\":list(getattr(m,\"__path__\",[]))}\ndef profile(frame,event,arg):\n    global last\n    if event!=\"return\" or \"/_pytest/\" not in frame.f_code.co_filename:\n        return\n    current=binding()\n    if current!=last:\n        events.append({\"function\":frame.f_code.co_name,\"source\":frame.f_code.co_filename,\"line\":frame.f_lineno,\n                       \"module_name\":frame.f_locals.get(\"module_name\"),\"module_path\":str(frame.f_locals.get(\"module_path\",\"\")),\"tools\":current})\n        last=current\nclass Probe:\n    def __init__(self):self.failures=[];self.collected=None\n    def pytest_collectreport(self,report):\n        if report.failed:self.failures.append({\"nodeid\":report.nodeid,\"tools\":binding(),\"error\":str(report.longrepr)})\n    def pytest_collection_finish(self,session):self.collected=len(session.items)\nprobe=Probe();out=io.StringIO();err=io.StringIO()\nsys.setprofile(profile)\nwith contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):\n    code=pytest.main(json.loads(sys.argv[1]),plugins=[probe])\nsys.setprofile(None)\nprint(json.dumps({\"exit_code\":int(code),\"collected\":probe.collected,\"events\":events,\"failures\":probe.failures,\n                  \"stdout\":out.getvalue(),\"stderr\":err.getvalue()},indent=2))\n' '[\"-qq\", \"-p\", \"no:cacheprovider\", \"--import-mode=importlib\", \"-m\", \"not slow and not fuzzer\", \"tests/docs/test_doc_freshness.py\", \"tests/docs/test_status_tasks_consistency.py\", \"tests/docs/test_l4_current_state_truth.py\", \"mu/tests/tools/test_phase_b_executor.py::test_native_late_direct_consumer_revalidates_before_mutation[proof-from-another-launch]\", \"--collect-only\", \"--tb=short\"]'",
+        "driver_exit_code": 0,
+        "elapsed_seconds": 2.7274678330868483,
+        "label": "explicit_node_collection",
+        "source_sha256_after": {
+          "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+          "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+          "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+          "conftest.py": "b1927d777a5fabfd32ed05cd01e357292ee0aebddf8234516b7c007ebb7dbe17",
+          "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+          "mu/tests/docs/conftest.py": "4d62f403f8709807293cb6b3d110eff9d56d877228d58064c017d36e03f61a42",
+          "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+          "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+          "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+          "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+          "mu/tests/tools/__init__.py": "3cf61e7d0cd96ce46e55c6a9bc3e713a23bc729d64cc577e959db005d1e843f4",
+          "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+          "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+          "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+          "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+          "mu/tools/__init__.py": "0375640c4481c1bbacc8162656c286606bcd7d70913d4b6850040d738b0f5b91",
+          "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+          "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+          "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+          "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+          "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+          "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+          "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+          "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+          "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+          "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+          "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+        },
+        "source_sha256_before": {
+          "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+          "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+          "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+          "conftest.py": "b1927d777a5fabfd32ed05cd01e357292ee0aebddf8234516b7c007ebb7dbe17",
+          "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+          "mu/tests/docs/conftest.py": "4d62f403f8709807293cb6b3d110eff9d56d877228d58064c017d36e03f61a42",
+          "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+          "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+          "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+          "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+          "mu/tests/tools/__init__.py": "3cf61e7d0cd96ce46e55c6a9bc3e713a23bc729d64cc577e959db005d1e843f4",
+          "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+          "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+          "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+          "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+          "mu/tools/__init__.py": "0375640c4481c1bbacc8162656c286606bcd7d70913d4b6850040d738b0f5b91",
+          "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+          "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+          "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+          "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+          "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+          "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+          "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+          "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+          "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+          "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+          "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+        },
+        "sources_unchanged": true,
+        "started_utc": "2026-10-19T17:03:40.647514+00:00",
+        "stderr": "",
+        "stdout": "{\n  \"exit_code\": 2,\n  \"collected\": 59,\n  \"events\": [\n    {\n      \"function\": \"_import_module_using_spec\",\n      \"source\": \"/Users/jeffabrams/Library/Python/3.13/lib/python/site-packages/_pytest/pathlib.py\",\n      \"line\": 733,\n      \"module_name\": \"tools\",\n      \"module_path\": \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/mu/tests/tools/__init__.py\",\n      \"tools\": {\n        \"file\": \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/mu/tests/tools/__init__.py\",\n        \"path\": [\n          \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/mu/tests/tools\"\n        ]\n      }\n    }\n  ],\n  \"failures\": [\n    {\n      \"nodeid\": \"tests/docs/test_doc_freshness.py\",\n      \"tools\": {\n        \"file\": \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/mu/tests/tools/__init__.py\",\n        \"path\": [\n          \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/mu/tests/tools\"\n        ]\n      },\n      \"error\": \"ImportError while importing test module '/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/tests/docs/test_doc_freshness.py'.\\nHint: make sure your test modules/packages have valid Python names.\\nTraceback:\\ntests/docs/test_doc_freshness.py:37: in <module>\\n    from tools.docs.shared_doc_config import (\\nE   ModuleNotFoundError: No module named 'tools.docs'\"\n    }\n  ],\n  \"stdout\": \"mu/tests/tools/test_phase_b_executor.py: 1\\ntests/docs/test_l4_current_state_truth.py: 8\\ntests/docs/test_status_tasks_consistency.py: 50\\n\\n==================================== ERRORS ====================================\\n______________ ERROR collecting tests/docs/test_doc_freshness.py _______________\\nImportError while importing test module '/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/tests/docs/test_doc_freshness.py'.\\nHint: make sure your test modules/packages have valid Python names.\\nTraceback:\\ntests/docs/test_doc_freshness.py:37: in <module>\\n    from tools.docs.shared_doc_config import (\\nE   ModuleNotFoundError: No module named 'tools.docs'\\n=========================== short test summary info ============================\\nERROR tests/docs/test_doc_freshness.py\\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\\n\",\n  \"stderr\": \"\"\n}\n"
+      },
+      {
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -c 'import contextlib,io,json,sys\nimport pytest\nevents=[]; last=None\ndef binding():\n    m=sys.modules.get(\"tools\")\n    return None if m is None else {\"file\":getattr(m,\"__file__\",None),\"path\":list(getattr(m,\"__path__\",[]))}\ndef profile(frame,event,arg):\n    global last\n    if event!=\"return\" or \"/_pytest/\" not in frame.f_code.co_filename:\n        return\n    current=binding()\n    if current!=last:\n        events.append({\"function\":frame.f_code.co_name,\"source\":frame.f_code.co_filename,\"line\":frame.f_lineno,\n                       \"module_name\":frame.f_locals.get(\"module_name\"),\"module_path\":str(frame.f_locals.get(\"module_path\",\"\")),\"tools\":current})\n        last=current\nclass Probe:\n    def __init__(self):self.failures=[];self.collected=None\n    def pytest_collectreport(self,report):\n        if report.failed:self.failures.append({\"nodeid\":report.nodeid,\"tools\":binding(),\"error\":str(report.longrepr)})\n    def pytest_collection_finish(self,session):self.collected=len(session.items)\nprobe=Probe();out=io.StringIO();err=io.StringIO()\nsys.setprofile(profile)\nwith contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):\n    code=pytest.main(json.loads(sys.argv[1]),plugins=[probe])\nsys.setprofile(None)\nprint(json.dumps({\"exit_code\":int(code),\"collected\":probe.collected,\"events\":events,\"failures\":probe.failures,\n                  \"stdout\":out.getvalue(),\"stderr\":err.getvalue()},indent=2))\n' '[\"-qq\", \"-p\", \"no:cacheprovider\", \"--import-mode=importlib\", \"-m\", \"not slow and not fuzzer\", \"tests/docs/test_doc_freshness.py\", \"tests/docs/test_status_tasks_consistency.py\", \"tests/docs/test_l4_current_state_truth.py\", \"mu/tests/tools/test_phase_b_executor.py\", \"--collect-only\", \"--tb=short\"]'",
+        "driver_exit_code": 0,
+        "elapsed_seconds": 2.742455790983513,
+        "label": "full_file_collection",
+        "source_sha256_after": {
+          "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+          "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+          "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+          "conftest.py": "b1927d777a5fabfd32ed05cd01e357292ee0aebddf8234516b7c007ebb7dbe17",
+          "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+          "mu/tests/docs/conftest.py": "4d62f403f8709807293cb6b3d110eff9d56d877228d58064c017d36e03f61a42",
+          "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+          "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+          "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+          "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+          "mu/tests/tools/__init__.py": "3cf61e7d0cd96ce46e55c6a9bc3e713a23bc729d64cc577e959db005d1e843f4",
+          "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+          "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+          "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+          "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+          "mu/tools/__init__.py": "0375640c4481c1bbacc8162656c286606bcd7d70913d4b6850040d738b0f5b91",
+          "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+          "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+          "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+          "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+          "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+          "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+          "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+          "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+          "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+          "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+          "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+        },
+        "source_sha256_before": {
+          "CHANGELOG.md": "bbcd2b87d12240cd4858b0bbdcb86da88248d68e11032257e940289544910518",
+          "STATUS.md": "440f74f2aa8f3fdc082ee3e893964eaf3655f77a47fc6d41f9d5bc6f8fae0e0f",
+          "TASKS.md": "d32ac652ceb68e2dccc904235a19459d75151ceb388692b717af6b702f00505f",
+          "conftest.py": "b1927d777a5fabfd32ed05cd01e357292ee0aebddf8234516b7c007ebb7dbe17",
+          "mu/tests/conftest.py": "52b46080935e24613c3e98ad36717de66cc925ad9ce1d59151a0fc194f78c9f5",
+          "mu/tests/docs/conftest.py": "4d62f403f8709807293cb6b3d110eff9d56d877228d58064c017d36e03f61a42",
+          "mu/tests/docs/test_doc_freshness.py": "706b78917d40efa653a1f605cb9beb0623bb46b44a27108331012617eb90d5f9",
+          "mu/tests/docs/test_growth_caps.py": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+          "mu/tests/docs/test_l4_current_state_truth.py": "d5b25108fd6f27960aa18f24a99f7c6c03c9f9288d4f8c40cecd3140e58cec6c",
+          "mu/tests/docs/test_status_tasks_consistency.py": "88c070f2606a0da9aecdc15fcecca5db1cd73941f625084ee6a7219330472251",
+          "mu/tests/tools/__init__.py": "3cf61e7d0cd96ce46e55c6a9bc3e713a23bc729d64cc577e959db005d1e843f4",
+          "mu/tests/tools/module_loader.py": "6f9c077959f79e6855470f3e08d62867ea3026cf2b8fdcc846680973d1ec0817",
+          "mu/tests/tools/test_executor_common.py": "22a876ea047aed4f5f7e6f1fbef0b17731e085d2cbca911a6066d2c9f416a45a",
+          "mu/tests/tools/test_phase_b_executor.py": "c266cdfdfdd1ab36106a2f208981240988fb9c4f12720f938399166af3c9da00",
+          "mu/tests/tools/test_pr_disposition_executor.py": "d53f4fa6d549fca463455fb9b332f042354fb2060860f92b1a4e923f8fdec208",
+          "mu/tools/__init__.py": "0375640c4481c1bbacc8162656c286606bcd7d70913d4b6850040d738b0f5b91",
+          "mu/tools/executors/commit_executor.py": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+          "mu/tools/executors/executor_common.py": "53308bd811b8ee53148b09671e7af8592ae3dc0d6d2b00d954ea40812b5eceb4",
+          "mu/tools/executors/executor_config.json": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+          "mu/tools/executors/executor_dispatch.py": "bd9028b6f891fddda78f8a48d6e47193a7adaab9cafb2630edfc232a3ab80d50",
+          "mu/tools/executors/phase_b_executor.py": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+          "mu/tools/executors/phase_b_implementer.py": "7979db416beade3c54e1ec1d9e83b7b19dd801b26297eda3f182ee06cd097eba",
+          "mu/tools/executors/pr_disposition_executor.py": "7f3aed814fbee3cdb926dcc8bc3f9715c7fe643bab4f76a98bf7e8a101b5a8da",
+          "mu/tools/executors/recovery_gate.py": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+          "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md": "1a2a6b58e586595b7a65b390bda61e83498941ec38aa77a5010aa3d2107ee648",
+          "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json": "222922ad66959283a722dd86d783c0231aafc05b3881537862664ae1fc793417",
+          "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md": "6f33c625d003f9471dae7584069c3b1c7cbfbbcc7b1146d056c248d3d4cf0999"
+        },
+        "sources_unchanged": true,
+        "started_utc": "2026-10-19T17:03:43.378094+00:00",
+        "stderr": "",
+        "stdout": "{\n  \"exit_code\": 0,\n  \"collected\": 1521,\n  \"events\": [\n    {\n      \"function\": \"__getitem__\",\n      \"source\": \"/Users/jeffabrams/Library/Python/3.13/lib/python/site-packages/_pytest/stash.py\",\n      \"line\": 84,\n      \"module_name\": null,\n      \"module_path\": \"\",\n      \"tools\": {\n        \"file\": \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/tools/__init__.py\",\n        \"path\": [\n          \"/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r5-20261019/tools\"\n        ]\n      }\n    }\n  ],\n  \"failures\": [],\n  \"stdout\": \"mu/tests/tools/test_phase_b_executor.py: 1421\\ntests/docs/test_doc_freshness.py: 42\\ntests/docs/test_l4_current_state_truth.py: 8\\ntests/docs/test_status_tasks_consistency.py: 50\\n\\n\",\n  \"stderr\": \"\"\n}\n"
+      }
+    ]
+  },
+  "supporting_references": [
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 230,
+      "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+      "start": 112
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 267,
+      "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "sha256": "f4c8635ba78e095bb18427fc8a86f1f4169492ba3581baa49711dd1694a8d611",
+      "start": 112
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 320,
+      "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "sha256": "ffa0c1c8e8d182cc9ac3cf6e46dd55a87896790e4a94201550c010dfd87931fd",
+      "start": 112
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 320,
+      "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+      "start": 233
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 320,
+      "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "sha256": "805c926e27cf1112e8c83d635341499db731e7e78d3776eae19f33088cb23b80",
+      "start": 270
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 423,
+      "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "sha256": "b9964ad5537d8a7074c424d9e26382697bd6b1b6fe7ba80de9d51b16cfe8050e",
+      "start": 342
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 9185,
+      "path": "mu/tests/tools/test_recovery_gate.py",
+      "sha256": "f9295f4acddd31e13c88d8f07f63664d84cc43c69bf4be37e369648e1a03747c",
+      "start": 9124
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 4897,
+      "path": "mu/tools/executors/commit_executor.py",
+      "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+      "start": 4833
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 4897,
+      "path": "mu/tools/executors/commit_executor.py",
+      "sha256": "314d22a43ac5eeb20c3aa7d8748147436c5d43c2e6f5192da0fd91b19915837b",
+      "start": 4851
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 4932,
+      "path": "mu/tools/executors/commit_executor.py",
+      "sha256": "e0f816e3209a48ab707099a03b2febf177154774b1e807f9c2e0942b445f61b7",
+      "start": 4899
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 4932,
+      "path": "mu/tools/executors/commit_executor.py",
+      "sha256": "2e285e869ef09d7a9e8bf40a586da0c2c9056eac6af59932a2e49244f9b238c8",
+      "start": 4915
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 22583,
+      "path": "mu/tools/executors/commit_executor.py",
+      "sha256": "6dca66d8eb17eca79aece0f7ffd87f22ea7649ddf6282f10e59a8eb2bcaf884d",
+      "start": 22549
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 775,
+      "path": "mu/tools/executors/phase_b_executor.py",
+      "sha256": "aab8139d26e219ea4b30474de31425d8200c97ba5861aeeb1fa94bc06693910b",
+      "start": 763
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 873,
+      "path": "mu/tools/executors/phase_b_executor.py",
+      "sha256": "218f521d70dd879c122939d424a7eff5c6a0e84e2fff67d0485c483f884485dd",
+      "start": 798
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 3912,
+      "path": "mu/tools/executors/pr_disposition_executor.py",
+      "sha256": "1786e969fcd1cdf70788b274af9e881d0f732ba5227b13b63eab14ddd4a36225",
+      "start": 3841
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 3931,
+      "path": "mu/tools/executors/pr_disposition_executor.py",
+      "sha256": "95c235192888fc43e98f477936707772e77aa99ad20dcdaa1a2367af9ac29e4b",
+      "start": 3915
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 4157,
+      "path": "mu/tools/executors/pr_disposition_executor.py",
+      "sha256": "57611a1d00336cd2dea44d33df5a301bbfd1a98f1dd3ffae33950f9aecdae106",
+      "start": 4083
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 8951,
+      "path": "mu/tools/executors/recovery_gate.py",
+      "sha256": "5673c05a2ba33cf4289d42d96280f43cdf5dc84d63479455d9334b44721bbc41",
+      "start": 8895
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 9185,
+      "path": "mu/tools/executors/recovery_gate.py",
+      "sha256": "0543a235b859aca358402edb759419b35a9709d461c9959b2933ad7ca373c95d",
+      "start": 9145
+    },
+    {
+      "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "end": 10055,
+      "path": "mu/tools/executors/recovery_gate.py",
+      "sha256": "4f903c3de2bb2509715a16b3e73cfe336791d199cc9816450f469d034fecd420",
+      "start": 9940
+    }
+  ],
+  "tracker_reconciliation": {
+    "candidate_ra_preserved": true,
+    "candidate_ra_sha256": "f497e6ab95f0c99599d1f8e524bf704c4e0e4d951e97bddaa6d649777057f5c8",
+    "method": "Applied six captured-PRIMARY diff hunks outside candidate Ra; no whole-file copy or native note insertion.",
+    "native_note_status": "removed",
+    "native_restore_anchor_counts": [
+      1,
+      1
+    ],
+    "ordered_owners": 44,
+    "outer_restore_pending": true,
+    "primary_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-coverage-r5-admission/PRIMARY-TASKS.md",
+    "primary_sha256": "730ee54dbfc88492e4b79a0eaf09d5586459eaaea560ecd429afed914044c918",
+    "splices": [
+      {
+        "candidate_lines": [
+          18,
+          18
+        ],
+        "kind": "replace",
+        "primary_lines": [
+          18,
+          194
+        ],
+        "sha256": "c7990a630b28fcbf52655cddbe20d9c0715a3d4994b2e2ea94aa496837c2019e"
+      },
+      {
+        "candidate_lines": [
+          179,
+          178
+        ],
+        "kind": "insert",
+        "primary_lines": [
+          355,
+          662
+        ],
+        "sha256": "be9b5d41b7550b2b2f932b6d5b74f7183ed2ca5b955bc04ed5bd076f5a1ab04d"
+      },
+      {
+        "candidate_lines": [
+          190,
+          190
+        ],
+        "kind": "replace",
+        "primary_lines": [
+          674,
+          728
+        ],
+        "sha256": "90381df6c08917aac44df8f2bb2be707db5914c760def24ecd4075a8101c8f05"
+      },
+      {
+        "candidate_lines": [
+          196,
+          196
+        ],
+        "kind": "replace",
+        "primary_lines": [
+          734,
+          736
+        ],
+        "sha256": "c4d164825c390c466fd75519f9691621756ae60ecf72de2aa8dbff61cbb3e6ca"
+      },
+      {
+        "candidate_lines": [
+          804,
+          804
+        ],
+        "kind": "replace",
+        "primary_lines": [
+          1344,
+          1373
+        ],
+        "sha256": "f2aef0e69204d2b7a087fce4fb80557c89f8407bdd1069a0ca587d2c5dd2221c"
+      },
+      {
+        "candidate_lines": [
+          1112,
+          1112
+        ],
+        "kind": "replace",
+        "primary_lines": [
+          1681,
+          1692
+        ],
+        "sha256": "4bc2c21e9bae5a00f5f11e122ca7c4560adea3f15b5f5add12bb55a5d635ad5f"
+      }
+    ],
+    "unique_ids": 268
+  },
+  "validation_summary": {
+    "declared_gate": {
+      "exit_code": 0,
+      "passed": 1568,
+      "pytest_seconds": 184.22,
+      "wall_seconds": 184.67390149994753
+    },
+    "focused_real_process_controls": {
+      "exit_code": 0,
+      "passed": 26,
+      "pytest_seconds": 16.18
+    },
+    "identical_commands_environment_and_source_vectors": true,
+    "identical_fresh_process_sweep": {
+      "exit_code": 0,
+      "passed": 1568,
+      "pytest_seconds": 175.29,
+      "wall_seconds": 175.72126937494613
+    },
+    "independent_semantic_review": "Pending outer native reviewer; no approval is inferred from a mechanical check or this implementer.",
+    "native_manifest_inventory_ranges_identity_and_lineage": "PASS, seven paths / fourteen hunks",
+    "source_bound_paths": 23
+  },
+  "wave_id": "workingrcx-fleet-pr-coverage-r5-2026-10-19"
+}

@@ -18,6 +18,7 @@ import io
 import json
 import os
 import re
+import selectors
 import signal
 import sqlite3
 import subprocess
@@ -635,8 +636,49 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
     protected = {}
     admitted_routes = []
     protected_index = []
+    unrelated = None
+    process_observer = common_mod.observe_executor_processes
+
+    if fault == "proof-from-another-launch":
+        # Valid foreign evidence is positive setup. Keep failures outside the
+        # dispatcher's error handler, which would otherwise mask them as a
+        # missing consumer result. End this observation boundary before dispatch.
+        owner = uuid.uuid4().hex
+        proc = subprocess.Popen(
+            [sys.executable, "-B", "-c",
+             "import os,time; os.write(1, b'ready\\n'); time.sleep(60)"],
+            stdout=subprocess.PIPE,
+            start_new_session=True,
+            env={**os.environ, common_mod.EXECUTOR_PROCESS_OWNER_ENV: owner},
+        )
+        try:
+            assert proc.stdout is not None
+            with selectors.DefaultSelector() as ready:
+                ready.register(proc.stdout, selectors.EVENT_READ)
+                assert ready.select(timeout=5), (
+                    "foreign proof process did not become ready", proc.pid, proc.poll(),
+                )
+                assert os.read(proc.stdout.fileno(), 6) == b"ready\n", (
+                    "foreign proof process exited before readiness", proc.pid, proc.poll(),
+                )
+            with complete_process_observation(common_mod) as observations:
+                unrelated = common_mod.terminate_owned_executor(proc, owner, cwd=repo)
+                assert unrelated is not None, {"pid": proc.pid, "observations": observations}
+                assert unrelated["owner"] == owner and unrelated["root_pid"] == proc.pid
+                assert any(member["pid"] == proc.pid for member in unrelated["members"])
+            assert common_mod.observe_executor_processes is process_observer
+            assert proc.poll() is not None, "foreign proof process was not reaped"
+        finally:
+            try:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
+            finally:
+                if proc.stdout is not None:
+                    proc.stdout.close()
 
     def mutate_after_admission(route):
+        assert common_mod.observe_executor_processes is process_observer
         admitted_routes.append(json.loads(json.dumps(route)))
         if fault == "source": (repo / fixture["implementation_path"]).write_text("foreign\n")
         elif fault == "index": subprocess.run(["git", "add", "TASKS.md"], cwd=repo, check=True, capture_output=True)
@@ -656,20 +698,9 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
         elif fault == "proof-owner-type": route["native_late_checkpoint"]["release_evidence"]["owner"] = None
         elif fault == "proof-owner-changed": route["native_late_checkpoint"]["release_evidence"]["owner"] = uuid.uuid4().hex
         elif fault == "proof-from-another-launch":
-            owner = uuid.uuid4().hex
-            proc = subprocess.Popen(
-                [sys.executable, "-B", "-c", "import time; time.sleep(60)"],
-                start_new_session=True,
-                env={**os.environ, common_mod.EXECUTOR_PROCESS_OWNER_ENV: owner},
-            )
-            try:
-                unrelated = common_mod.terminate_owned_executor(proc, owner, cwd=repo)
-                assert unrelated is not None
-                route["native_late_checkpoint"]["release_evidence"] = unrelated
-            finally:
-                if proc.poll() is None:
-                    proc.kill()
-                proc.wait(timeout=5)
+            assert unrelated is not None
+            assert unrelated["owner"] != route["native_late_checkpoint"]["release_evidence"]["owner"]
+            route["native_late_checkpoint"]["release_evidence"] = unrelated
         elif fault == "proof-member": route["native_late_checkpoint"]["release_evidence"]["members"] = []
         elif fault == "proof-pid-reuse":
             proof = route["native_late_checkpoint"]["release_evidence"]
@@ -716,6 +747,7 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
         fixture, monkeypatch, before_consumer=mutate_after_admission,
     )
     assert len(invocations) == 2
+    assert len(consumers) == 2, {"consumers": consumers, "calls": fixture["calls"]}
     if fault == "unchanged":
         assert consumers == ["final_validation", "final_validation"]
         assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1, "validation": 2}
@@ -744,6 +776,53 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret
     else:
         assert all(path.read_bytes() == raw for path, raw in protected.items())
     assert subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo) == protected_index[0]
+
+
+@pytest.mark.parametrize("setup_fault,diagnostic", [
+    ("readiness-timeout", "did not become ready"),
+    ("early-exit", "exited before readiness"),
+    ("missing-owner", "observations"),
+])
+def test_foreign_proof_setup_failure_is_visible_and_cleans_real_child(
+    late_native_retry_lane, monkeypatch, request, setup_fault, diagnostic,
+):
+    fixture = late_native_retry_lane
+    repo = fixture["repo"]
+    protected = {path: path.read_bytes() for path in (
+        repo / "TASKS.md", fixture["canonical"], fixture["spec_path"],
+        repo / fixture["implementation_path"], repo / fixture["plan_path"],
+    )}
+    index = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo)
+    observer = common_mod.observe_executor_processes
+    real_popen = subprocess.Popen
+    children = []
+
+    def start_child(args, **kwargs):
+        # Alter only this real setup child. The producer's ps queries, signals
+        # and absence probes must continue to use the actual subprocess API.
+        monkeypatch.setattr(subprocess, "Popen", real_popen)
+        if setup_fault == "readiness-timeout":
+            args = [*args[:-1], "import time; time.sleep(60)"]
+        elif setup_fault == "early-exit":
+            args = [*args[:-1], "raise SystemExit(0)"]
+        else:
+            kwargs["env"].pop(common_mod.EXECUTOR_PROCESS_OWNER_ENV)
+        child = real_popen(args, **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", start_child)
+    with pytest.raises(AssertionError, match=diagnostic):
+        test_native_late_direct_consumer_revalidates_before_mutation(
+            fixture, monkeypatch, request, "proof-from-another-launch",
+        )
+    assert len(children) == 1
+    assert children[0].poll() is not None
+    assert children[0].stdout.closed
+    assert common_mod.observe_executor_processes is observer
+    assert fixture["calls"] == {"implementer": 0, "sdk": 0, "bridge": 0, "validation": 0}
+    assert all(path.read_bytes() == raw for path, raw in protected.items())
+    assert subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo) == index
 
 
 @pytest.mark.parametrize("late_native_retry_lane", [None, ".agent_bus-late-retry"], indirect=True)

@@ -4,6 +4,30 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-19
+
+### PR1330 coverage R5 and bounded foreign-proof fixture (Phase B)
+
+- Prepare exact schema-2 coverage for all seven original paths and fourteen
+  hunks against retained PR1330 head `817e4703` and actual merged PR1334/current
+  dev `b7597254`. PR1334 merged at 2026-10-14T05:02:20Z; inherited budget and
+  failure assertions in that lineage are distinct from PR1330 disposition.
+- Move valid foreign-proof setup outside dispatcher error handling, wait at
+  most five seconds for a real child readiness message, and end coherent
+  observation before adverse consumer injection. Retain all 23 consumer faults
+  and their no-mutation assertions; add three real-child setup failure controls.
+  Production process authority, timeout policy and runtime code are unchanged.
+- Preserve the R4 full-prepush failure (1 failed, 13,632 passed, 2 skipped in
+  1,341.64s), its unproved producer-refusal cause, and unmerged commit `a25af76`.
+  Current command results, including collection errors, are recorded separately
+  in `reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_implementation_evidence.json`.
+- Reconcile captured PRIMARY outside native Ra, retaining 268 IDs, 44 ordered
+  owners and restoration anchors. Deliver both original deferred topics under
+  row40 in `reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md`.
+  Native review, packet/index/indicator/Step5e gates, CI, landing, PRIMARY sync
+  and later public disposition remain pending. All original branches and other
+  five PR obligations remain retained; no source retirement is authorized.
+
 ## 2026-10-13
 
 ### Native timeout recovery R4 (Phase B implementation)
