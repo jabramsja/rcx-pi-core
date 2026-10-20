@@ -1,0 +1,1817 @@
+{
+  "comparison_commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+  "manifest_sha256": "87bfab8b04a60523474ef9dfb02a8b446395d0c0edccf1cd1f3abc3fb97bba9c",
+  "repository": {
+    "id": "R_kgDOQvy8bg",
+    "nameWithOwner": "jabramsja/rcx-pi-core",
+    "url": "https://github.com/jabramsja/rcx-pi-core"
+  },
+  "schema_version": 2,
+  "targets": [
+    {
+      "coverage": [
+        {
+          "hunks": [
+            {
+              "header": "@@ -4,6 +4,36 @@ This file is a selected historical changelog, not the complete current",
+              "reason": "The October4 implementation entry preserves reconstruction, six original regression failures, blocker descriptor fixture repair and historical2423tools/351docs results. It explicitly leaves native landing, physical cleanup and PR disposition pending. Preserve as chronology; actual contributing merges and current standing obligations are recorded by R7 without rebinding these results.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "652d293dd5c23b930a737153bca7013869894a303a87f5a9d1662f010380837a"
+            }
+          ],
+          "patch_sha256": "9e4e531927cb68604378c9d16fa80656d41d7b2450aafcc7ea942a79881e25f9",
+          "path": "CHANGELOG.md",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -9,9 +9,11 @@ Founder model selection (2026-09-11): every selected local model-bearing pipelin",
+              "reason": "Original current/historical checkpoint transition preserves the stopped R1 and held PRIMARY transaction467ab734/stash4989dd3d plus19-source census and PR1325 eight-path/21-hunk HOLD. R7 preserves history but uses actual PR1340 landing and1330/1338 CLOSED_VERIFIED as current state.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "c2553d25505e60bce07e65c93d482a0268dcc848b484c8addd41b2a17711760e"
+            },
+            {
+              "header": "@@ -528,13 +530,15 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Original row38 ownership/ordering and cleanup observations remain history. Preserve all268IDs/44orderedowners and every useful-work owner; R7 owns exact1329coverage, with other originals1325/1335/1336/1337 independently open and no all-unfinished-work prerequisite barrier.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "79e8bf12f9bbc4c29f192971248c3c4b9a03265b1352745379a50d641baba316"
+            },
+            {
+              "header": "@@ -1870,6 +1874,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "Original October4 tracker note is historical L4/indicator and pending native-stage evidence, not approval for this wave. The frozen October20 R7 note is restored only by native outer authority; no historical approval or source hash transfers.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "bd1ae844cc3955bbb2056fd1b9f37a5ac0c67c451059ed0d3dfc4568e14a1087"
+            }
+          ],
+          "patch_sha256": "12cb40ccb800cfb4c8cb365c736a510730340bcd5633c5dc4e58086641fe71b3",
+          "path": "TASKS.md",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -98,11 +98,27 @@ lock exclusively and retains it through its normal completion gates. This",
+              "reason": "PR1333 landed live protocol/PID/birth/pane adoption, TERM/trap reaping, dead-pane respawn and no-claim holds; the actual PR1333 merge already includes literal ps parsing, absent-PID conjunction and exact registration scope; PR1334 does not change those files. Current doctrine preserves reader/writer guards and spent claims.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 130,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "a1c49db14a92eb36b1432639ba27d941000f5d50aa49c7bbb1701af492ac174e",
+                  "start": 95
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 130,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "a1c49db14a92eb36b1432639ba27d941000f5d50aa49c7bbb1701af492ac174e",
+                  "start": 95
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "2ab4e066f8a700f2ab00acf8be704bbc6f69ac5c56aa100384f9756887606ad1"
+            },
+            {
+              "header": "@@ -274,6 +290,23 @@ require committed bytes, index and mode for the complete authority, including",
+              "reason": "The exact October 4 one-time MuR1 release is absent, not landed: it bound wave R2, source fa13dada, replacement PR1327 merge146ca495 and predecessor35f7c225, and allowed NEEDS_LANDING only with independent preservation. Current PR1333 policy retains the default Mu source unconditionally, fresh predecessor/identity checks and explicit exact/parent protections. R7 authorizes coverage only and preserves original Mu work; obsolete release permission and its positive/14 refusal cases are superseded, never reactivated. Existing row38/Mu owners retain useful-work integration and any separately authorized future retirement; see the required R7 row40 standing report.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "17604da13f220e78ac9d98454aac65a6bc99db41828ccfa5332d1c23f42cc463",
+                  "start": 409
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "17604da13f220e78ac9d98454aac65a6bc99db41828ccfa5332d1c23f42cc463",
+                  "start": 409
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 321,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "e812895290b3b05183ce68f3f9f052a9a39ed4105bc4ee98b41a979c800dc82d",
+                  "start": 306
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 321,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "e812895290b3b05183ce68f3f9f052a9a39ed4105bc4ee98b41a979c800dc82d",
+                  "start": 306
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "def30b585b05e4ee9e94e0d0dc577ee1514fff1341ba03d3395f1f206e00951f"
+            }
+          ],
+          "patch_sha256": "cd94d79272a0fb93aa4eb2aa01e3cb8c8df314e4f2257099862c318195b05f90",
+          "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+          "reason": "PR1333 carries live-reader ownership doctrine including its strict process/terminal checks; PR1334 preserves those exact bytes; the one-time Mu release paragraph is superseded by protected-source policy. Both hunks are adjudicated separately.",
+          "references": [
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 620,
+              "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+              "sha256": "d594cfb71e1ed62e7804b9de25da1eb7011263263ea93553d59e418a2a8fe163",
+              "start": 1
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 620,
+              "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+              "sha256": "d594cfb71e1ed62e7804b9de25da1eb7011263263ea93553d59e418a2a8fe163",
+              "start": 1
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 420,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "17604da13f220e78ac9d98454aac65a6bc99db41828ccfa5332d1c23f42cc463",
+              "start": 409
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 420,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "17604da13f220e78ac9d98454aac65a6bc99db41828ccfa5332d1c23f42cc463",
+              "start": 409
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -25,10 +25,14 @@ from __future__ import annotations",
+              "reason": "Original regex/signal/shlex/shutil/tempfile support remains for real watcher construction and protocol health. PR1339 additionally imports threading to own and reap the private parent.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 45,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "368972fa2df58c27ffe92f7e0f168318f2d2dfa8b0b4740386ae943dff0ef5a9",
+                  "start": 20
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 45,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "368972fa2df58c27ffe92f7e0f168318f2d2dfa8b0b4740386ae943dff0ef5a9",
+                  "start": 20
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "1e6e4c8e14edc72c702033c5fffee2b6bd38df2d8adee81347045d78d1c9b52c"
+            },
+            {
+              "header": "@@ -137,6 +141,107 @@ def generated_log_watcher(tmp_path, lane, env, *, monitor_env=None):",
+              "reason": "Original live pre-update Bash/raw-tail and health adoption assertions remain. PR1339 foreground tmux -D controller is a child of the test, validates identities, signals only its reaper, waits for actual child/PID absence and preserves paused-parent behavior. The shutil.which/assert tmux prerequisite at214-215 is still present: original P2 remains an OPEN row40 source concern with local provisioned-environment-only acceptance.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 444,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "1840f19e3a2075a8022b3d418fa5bcceed7015f94c4ebf37aae7ed6c783a171d",
+                  "start": 208
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 444,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "1840f19e3a2075a8022b3d418fa5bcceed7015f94c4ebf37aae7ed6c783a171d",
+                  "start": 208
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "84bc319c88c2086f81841294e6b8ca45fe047fe6a602c2566d8ba62a1449d96e"
+            },
+            {
+              "header": "@@ -391,7 +496,9 @@ esac",
+              "reason": "PR1333 retains _fake_tmux_dir: repo_roots scopes the recording-only protocol double to disposable tmp_path repositories and exclusive creation refuses overwriting real lifecycle code.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 855,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "98efd742648b2143a357abe5cdd992fbae91abab3a22bc5fc4855314a1ee714c",
+                  "start": 735
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 855,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "98efd742648b2143a357abe5cdd992fbae91abab3a22bc5fc4855314a1ee714c",
+                  "start": 735
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "64e9f8d34ca855b567e6474c51cd570899db21f832b39aa0f64ac8905d67018b"
+            },
+            {
+              "header": "@@ -402,6 +509,21 @@ def _fake_tmux_dir(tmp_path: Path, *, log_path: Path) -> Path:",
+              "reason": "PR1333 retains _fake_tmux_dir: repo_roots scopes the recording-only protocol double to disposable tmp_path repositories and exclusive creation refuses overwriting real lifecycle code.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 855,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "98efd742648b2143a357abe5cdd992fbae91abab3a22bc5fc4855314a1ee714c",
+                  "start": 735
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 855,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "98efd742648b2143a357abe5cdd992fbae91abab3a22bc5fc4855314a1ee714c",
+                  "start": 735
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "bc16c7c00e9bcb87481dd4a7320e89b7906ba12b5b1e2dcb2a2d71c52e667a6d"
+            },
+            {
+              "header": "@@ -775,7 +897,7 @@ def _start_and_capture(",
+              "reason": "PR1333 retains _start_and_capture: the fake-tmux call supplies its own disposable repo root; owner/root/bus and autoping assertions stay active.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 1188,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "fe32075cf67cddc9e0a4f81ca898da73ac5189514033154c670340481e16a8a4",
+                  "start": 1125
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 1188,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "fe32075cf67cddc9e0a4f81ca898da73ac5189514033154c670340481e16a8a4",
+                  "start": 1125
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "a7865d65de705e314cbb276595e071c1b40868c06f62b58f8699b7195792c039"
+            },
+            {
+              "header": "@@ -937,7 +1059,7 @@ exit 0",
+              "reason": "PR1333 retains test_orchestrator_monitor_uses_mu_codex_autoping_launcher_for_selected_bus: the fake-tmux call supplies its own disposable repo root; owner/root/bus and autoping assertions stay active.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 1382,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "78e80675bff014be6e6032c0a493679521b647fef8b945647c660262472b347f",
+                  "start": 1314
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 1382,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "78e80675bff014be6e6032c0a493679521b647fef8b945647c660262472b347f",
+                  "start": 1314
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "e94cbc5be2b7ba366e483f2ef4c333cae937cfd7484117efe8a098287eb8b387"
+            },
+            {
+              "header": "@@ -1011,7 +1133,7 @@ while true; do sleep 30 & wait $!; done",
+              "reason": "PR1333 retains test_orchestrator_monitor_replaces_untracked_wrong_root_owner: the fake-tmux call supplies its own disposable repo root; owner/root/bus and autoping assertions stay active.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 1448,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "f86b9353b825b73c2cf1dab789f30ff3bb07e96bb7d0e58d0234448bfe16fc37",
+                  "start": 1385
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 1448,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "f86b9353b825b73c2cf1dab789f30ff3bb07e96bb7d0e58d0234448bfe16fc37",
+                  "start": 1385
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "54703f3fe29afeea7a94d8417319f0d100d91fd5f35765deddaff63e198ba097"
+            },
+            {
+              "header": "@@ -1064,7 +1186,7 @@ def test_orchestrator_monitor_replaces_same_session_wrong_bus_owner(tmp_path):",
+              "reason": "PR1333 retains test_orchestrator_monitor_replaces_same_session_wrong_bus_owner: the fake-tmux call supplies its own disposable repo root; owner/root/bus and autoping assertions stay active.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 1556,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "abc8973260bde12682c3b02804c9e0267443bb7602e2a8495be113c4516ae721",
+                  "start": 1451
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 1556,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "abc8973260bde12682c3b02804c9e0267443bb7602e2a8495be113c4516ae721",
+                  "start": 1451
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "4e1e78ced8937895836e9883b6b13642121d66b499620527dffbcd555d2c4992"
+            }
+          ],
+          "patch_sha256": "718cc7115fdb2dca4c194c558f201ceb4173b0b7dd6f911610c753d67acd56bd",
+          "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+          "reason": "PR1333 carried stale real watcher/health tests and isolated fake-tmux unit doubles; PR1339 supplies a real foreground controller/reaper without changing availability policy. Original P2 remains OPEN under bounded row40 acceptance; not solved by fixture ownership.",
+          "references": [
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 1778,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "4b060706167f5e3936020856fb60a14b03776493e2943c4954c1e02e5b798137",
+              "start": 1
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 1778,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "4b060706167f5e3936020856fb60a14b03776493e2943c4954c1e02e5b798137",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -11743,12 +11743,29 @@ esac",
+              "reason": "PR1333 _fake_tmux_dir: fake-tmux helper scopes protocol doubles to each disposable root, verifies tmp_path containment and creates exclusively; it cannot replace a production lifecycle module.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 12305,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "3fc25a461b8a147197384b19cba21c49f2cfe34645030046780477881becbc9e",
+                  "start": 12201
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 12305,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "3fc25a461b8a147197384b19cba21c49f2cfe34645030046780477881becbc9e",
+                  "start": 12201
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "0a4302897750c613b854374b08e29dc599ed72143604de97ad5f86dafec0a9e5"
+            },
+            {
+              "header": "@@ -12486,7 +12503,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_start_resolves_window_and_pane_ids_from_tmux: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 12983,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "749bdd096545c04d640d5052f8386c35523154bcf54919069caab2577e45c15f",
+                  "start": 12951
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 12983,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "749bdd096545c04d640d5052f8386c35523154bcf54919069caab2577e45c15f",
+                  "start": 12951
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "9b8e5fd896730bccbc84f756bae639fa325d98351e490b238e6c65cf7e4d8ffe"
+            },
+            {
+              "header": "@@ -12531,7 +12548,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_start_uses_configured_named_lane_identity: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13037,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "b81f092c0452af78314d9b27e3d0b98bfe8a971590b38c0de1440f533d11c586",
+                  "start": 12985
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13037,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "b81f092c0452af78314d9b27e3d0b98bfe8a971590b38c0de1440f533d11c586",
+                  "start": 12985
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "70eab649b84dfba6c4f62663e948666b12e5a0dd4030f5fc9f4b230b167d0846"
+            },
+            {
+              "header": "@@ -12574,7 +12591,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_start_does_not_pin_panes_to_launcher_worktree: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13071,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "74621983dd10c166d113bdaf6314c3eb03df7292286c0376e3a7a3a4b13971d2",
+                  "start": 13039
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13071,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "74621983dd10c166d113bdaf6314c3eb03df7292286c0376e3a7a3a4b13971d2",
+                  "start": 13039
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "2f04db68c9d0618fb4f45320a3e20d106ee12e5552338fbce6d5cf74d531be0e"
+            },
+            {
+              "header": "@@ -12619,7 +12636,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_start_reseeds_autoping_when_thread_id_is_present: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13126,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "e35f15445e979709177f5638a6402c08480f84e1b00dea4462d53019d2887c79",
+                  "start": 13073
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13126,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "e35f15445e979709177f5638a6402c08480f84e1b00dea4462d53019d2887c79",
+                  "start": 13073
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "ae8ba0c05d1ff0b30a9e92b25bce46bb3549698421eab6ab568881bdd39be5f5"
+            },
+            {
+              "header": "@@ -12674,7 +12691,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_start_clears_saved_autoping_thread_when_thread_id_is_absent: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13199,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "86480b801905a8dd394c7653060b152ff79d6a414445d647d387a57e525b57da",
+                  "start": 13128
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13199,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "86480b801905a8dd394c7653060b152ff79d6a414445d647d387a57e525b57da",
+                  "start": 13128
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "f0b3db1c427f6f2d3888d99ab3170a70c27a3e63aade004737a7736a67ff7898"
+            },
+            {
+              "header": "@@ -12747,7 +12764,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_owner_tick_keeps_autoping_seeded_after_start: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13276,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "1f6662865bbb7dcaa7b687336b3e2007d765fb3c275ed9df69bb3f3689a41f77",
+                  "start": 13201
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13276,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "1f6662865bbb7dcaa7b687336b3e2007d765fb3c275ed9df69bb3f3689a41f77",
+                  "start": 13201
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d59f893cd0b826aa4c3b95062829a89ed358d34cd00ac9a8495806750b4803b6"
+            },
+            {
+              "header": "@@ -12830,7 +12847,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_start_defaults_to_claude_autoping_without_mode_config: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13339,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "6f8e840720465ee754fa8eff829a1e5c0d96e5d846ede381c1a3b4d9d6a62cf4",
+                  "start": 13278
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13339,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "6f8e840720465ee754fa8eff829a1e5c0d96e5d846ede381c1a3b4d9d6a62cf4",
+                  "start": 13278
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "5bf07b695fc24c358d032c21185636bfb40dc9b5c1088ef084540cd5a65f862c"
+            },
+            {
+              "header": "@@ -12876,7 +12893,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_detached_start_is_idempotent_with_single_owner: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13384,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "81ad7c7857f9d1872f1b528313bf13a869dceeedb30c64bc1f9fe0ba027b5846",
+                  "start": 13341
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13384,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "81ad7c7857f9d1872f1b528313bf13a869dceeedb30c64bc1f9fe0ba027b5846",
+                  "start": 13341
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d3d14c7f257198c14b3b9482eeb9ac169d2ed9d9b402942dbca0547307209a6f"
+            },
+            {
+              "header": "@@ -12933,7 +12950,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_start_replaces_wrong_root_detached_owner: recording-only monitor caller supplies its exact disposable repo roots (repo_a, repo_b), preserving wrong-root ownership assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13455,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "dfb89410d7f4f4b2eb2121073123e1813cb3fd42209bcf755ed0aa97670d9026",
+                  "start": 13386
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13455,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "dfb89410d7f4f4b2eb2121073123e1813cb3fd42209bcf755ed0aa97670d9026",
+                  "start": 13386
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "6f2c452276d95e65beef7ea3993d2f324f0b077cd20329911d5404f5aae1a054"
+            },
+            {
+              "header": "@@ -13003,7 +13020,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_start_replaces_owner_with_stale_expected_root_metadata: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13526,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "33c411f9beeabd94caea3aa72a4dc6287b29571297f60472c72e0569e9741714",
+                  "start": 13457
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13526,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "33c411f9beeabd94caea3aa72a4dc6287b29571297f60472c72e0569e9741714",
+                  "start": 13457
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "9e28fa25ca353f9dd1b27bff8a98323260471876ace9b37c5ffaaf467be8d017"
+            },
+            {
+              "header": "@@ -13063,7 +13080,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_stop_cleans_owner_state: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13569,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "711e37a0935a37e0182e56adc6c86cd2e4d0fafb6413f092eb39ecc3cba5a6f4",
+                  "start": 13528
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13569,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "711e37a0935a37e0182e56adc6c86cd2e4d0fafb6413f092eb39ecc3cba5a6f4",
+                  "start": 13528
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "071bd3f2a0aea93bdc5fe937d85230176e8d1710c2d31efdf8185eac6e2e635c"
+            },
+            {
+              "header": "@@ -13107,7 +13124,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_start_rebuilds_missing_degraded_and_wrong_root_panes: recording-only monitor caller supplies its exact disposable repo root, preserving the original configured-lane/autoping/owner/health assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 13632,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "6f55d6e867cffb83d25ad9072d1fac4eb377230c8e83bc4c00faf94a24545f41",
+                  "start": 13571
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 13632,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "6f55d6e867cffb83d25ad9072d1fac4eb377230c8e83bc4c00faf94a24545f41",
+                  "start": 13571
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "1621b3c49cfeb90d1ab87b4404f33917d36e7ca9e6dee0bbf7ae3ef5ff678e74"
+            },
+            {
+              "header": "@@ -13588,7 +13605,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_find_newest_log_ignores_blank_bridge_stderr_and_uses_raw_reviewer: the extracted watcher is sourced with --rcx-log-reader-v2 so its intentional exec guard does not rerun the test harness; original log-selection/heartbeat assertions remain.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 14074,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "743cf60053cf77ac03dcd0b3c353a5959c619be48439d24187471600118f9112",
+                  "start": 14027
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 14074,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "743cf60053cf77ac03dcd0b3c353a5959c619be48439d24187471600118f9112",
+                  "start": 14027
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "066427bef36db6f80639bcb61a3f039fb5c75c0c52da98c67db228fb075dd203"
+            },
+            {
+              "header": "@@ -13634,7 +13651,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_find_newest_log_ignores_newer_reader_transcript: the extracted watcher is sourced with --rcx-log-reader-v2 so its intentional exec guard does not rerun the test harness; original log-selection/heartbeat assertions remain.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 14120,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "0fa9f369ef4dfcd09c031898d87bf9fb3fb7819020c9d4be738088f8c12ff344",
+                  "start": 14076
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 14120,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "0fa9f369ef4dfcd09c031898d87bf9fb3fb7819020c9d4be738088f8c12ff344",
+                  "start": 14076
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "24b8d191929c656fb79fdf12d76ac98fa4fa91307bddfed9d805280009e11520"
+            },
+            {
+              "header": "@@ -13678,7 +13695,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_prefers_newer_executor_live_log_over_older_reviewer_transcript: the extracted watcher is sourced with --rcx-log-reader-v2 so its intentional exec guard does not rerun the test harness; original log-selection/heartbeat assertions remain.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 14164,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "8ef21c6c815cb5e5f4dc5b79f75d44f7f9601a6c79e28405817bc8344b8bcc31",
+                  "start": 14122
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 14164,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "8ef21c6c815cb5e5f4dc5b79f75d44f7f9601a6c79e28405817bc8344b8bcc31",
+                  "start": 14122
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d408e2b1dc5625cb25d65bafa1c0feabb02e0552d8805c8d0bf677bd9b95e257"
+            },
+            {
+              "header": "@@ -13722,7 +13739,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_prefers_reviewer_transcript_over_newer_bridge_stderr: the extracted watcher is sourced with --rcx-log-reader-v2 so its intentional exec guard does not rerun the test harness; original log-selection/heartbeat assertions remain.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 14208,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "ce9a4119820186b213fba7af5a7ca65b17efa811693064856f887d701236dbd6",
+                  "start": 14166
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 14208,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "ce9a4119820186b213fba7af5a7ca65b17efa811693064856f887d701236dbd6",
+                  "start": 14166
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "f52aad3a9cf04e4d83c65ceb502f25247dad8b3896ad0107728cefa36958cbf6"
+            },
+            {
+              "header": "@@ -13747,6 +13764,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_restarts_same_log_tail_on_heartbeat: heartbeat test points RCX_OBS_LIFECYCLE_HELPER to the real executor helper while retaining restart and output assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 14255,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "89231c6bbf35ab4a8d53c9b6cf1db586deb222aec7d209f6a926b030b8cfb671",
+                  "start": 14210
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 14255,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "89231c6bbf35ab4a8d53c9b6cf1db586deb222aec7d209f6a926b030b8cfb671",
+                  "start": 14210
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d7d9190cf1b25deed7d62bd343f68b9ce8217556fd4298c0ac85c776fd2a1f53"
+            },
+            {
+              "header": "@@ -13757,7 +13775,7 @@ esac",
+              "reason": "PR1333 test_pipeline_monitor_restarts_same_log_tail_on_heartbeat: the extracted watcher is sourced with --rcx-log-reader-v2 so its intentional exec guard does not rerun the test harness; original log-selection/heartbeat assertions remain.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 14255,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "89231c6bbf35ab4a8d53c9b6cf1db586deb222aec7d209f6a926b030b8cfb671",
+                  "start": 14210
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 14255,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "89231c6bbf35ab4a8d53c9b6cf1db586deb222aec7d209f6a926b030b8cfb671",
+                  "start": 14210
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "7cb556dfa10e74c9cc0c42182b22a2451ac4df0bde629031ab28ca99d3c7e5d1"
+            }
+          ],
+          "patch_sha256": "b9b1788f1fd713829628e550b9c22c21f3f2a942b868e914b0b3721f8658a10a",
+          "path": "mu/tests/tools/test_recovery_gate.py",
+          "reason": "PR1333 retains all19 adjacent fixture/call-site hunks. Recording-only fake tmux receives bounded disposable protocol doubles; sourced watcher tests opt into v2 and heartbeat uses the real lifecycle helper. Later PR1334 executor process-release/recovery-continuation changes are separate lineage; test_recovery_gate.py itself is unchanged by that merge, not causal proof of1329 failures.",
+          "references": [
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 23229,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "e13565c6b2d92cfde60cee185af0e44460620c85c0f8616077ee1ddec1faeaac",
+              "start": 1
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 23229,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "e13565c6b2d92cfde60cee185af0e44460620c85c0f8616077ee1ddec1faeaac",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -26,13 +26,82 @@ STAMP = \"2026-09-11T18:34:09+00:00\"",
+              "reason": "The exact October 4 one-time MuR1 release is absent, not landed: it bound wave R2, source fa13dada, replacement PR1327 merge146ca495 and predecessor35f7c225, and allowed NEEDS_LANDING only with independent preservation. Current PR1333 policy retains the default Mu source unconditionally, fresh predecessor/identity checks and explicit exact/parent protections. R7 authorizes coverage only and preserves original Mu work; obsolete release permission and its positive/14 refusal cases are superseded, never reactivated. Existing row38/Mu owners retain useful-work integration and any separately authorized future retirement; see the required R7 row40 standing report. The useful archived_protected_source=False/True assertions survive at29-53, extended by exact/parent real completed archive controls56-81; no blanket evidence-only dismissal of this test hunk.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "17604da13f220e78ac9d98454aac65a6bc99db41828ccfa5332d1c23f42cc463",
+                  "start": 409
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "17604da13f220e78ac9d98454aac65a6bc99db41828ccfa5332d1c23f42cc463",
+                  "start": 409
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "fffa8fee593e91f26c6d0563b857c6fb7d3bbfad53e7fa5eac2e24c3ee6ddbc0"
+            }
+          ],
+          "patch_sha256": "ecfef207cf531073c9440451f4111979aeadbfc9178ec356137ac106c7e3e565",
+          "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+          "reason": "PR1333 retains both archived_protected_source parameters and adds real completed-archive exact/parent controls; the15case one-time Mu release test is superseded with its removed capability.",
+          "references": [
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 932,
+              "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+              "sha256": "b572c292001b9d0778385aec0778757952ffe41a50a2d34896c9bc779f07bc99",
+              "start": 1
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 932,
+              "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+              "sha256": "b572c292001b9d0778385aec0778757952ffe41a50a2d34896c9bc779f07bc99",
+              "start": 1
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 420,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "17604da13f220e78ac9d98454aac65a6bc99db41828ccfa5332d1c23f42cc463",
+              "start": 409
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 420,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "17604da13f220e78ac9d98454aac65a6bc99db41828ccfa5332d1c23f42cc463",
+              "start": 409
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -250,6 +250,104 @@ def test_finished_generated_reader_releases_within_native_completion_budget(nati",
+              "reason": "All original obstruction parameters None/writer/unknown-reader and missing-pane/changed-start negatives remain. Current cases add normal/delayed reaper and changed-PPID/command, preserve actual old watcher/tail ProcessLookupError, one-claim success, three-claim descriptor HOLD, zero-claim identity HOLD, immutable receipts, retained log bytes and no replay. Paused-parent zombie HOLD is a separate control; no equivalence is inferred among historical1329/R5/R2 failures.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 339,
+                  "path": "mu/tests/tools/test_worktree_lifecycle.py",
+                  "sha256": "44461789e62e0828a43f77fe1a5c50039b26dfb59f2abac15bd393ff9ef78c01",
+                  "start": 288
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 339,
+                  "path": "mu/tests/tools/test_worktree_lifecycle.py",
+                  "sha256": "44461789e62e0828a43f77fe1a5c50039b26dfb59f2abac15bd393ff9ef78c01",
+                  "start": 288
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 549,
+                  "path": "mu/tests/tools/test_worktree_lifecycle.py",
+                  "sha256": "024993a325984483ec75df9a57781951cfc5b31a42c32821caf29a314f008cc4",
+                  "start": 441
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 549,
+                  "path": "mu/tests/tools/test_worktree_lifecycle.py",
+                  "sha256": "024993a325984483ec75df9a57781951cfc5b31a42c32821caf29a314f008cc4",
+                  "start": 441
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 669,
+                  "path": "mu/tests/tools/test_worktree_lifecycle.py",
+                  "sha256": "9caa22db4c9a9ec4fa55c5685a334b9d9ae64425f08b3a130f547a61c9871534",
+                  "start": 626
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 669,
+                  "path": "mu/tests/tools/test_worktree_lifecycle.py",
+                  "sha256": "9caa22db4c9a9ec4fa55c5685a334b9d9ae64425f08b3a130f547a61c9871534",
+                  "start": 626
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "a0ee136af8f1fe527a07315981e3f1a7370c058bbbbd9effb2642488116b5f42"
+            }
+          ],
+          "patch_sha256": "2723e8c7806c871a712175c21a5c0f07728dc6e4cc563b7f07767a8055f42357",
+          "path": "mu/tests/tools/test_worktree_lifecycle.py",
+          "reason": "PR1333 carried the live stale-reader adoption and no-claim identity controls. PR1333 already includes the strict identity/absence cases; their bytes are unchanged by PR1334; PR1339 shares the private foreground parent/reaper while retaining original assertions and parameters.",
+          "references": [
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 1955,
+              "path": "mu/tests/tools/test_worktree_lifecycle.py",
+              "sha256": "f23ed73bd503c487b2da052d792c300a757caa0a61b3c5b9748fda22e7b08d05",
+              "start": 1
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 1955,
+              "path": "mu/tests/tools/test_worktree_lifecycle.py",
+              "sha256": "f23ed73bd503c487b2da052d792c300a757caa0a61b3c5b9748fda22e7b08d05",
+              "start": 1
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 444,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "1840f19e3a2075a8022b3d418fa5bcceed7015f94c4ebf37aae7ed6c783a171d",
+              "start": 208
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 444,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "1840f19e3a2075a8022b3d418fa5bcceed7015f94c4ebf37aae7ed6c783a171d",
+              "start": 208
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -72,6 +72,16 @@ LANDED_CENSUS = \"workingrcx-fleet-census-r3-2026-09-11_census.json\"",
+              "reason": "The exact October 4 one-time MuR1 release is absent, not landed: it bound wave R2, source fa13dada, replacement PR1327 merge146ca495 and predecessor35f7c225, and allowed NEEDS_LANDING only with independent preservation. Current PR1333 policy retains the default Mu source unconditionally, fresh predecessor/identity checks and explicit exact/parent protections. R7 authorizes coverage only and preserves original Mu work; obsolete release permission and its positive/14 refusal cases are superseded, never reactivated. Existing row38/Mu owners retain useful-work integration and any separately authorized future retirement; see the required R7 row40 standing report. This hunk covers immutable exception identity.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "9528cde647f61537c2849a1f2700cd93aae0c8c5163a2e41dd64152344d3a82c"
+            },
+            {
+              "header": "@@ -348,11 +358,61 @@ def readonly_review_matches(identity: dict, review: dict, predecessor: dict, roo",
+              "reason": "The exact October 4 one-time MuR1 release is absent, not landed: it bound wave R2, source fa13dada, replacement PR1327 merge146ca495 and predecessor35f7c225, and allowed NEEDS_LANDING only with independent preservation. Current PR1333 policy retains the default Mu source unconditionally, fresh predecessor/identity checks and explicit exact/parent protections. R7 authorizes coverage only and preserves original Mu work; obsolete release permission and its positive/14 refusal cases are superseded, never reactivated. Existing row38/Mu owners retain useful-work integration and any separately authorized future retirement; see the required R7 row40 standing report. This hunk covers conditional helper and API argument.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "92b76f32a12fb8ce66ea04dcd2a1afe85734ae983b9ce8e0baf31631f4279db5"
+            },
+            {
+              "header": "@@ -412,7 +472,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,",
+              "reason": "The exact October 4 one-time MuR1 release is absent, not landed: it bound wave R2, source fa13dada, replacement PR1327 merge146ca495 and predecessor35f7c225, and allowed NEEDS_LANDING only with independent preservation. Current PR1333 policy retains the default Mu source unconditionally, fresh predecessor/identity checks and explicit exact/parent protections. R7 authorizes coverage only and preserves original Mu work; obsolete release permission and its positive/14 refusal cases are superseded, never reactivated. Existing row38/Mu owners retain useful-work integration and any separately authorized future retirement; see the required R7 row40 standing report. This hunk covers conditional default-protection bypass.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "1cac39eea1b76763d143056ee0750d571ad49b37776e970b3efe1b775a96fb6b"
+            },
+            {
+              "header": "@@ -508,7 +569,9 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,",
+              "reason": "PR1333 generalizes the original Mu-name/explicit-protect guard to path not in protected_paths plus explicit exact/parent protection. A completed lifecycle archive cannot release a default owner or explicit protected descendant; ordinary completed archives remain eligible. This is the useful independent protection fix.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "bf7fe78ab2ed967fb0e7c63dd434aedbf52d0a16fe8fcdbaedaa5625d5b041f7"
+            },
+            {
+              "header": "@@ -681,6 +744,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,",
+              "reason": "The exact October 4 one-time MuR1 release is absent, not landed: it bound wave R2, source fa13dada, replacement PR1327 merge146ca495 and predecessor35f7c225, and allowed NEEDS_LANDING only with independent preservation. Current PR1333 policy retains the default Mu source unconditionally, fresh predecessor/identity checks and explicit exact/parent protections. R7 authorizes coverage only and preserves original Mu work; obsolete release permission and its positive/14 refusal cases are superseded, never reactivated. Existing row38/Mu owners retain useful-work integration and any separately authorized future retirement; see the required R7 row40 standing report. This hunk covers policy-output serialization.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "845f36f4f531936d2bc8fbe1ada15498c83c4e5f559385b60c45e15092c55f74"
+            },
+            {
+              "header": "@@ -785,6 +850,7 @@ def main(argv: list[str] | None = None) -> int:",
+              "reason": "The exact October 4 one-time MuR1 release is absent, not landed: it bound wave R2, source fa13dada, replacement PR1327 merge146ca495 and predecessor35f7c225, and allowed NEEDS_LANDING only with independent preservation. Current PR1333 policy retains the default Mu source unconditionally, fresh predecessor/identity checks and explicit exact/parent protections. R7 authorizes coverage only and preserves original Mu work; obsolete release permission and its positive/14 refusal cases are superseded, never reactivated. Existing row38/Mu owners retain useful-work integration and any separately authorized future retirement; see the required R7 row40 standing report. This hunk covers CLI opt-in.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "c50715a79386f1a78292128373051df9d364679d0b1c5e41590b9479e5b72727"
+            },
+            {
+              "header": "@@ -817,6 +883,7 @@ def main(argv: list[str] | None = None) -> int:",
+              "reason": "The exact October 4 one-time MuR1 release is absent, not landed: it bound wave R2, source fa13dada, replacement PR1327 merge146ca495 and predecessor35f7c225, and allowed NEEDS_LANDING only with independent preservation. Current PR1333 policy retains the default Mu source unconditionally, fresh predecessor/identity checks and explicit exact/parent protections. R7 authorizes coverage only and preserves original Mu work; obsolete release permission and its positive/14 refusal cases are superseded, never reactivated. Existing row38/Mu owners retain useful-work integration and any separately authorized future retirement; see the required R7 row40 standing report. This hunk covers CLI forwarding.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 695,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "35cdb9851e42a363141a4c1f665b2ac54a510a145a2821f8ec2af49975decc40",
+                  "start": 665
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "cc0e72afe9a5114a0d7f6b4a85964152831fdcade0e474e48252bad8a4f21e9b"
+            }
+          ],
+          "patch_sha256": "3e376a9f85fbe6001f88edff69b1d49a94b5101f66e6f92770a6f2dfb579f65c",
+          "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+          "reason": "Mixed change: PR1333 landed the completed-archive explicit/default protection repair; all six exception-plumbing hunks are superseded by current protected Mu policy, not claimed landed.",
+          "references": [
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 845,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "dee4117e23b6beea49b2108be92605579137160733c9a48b3b92a83a089f6c27",
+              "start": 1
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 845,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "dee4117e23b6beea49b2108be92605579137160733c9a48b3b92a83a089f6c27",
+              "start": 1
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -34,6 +34,178 @@ MAX_ATTEMPTS = 3",
+              "reason": "The full live watcher protocol remains: exact Bash/script/pane/PID/PPID/birth/command, own trap TERM/reaping, bounded acknowledgment, no forced respawn and no claim on unknown identity. PR1333 deliberately replaces shell interpretation of ps text with literal scoped parsing, conjoins OS PID absence, and binds the terminal record directory.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 229,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "d59d9a4a6e63722590ff503b9dc538faf9e9e6f458e974428034aad0f9e8dd90",
+                  "start": 36
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 229,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "d59d9a4a6e63722590ff503b9dc538faf9e9e6f458e974428034aad0f9e8dd90",
+                  "start": 36
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "fd21c057cb480707515dfdd25828f02e6403acd16c50729fbd565127d559ea68"
+            },
+            {
+              "header": "@@ -304,6 +476,7 @@ def follow_terminal_log(repo: Path, bus_dir: str, log: Path) -> None:",
+              "reason": "Release still adopts exact owned legacy terminal readers before acquiring the exclusive log-reader fence; current call includes the exact registration directory present in the actual PR1333 merge and unchanged by PR1334.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 525,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "e7161c47add1945e0932854ad315ecec914d12fc8f9fd22dfe723170e44e40b8",
+                  "start": 506
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 525,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "e7161c47add1945e0932854ad315ecec914d12fc8f9fd22dfe723170e44e40b8",
+                  "start": 506
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "c46f7e92fd67e1ba3e7dfeaf3464cb7a804c5c90813a43832ee01b82575eefeb"
+            },
+            {
+              "header": "@@ -317,6 +490,7 @@ def _released_log_readers(directory: Path, registration: dict, terminal: dict):",
+              "reason": "reader-release.json still binds the terminal hash/identity/bus and records watcher_adoptions; its acknowledgment is not retirement authority.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 525,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "e7161c47add1945e0932854ad315ecec914d12fc8f9fd22dfe723170e44e40b8",
+                  "start": 506
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 525,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "e7161c47add1945e0932854ad315ecec914d12fc8f9fd22dfe723170e44e40b8",
+                  "start": 506
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "4eaf7131d274ec9f8f1ada26b6fb2504aafcc8ecde83074f2f34df6f9ccfd0ef"
+            },
+            {
+              "header": "@@ -778,7 +952,7 @@ def complete_pending(directory: Path, *, delay: float = 2.0) -> dict:",
+              "reason": "Native complete_pending still catches Hold/OSError/ValueError/SubprocessError and seals the release hold before any unspent claim. MAX_ATTEMPTS remains3 and reader deadline remains2seconds; no timeout inflation or old-budget reset.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 1028,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "cc72bfda1b5bd4ddabb3d1de62fbdb15e03d10919e3bc2a9be4bcec7606777dd",
+                  "start": 912
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 1028,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "cc72bfda1b5bd4ddabb3d1de62fbdb15e03d10919e3bc2a9be4bcec7606777dd",
+                  "start": 912
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "6a5c052aa20f6f7812bf6151c48646fe0118a0ff59ab3d04faa193ed04de1189"
+            }
+          ],
+          "patch_sha256": "4fdcb289d53750e44f58d73c7f64cf5f867bfe450bf56fc05be3b345a120307c",
+          "path": "mu/tools/executors/worktree_lifecycle.py",
+          "reason": "PR1333 landed stale-watcher protocol adoption/release integration; the actual PR1333 merge already includes literal OS identity parsing, absent-PID proof and explicit terminal record scope; PR1334 preserves identical lifecycle bytes. PR1339 supplies fixture ownership/reaping only and is the aggregate anchor, not author of these ancestor changes.",
+          "references": [
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 1105,
+              "path": "mu/tools/executors/worktree_lifecycle.py",
+              "sha256": "b4e6e08e852d0bbbafe87a7a81d054de86a566f626f4a0ab991354d6ee80ad3c",
+              "start": 1
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 1105,
+              "path": "mu/tools/executors/worktree_lifecycle.py",
+              "sha256": "b4e6e08e852d0bbbafe87a7a81d054de86a566f626f4a0ab991354d6ee80ad3c",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -218,6 +218,10 @@ write_log_watcher() {",
+              "reason": "PR1333 retains exec into --rcx-log-reader-v2 and resets reader_acknowledged; legacy in-memory processes cannot acquire health merely from file replacement.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 226,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "9c9da53a636e161d37d3128299fc8af35b77a484f53f26cfb705985fd511632e",
+                  "start": 218
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 226,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "9c9da53a636e161d37d3128299fc8af35b77a484f53f26cfb705985fd511632e",
+                  "start": 218
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "6eaecbaeea46af7134bd786f9882837d91ddb6005da5b07ae21b35adf4c0c06d"
+            },
+            {
+              "header": "@@ -272,7 +276,7 @@ resolve_live_log() {",
+              "reason": "PR1333 retains the optional git common-directory probe with || true and moves watcher cwd/helper to the surviving owner when known; probe failure does not invent an identity.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 290,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "e9d2377430728b58b1772a1b341c0da7c5a1e09522bf239867156a0705afad8a",
+                  "start": 276
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 290,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "e9d2377430728b58b1772a1b341c0da7c5a1e09522bf239867156a0705afad8a",
+                  "start": 276
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "b76b8e4c59b5a6edfd99ff4a0267576f108cd58c82be3efbb83bf27d104df934"
+            },
+            {
+              "header": "@@ -535,6 +539,16 @@ while true; do",
+              "reason": "PR1333 retains exact pane_pid==shell PID verification and PID/birth/protocol acknowledgment from the live process; acknowledgment is issued only after successful tmux set-option.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 551,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "966f034e8e8de2cb27ce759e2c720aa4e203197b66b98a20aab4bf614eefbf0e",
+                  "start": 542
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 551,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "966f034e8e8de2cb27ce759e2c720aa4e203197b66b98a20aab4bf614eefbf0e",
+                  "start": 542
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "b5b86e6019884c31d2365839d448bf3fd8952f5e5e09aee811fc3697cde6edc1"
+            },
+            {
+              "header": "@@ -888,6 +902,20 @@ release_owner_lock() {",
+              "reason": "PR1333 retains isolated Python protocol check/adopt helper and conservative OSError/ValueError/Hold/SubprocessError failure handling.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 917,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "687287e5d3880fd5d50e710b84afc4bade4fd66ca875c53e5358410b7e196134",
+                  "start": 905
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 917,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "687287e5d3880fd5d50e710b84afc4bade4fd66ca875c53e5358410b7e196134",
+                  "start": 905
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "cd6fa1f246ab31cd7c04c4a5969916571c40edce695e9f679449897a83702f70"
+            },
+            {
+              "header": "@@ -945,6 +973,10 @@ tmux_session_health_detail() {",
+              "reason": "PR1333 retains distinct health return2 when structurally valid panes lack coordinated reader protocol; titles alone do not establish health.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 982,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "dffd4e65ce706da56817e7482a2ff0ab34da3acae3fee28dace723a62bb874f6",
+                  "start": 971
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 982,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "dffd4e65ce706da56817e7482a2ff0ab34da3acae3fee28dace723a62bb874f6",
+                  "start": 971
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "8bd633de75c7f83559bbadcf033e4ba8c7e2cb7643e188e3973cbf309dafa829"
+            },
+            {
+              "header": "@@ -1034,8 +1066,18 @@ rebuild_tmux_session() {",
+              "reason": "PR1333 retains health2 exact watcher adoption and subsequent recheck; unknown watcher identity cannot take the full-session rebuild path. PR1331 default-bus propagation remains independently present.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 1083,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "1614cc0a3da980857777b99cb3d8a153142abbfd3e5b1dac9a5fc5b518fcd73c",
+                  "start": 1067
+                },
+                {
+                  "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+                  "end": 1083,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "1614cc0a3da980857777b99cb3d8a153142abbfd3e5b1dac9a5fc5b518fcd73c",
+                  "start": 1067
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "444c5a82d184572ab42d3b65a989ca60eaca198ababa53449db7b8affd6e3961"
+            }
+          ],
+          "patch_sha256": "ee4712f0ea3f1074fa39e5f20218113ddbb6c4c4cf7919147c1146ec39d90285",
+          "path": "mu/tools/observability/pipeline_monitor.sh",
+          "reason": "PR1333 carries the original live protocol/health and optional common-directory changes; PR1331 separately preserves explicit default-bus selection across the owner boundary. The PR1339 anchor contains both ancestors, without claiming fixture landing authored them.",
+          "references": [
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 1490,
+              "path": "mu/tools/observability/pipeline_monitor.sh",
+              "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
+              "start": 1
+            },
+            {
+              "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+              "end": 1490,
+              "path": "mu/tools/observability/pipeline_monitor.sh",
+              "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,176 @@",
+              "reason": "Original locked packet and machine-derived tracker/indicator/commit-path sections describe the stopped October 4 attempt. Preserve its timestamps, scope, consumed budgets and pending native gates; it is neither current R7 authority nor evidence that live retirement/PR disposition occurred.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "40e722cd5325b86c3813a5f6134889da6e792e3a5dd36a8532df85d36e90da16"
+            }
+          ],
+          "patch_sha256": "e75d431957e33d7d472c0cda5043ee25704b9e14038954bcbafaa9643ff54211",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_2026-10-04.md",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,32081 @@",
+              "reason": "Original read-only plan binds 19 sources, five conditional candidates and fourteen HOLDs to35f7c225; mutation_authorized=false and foreground apply/verify pending. Preserve exact operation identities without replay. Fresh retention/folder action and every inherited landing owner remain under row38/row40, independent of this single-PR coverage.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "e6f4e51faae50a3857469e5b9dd44884949a5013275d7726e26352b23196da4a"
+            }
+          ],
+          "patch_sha256": "0a3e7251316fc60f030959cc8a945b1d0146e701e26ce9d58c7dc03568156324",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_apply_plan.json",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,22889 @@",
+              "reason": "Complete historical non-atomic read-only census of19entries observed October4 05:14:37-05:15:20UTC. Preserve source/index/history/liveness observations and all limitations; these are not fresh identities or authority for current source retirement.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "5f425b5efc8375851da986a5b1299120abfaedd194d575734823277363f0ac4e"
+            }
+          ],
+          "patch_sha256": "a174b96703c64404760cdbb4dad2aad745dbfd021f150b60ff6171f9fab88c85",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_census.json",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,52128 @@",
+              "reason": "Historical19-row classifier produced five candidates and fourteen HOLDs with mutation_authorized=false, including the now-superseded reviewed_oldest_mu_release proposal. Preserve all rows and owner chains; current default/explicit protection supersedes the old release permission and no candidate is applied here.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "d15a811d2bc07e5c3184590685947cc90b85bdf47ed229678707695780da771a"
+            }
+          ],
+          "patch_sha256": "efa4364762ba12db85cd9d61cefd97a1108fef4ae4c3d1ea4fff41d769a9ed41",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_classification.json",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,1035 @@",
+              "reason": "Original schema2 PR1325 inventory covers25paths40hunks:16landed,3evidence_only,21missing across eight paths. Those exact original holds and retained source remain owned; R7 covers only1329 and does not approve or close1325. Actual PR1327 replacement lineage is historical evidence, not proof all Mu work landed.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "86d88f72cc843fafde249d2adbfb78d79235c3f335481b7792e0c7ab16391135"
+            }
+          ],
+          "patch_sha256": "1aa52869f3fe00c54e0c2d560e019ccbea2907d33a18e178773edff416916333",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_coverage.json",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,2910 @@",
+              "reason": "Retain all historical failed and passing runs, native source/index observations, nine recent owner recovery records and245/55/122 inherited owner ledgers at their original timestamps. Current-source PASS predates the report-only correction and explicitly leaves fresh supervisor pending. No historical source map is rewritten or transferred to R7.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "c26c2c35eb30fa6bfa6a2599defb10b79f71732c48481f7ed1e9117d3e9a2397"
+            }
+          ],
+          "patch_sha256": "c8701bbd10ed59cd491731cd8314fb349083fd1fb67a30c02e8bb705b5e12d1d",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_implementation_evidence.json",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,717 @@",
+              "reason": "Historical binding record has mutation_authorized=false, fleet_complete=false and useful_work_complete=false, five matching read-only identities and fourteen individual holds. Prior consumed operation summaries and foreground execution state remain immutable; no source retirement or fresh approval follows from R7 coverage.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "8193bff08a2f3b0a00b3b01dd5c99a236382991d64bd72055c3bea8af848f70f"
+            }
+          ],
+          "patch_sha256": "7a247f7d81ff397b942dad325e9810643b61a48b85ab0f1fc38a6f53809e5923",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_retirement_evidence.json",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,28693 @@",
+              "reason": "All19 historical source entries and12 landing owners are retained, including MuR1/R8/R9 NEEDS_LANDING, stopped runner/cleanup work and absent-checkout unknown intent. Existing owners must independently review and land useful missing work; this ledger is not dismissed as integration or used as an all-unfinished-work barrier.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "ddd4a25281eb55a21ffa424d4e811a8c5944d900782411d4f8ab13fc0dbfdefa"
+            }
+          ],
+          "patch_sha256": "ea11c2ec23c0652248fe73fcc912c602c4d6d54f3985569db1c6deeb62cbd240",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_useful_work.json",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,31045 @@",
+              "reason": "Original schema_version=1 useful-work coverage ledger binds 19 fleet-source entries to comparison35f7c225, census/classification hashes and historical retirement authority. Each entry records changes and commits, current_source_coverage, current_landing_review, landing_owner, prior_operation_owners, retained_journal_owners and source_action. Exact index/worktree blobs and reverse-patch comparisons preserve recorded source changes; REQUIRES_HUNK_REVIEW remains an obligation, not proof that code is missing or integrated. The historical coverage totals are15NEEDS_LANDING/3COVERED/1UNKNOWN, with12current landing reviews, three prior-operation owners and40retained-journal owners. Preserve those owner chains, local commits, held transactions, index/worktree snapshots and absent-checkout UNKNOWN_ABSENT_CHECKOUT intent. Its five RETIRE_WORKTREE proposals and14UNTOUCHED_HOLD rows authorize no action: mutation_authorized=false and completion=PENDING_NATIVE_LANDING_REVIEW_AND_FOREGROUND_RETIREMENT. The MuR1 proposal does not reactivate the removed one-time release. Retain this ledger at original head537fb046 and its exact preserved branch/tree as evidence_only; existing row38/row40 and Mu owners must independently review retained hunks, land useful missing work and separately admit any physical action. R7 accounts for this ledger's preservation and ownership contribution without completing those obligations, replaying journals, retiring sources or approving other original PRs.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "6c2ef6b466595fc93be46d96b076127fbf3d1999899ad16239f6ca37a08dda23"
+            }
+          ],
+          "patch_sha256": "4f0520b3ff3f50939d219190ffae9addc7478a1e4071eeebf4c36db9fa7e9a8f",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_useful_work_coverage.json",
+          "reason": "The schema1 fleet-source ledger preserves exact change/commit comparisons and current, inherited and held-journal landing obligations for19sources. Its pending review/retirement state and mutation_authorized=false remain historical evidence under existing row38/row40 and Mu ownership; source preservation is not semantic integration or fresh action authority.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "Original indicator collected2026-10-04T07:55:23Z against35f7c225 reports ratio0.990054/parity_diff_count3/net_host_semantic_delta0/slope0.346172. Preserve those measurements and their scope; R7 indicators must be generated independently by the native outer actor.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "791b55fe667e5fc0bba2c2e75d88fd15951302ed90ef3254c1755c606886b447"
+            }
+          ],
+          "patch_sha256": "1e3b3873090cac610725916d6050e7d38a7c48185386ad374a4fd9557e5ce9da",
+          "path": "reports/l4_wave_indicators/workingrcx-fleet-residual-pr-folders-r2-2026-10-04.json",
+          "reason": "Historical governance/preservation evidence remains at the exact retained original branch/raw commit/tree; the per-hunk accounting below retains all still-open owners and grants no live action or semantic completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        }
+      ],
+      "evidence_refs": [
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/source-recovery-record.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/pr1329-commit.raw",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/source-tree-objects.pack",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/original-contribution-inventory.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission-complete-preserved",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md"
+      ],
+      "owner": {
+        "packet": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
+        "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+        "wave_id": "workingrcx-fleet-pr-coverage-r7-2026-10-20"
+      },
+      "preservation_ref": "refs/heads/jabramsja/workingrcx-fleet-residual-pr-folders-r2-2026-10-04",
+      "replacement": {
+        "head": "8404536fb2aba4b9e9726635d1e5fd5be1ff5068",
+        "id": "PR_kwDOQvy8bs8AAAABJcW0iA",
+        "merge": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+        "number": 1339
+      },
+      "source_base": "35f7c225a25025aec893230c072754cf7d7c76fc",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/workingrcx-fleet-residual-pr-folders-r2-2026-10-04",
+        "headRefOid": "537fb0461e7272e063c170e6d7d1cfa4de1b52a2",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABGh1NrA",
+        "mergedAt": null,
+        "number": 1329,
+        "state": "OPEN"
+      }
+    }
+  ],
+  "wave_id": "workingrcx-fleet-pr-coverage-r7-2026-10-20"
+}

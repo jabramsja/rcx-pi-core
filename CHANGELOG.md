@@ -6,7 +6,36 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-20
 
-### PR1330 and PR1338 coverage R6 (Phase B; unmerged)
+### PR1329 coverage R7 (Phase B; unmerged)
+
+- Account for the original20paths62hunks at retained head `537fb046`, using
+  actual PR1339 as the aggregate anchor and explicit PR1333 folder-recovery,
+  PR1331 monitor pin, PR1334 executor recovery and PR1339 fixture contributions.
+  Strict watcher lifecycle checks already landed in PR1333; PR1334 preserves them.
+  The removed one-time Mu exception is superseded, never called landed; retain
+  default protection, original source and every useful-work owner.
+- Keep original tmux-less P2 OPEN in a required row40 standing report with
+  bounded coverage-only acceptance. Preserve distinct1329 unknown-reader, R5
+  Linux zombie and R2 changing-PID failure histories without inferred causality.
+- Reconcile captured PRIMARY outside exact native Ra/restoration anchors,
+  retaining268IDs/44orderedowners and prior notes. Preserve held transaction
+  `f82a652ae9ca461aa1b5a069948e73f4` and stash
+  `991ef3e02a0f76e967829f29d85ef5a868d92187`, plus all older WIP.
+- Local command/source/index receipts: `reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json`.
+  Native generated/indexed authority, independent review and complete landing
+  gates precede separate fresh public1329 disposition. No source retirement.
+
+### R6 coverage and original PR disposition actually completed
+
+- PR1340 merged at `5921cf352db0f52aa469655371e8977c3f1a0848` on
+  2026-10-20T02:36:40Z. Captured later evidence records Main synchronization,
+  native lifecycle COMPLETE and public apply/verify exit0 with PR1330/PR1338
+  CLOSED_VERIFIED; local and remote original branches remain retained.
+- The following R6 Phase B entry retains its original stage and proof limits.
+  It does not describe current PR state or grant new approval. Linked dev
+  ownership HOLD, runner, retention, Mu and other originals remain separate.
+
+### PR1330 and PR1338 coverage R6 (historical Phase B observation; later landed PR1340)
 
 - Account independently for PR1330's 7 paths/14 hunks and PR1338's 9 paths/20
   hunks at their exact retained heads. Cite actual PR1334 budget/recovery and

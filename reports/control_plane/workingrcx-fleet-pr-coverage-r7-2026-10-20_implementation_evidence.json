@@ -1,0 +1,1865 @@
+{
+  "additional_standing_topic": {
+    "owner": "FLEET-NATIVE-LIFECYCLE-PREVENTION",
+    "record": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-current-source-contract-review-20261013.json",
+    "status": "OPEN; separate native reproduction/disposition",
+    "topic": "PR1333 late monitor finding4257009407"
+  },
+  "admitted_inputs": [
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/PRIMARY-TASKS.md",
+      "sha256": "bb90de978337dfa213ecd538b11a7363cdef300081dc41a7d0898ba80c96ac7b",
+      "size": 3274276
+    },
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/frozen-wave-config.json",
+      "sha256": "ec550b039cf6befa5055faf02c3eaf82e2036c8fe8eed95857180f3615de6f85",
+      "size": 15089
+    },
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/original-contribution-inventory.json",
+      "sha256": "9cb09977f5f534cfdcb81a344ddf8d5fbdfc70dfd51c36b91ffe05f3512a5678",
+      "size": 15654
+    },
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/source-recovery-record.json",
+      "sha256": "7d047b23fd975bdbd01e42c0796e52623eb2342c1d00b4deffd48c14e0f40481",
+      "size": 861
+    },
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/pr1329-commit.raw",
+      "sha256": "859f72484d6a3f10667f45e58b4ff2ebc0e7be18bbae510bfa62bc8d59bd9ac7",
+      "size": 304
+    },
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/source-tree-objects.pack",
+      "sha256": "5c9db0cab956494ae4d1ba8dfa3daaf65dd56979ffde87a4196d615a76efa76e",
+      "size": 64974110
+    },
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-r7-live-inputs-20261020/pr1329.json",
+      "sha256": "4b9a407901c9114127a03b1218fc8dd545c4975d65cb179163ee7e52fc2e6cbb",
+      "size": 1786
+    },
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-next-coverage-boundaries-20261019.json",
+      "sha256": "64863048f3ec01547cd97531a626f23ae96367a840b43bfda8ee7973754c3e83",
+      "size": 1507
+    },
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-r7-tmux-prerequisite-observation.json",
+      "sha256": "da2677139e99774668d5366ae98bf829eb2e75f0e606f94e4eecbb93adc9fb29",
+      "size": 1279
+    },
+    {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-r6-disposition-verified-preserved/preservation.json",
+      "sha256": "de5660d6023625481f8ced61adddd2ef2916cca32288e440d9d6d01971ea9407",
+      "size": 10065
+    }
+  ],
+  "branch": "jabramsja/workingrcx-fleet-pr-coverage-r7-2026-10-20",
+  "bridge_round_1_remediation": {
+    "after_validation_packet_predicate": {
+      "call": "phase_a_executor.validate_native_stub_packet_contract(route, packet_path, packet_content, allow_post_lock_machine_sections=True)",
+      "contract_digest": "f385feb205766cfee0abd1c8995dd800c6fbce74f8c8f13a8a1e0edf8a1f9870",
+      "observed_utc": "2026-10-20T03:48:58.131343+00:00",
+      "packet_sha256_as_observed": "d911f76aeb3f1534c1b0fa383eda41efa5703ad0af4b8a041648286e27061894",
+      "post_lock_section_limit": "Only existing native-generated indicator reconciliation is admitted; implementer did not edit packet bytes.",
+      "result": true,
+      "route_sha256_as_observed": "38c63c758f09730f4906ef8e29de848e4191a8921b65798c37bbcb8ab02b4001"
+    },
+    "before_validation": {
+      "coverage": {
+        "hunks": 62,
+        "manifest_sha256": "87bfab8b04a60523474ef9dfb02a8b446395d0c0edccf1cd1f3abc3fb97bba9c",
+        "paths": 20,
+        "shape_and_source_errors": []
+      },
+      "observed_utc": "2026-10-20T03:41:25.668832+00:00",
+      "packet_predicate": {
+        "call": "phase_a_executor.validate_native_stub_packet_contract(route, packet_path, packet_content, allow_post_lock_machine_sections=True)",
+        "contract_digest": "f385feb205766cfee0abd1c8995dd800c6fbce74f8c8f13a8a1e0edf8a1f9870",
+        "observed_utc": "2026-10-20T03:41:25.700447+00:00",
+        "packet_sha256_as_observed": "d911f76aeb3f1534c1b0fa383eda41efa5703ad0af4b8a041648286e27061894",
+        "post_lock_section_limit": "Only existing native-generated indicator reconciliation is admitted; implementer did not edit packet bytes.",
+        "result": true,
+        "route_sha256_as_observed": "38c63c758f09730f4906ef8e29de848e4191a8921b65798c37bbcb8ab02b4001"
+      },
+      "quota": {
+        "available": true,
+        "checked_utc": "2026-10-20T03:41:27.726092+00:00",
+        "observed_utc": "2026-10-20T03:41:00.000Z",
+        "source": "one-shot current-session usage observation",
+        "stop_required": false,
+        "values_private": true
+      }
+    },
+    "blocking_finding": "DOC_ACCURACY: Account for the actual useful-work coverage ledger",
+    "completed_utc": "2026-10-20T03:48:58.549421+00:00",
+    "current_manifest_sha256": "87bfab8b04a60523474ef9dfb02a8b446395d0c0edccf1cd1f3abc3fb97bba9c",
+    "entry_source_inventory": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/entry-source-inventory.json",
+      "sha256": "6ab13d1dafeb0e177ec0af6b5a82b940a15ab507eb6695bf9595386a69c2c4e6"
+    },
+    "files_changed": [
+      "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json",
+      "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json"
+    ],
+    "handoff_quota_observation": {
+      "available": true,
+      "checked_utc": "2026-10-20T03:48:56.260188+00:00",
+      "observed_utc": "2026-10-20T03:48:53.639Z",
+      "source": "one-shot current-session usage observation",
+      "stop_required": false,
+      "values_private": true
+    },
+    "historical_proof_policy": "All previous report fields replaced for this correction are preserved verbatim under historical_before_bridge_round_1_correction; all original source/index/run receipts and timestamps remain unchanged. Current final inventory and new runs are separate evidence.",
+    "implementation": "Replaced the copied PR1325 rationale with source-bound accounting for the schema1 19-source ledger, its comparison evidence, current/inherited/held-journal owners, pending reviews and non-authorizing retirement proposals. Updated only that coverage entry and the manifest canonical digest.",
+    "ledger_entry_inventory": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/retained-useful-work-ledger-accounting.json",
+      "sha256": "11df1dad84a441dcd62696e64f5c5aeb30fcafebe3e64bdb14fc98c7165fbed1"
+    },
+    "native_entry_state": "Outer tracker restoration and indicator generation were already present at repair entry; their bytes and index are preserved. These observations do not substitute for actual native indexed L4, review, precommit or landing gates.",
+    "native_stage_limit": "Correction for independent outer review only. No staging, startup gates, launch, attestation, commit, push, PR, merge, closeout, or lifecycle action executed by this implementer.",
+    "non_blocking_finding": {
+      "proof_limit": "Passing provisioned environments do not establish universal tmux provisioning or supported tmux-less behavior; no fixture/workflow/assertion change.",
+      "standing_report": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md",
+      "standing_report_unchanged": true,
+      "status": "OPEN under existing row40 bounded acceptance",
+      "topic": "Original P2 tmux availability"
+    },
+    "original_ledger": {
+      "census_sha256": "8ab915d983fe1384e2431384097ff0a86a18d3449159c3888aa176bf2b1a2904",
+      "classification_sha256": "7f6dd0587dfcd1333ea23a520c20d92f0296aada5fde4dd3b12e469441d12b71",
+      "comparison_commit": "35f7c225a25025aec893230c072754cf7d7c76fc",
+      "completion": "PENDING_NATIVE_LANDING_REVIEW_AND_FOREGROUND_RETIREMENT",
+      "current_landing_reviews": 12,
+      "entry_count": 19,
+      "evidence_policy": "Exact reverse binary patches and comparison blobs prove only the recorded source changes. A failed comparison requires hunk review, not an inference of missing code. Inherited owners and held journal intent remain open independently.",
+      "historical_coverage_totals": {
+        "COVERED": 3,
+        "NEEDS_LANDING": 15,
+        "UNKNOWN": 1
+      },
+      "historical_source_action_totals": {
+        "RETIRE_WORKTREE": 5,
+        "UNTOUCHED_HOLD": 14
+      },
+      "mutation_authorized": false,
+      "prior_operation_owners": 3,
+      "retained_journal_owners": 40,
+      "schema_version": 1,
+      "source_blob": "3b4f6fe742a78a2bc3133e39d9c07045aac9f274",
+      "source_bytes": 1808026,
+      "source_head": "537fb0461e7272e063c170e6d7d1cfa4de1b52a2",
+      "source_lines": 31045,
+      "source_path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_useful_work_coverage.json",
+      "source_sha256": "ab5d63a2571b26acf703884379dad8622a0152d0206249164c51ec1b2f0b1cbf"
+    },
+    "prior_full_evidence": {
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/prior-implementation-evidence.json",
+      "sha256": "0f1b5aa23a7530289d9f953d7cd792ae5daf92f634dab5d186b0b81f2c0e0b09"
+    },
+    "source_index_stability": "Both complete runs have identical source maps and index hashes before, after and across. Only this evidence report is updated afterward to record the results.",
+    "started_utc": "2026-10-20T03:42:19.783733+00:00",
+    "status": "IMPLEMENTED_LOCAL_GATES_PASS_NATIVE_REVIEW_PENDING"
+  },
+  "cited_whole_files": [
+    {
+      "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "lines": 620,
+      "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+      "sha256": "d594cfb71e1ed62e7804b9de25da1eb7011263263ea93553d59e418a2a8fe163"
+    },
+    {
+      "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "lines": 1778,
+      "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+      "sha256": "4b060706167f5e3936020856fb60a14b03776493e2943c4954c1e02e5b798137"
+    },
+    {
+      "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "lines": 23229,
+      "path": "mu/tests/tools/test_recovery_gate.py",
+      "sha256": "e13565c6b2d92cfde60cee185af0e44460620c85c0f8616077ee1ddec1faeaac"
+    },
+    {
+      "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "lines": 932,
+      "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+      "sha256": "b572c292001b9d0778385aec0778757952ffe41a50a2d34896c9bc779f07bc99"
+    },
+    {
+      "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "lines": 1955,
+      "path": "mu/tests/tools/test_worktree_lifecycle.py",
+      "sha256": "f23ed73bd503c487b2da052d792c300a757caa0a61b3c5b9748fda22e7b08d05"
+    },
+    {
+      "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "lines": 845,
+      "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+      "sha256": "dee4117e23b6beea49b2108be92605579137160733c9a48b3b92a83a089f6c27"
+    },
+    {
+      "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "lines": 1105,
+      "path": "mu/tools/executors/worktree_lifecycle.py",
+      "sha256": "b4e6e08e852d0bbbafe87a7a81d054de86a566f626f4a0ab991354d6ee80ad3c"
+    },
+    {
+      "commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "lines": 1490,
+      "path": "mu/tools/observability/pipeline_monitor.sh",
+      "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1"
+    },
+    {
+      "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+      "lines": 620,
+      "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+      "sha256": "d594cfb71e1ed62e7804b9de25da1eb7011263263ea93553d59e418a2a8fe163"
+    },
+    {
+      "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+      "lines": 1778,
+      "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+      "sha256": "4b060706167f5e3936020856fb60a14b03776493e2943c4954c1e02e5b798137"
+    },
+    {
+      "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+      "lines": 23229,
+      "path": "mu/tests/tools/test_recovery_gate.py",
+      "sha256": "e13565c6b2d92cfde60cee185af0e44460620c85c0f8616077ee1ddec1faeaac"
+    },
+    {
+      "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+      "lines": 932,
+      "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+      "sha256": "b572c292001b9d0778385aec0778757952ffe41a50a2d34896c9bc779f07bc99"
+    },
+    {
+      "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+      "lines": 1955,
+      "path": "mu/tests/tools/test_worktree_lifecycle.py",
+      "sha256": "f23ed73bd503c487b2da052d792c300a757caa0a61b3c5b9748fda22e7b08d05"
+    },
+    {
+      "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+      "lines": 845,
+      "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+      "sha256": "dee4117e23b6beea49b2108be92605579137160733c9a48b3b92a83a089f6c27"
+    },
+    {
+      "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+      "lines": 1105,
+      "path": "mu/tools/executors/worktree_lifecycle.py",
+      "sha256": "b4e6e08e852d0bbbafe87a7a81d054de86a566f626f4a0ab991354d6ee80ad3c"
+    },
+    {
+      "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+      "lines": 1490,
+      "path": "mu/tools/observability/pipeline_monitor.sh",
+      "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1"
+    }
+  ],
+  "comparison_commit": "5921cf352db0f52aa469655371e8977c3f1a0848",
+  "completed_local_validation_utc": "2026-10-20T03:48:53.282406+00:00",
+  "completed_utc": "2026-10-20T03:48:58.549421+00:00",
+  "contributing_lineage": [
+    {
+      "contribution": "Explicit default-bus pin across detached monitor owner boundary, independent of1329 unknown-reader failure.",
+      "head": "244b09db076754ccb0489aaab30ca03d054f52d6",
+      "merge": "244b09db076754ccb0489aaab30ca03d054f52d6",
+      "merged_at": "2026-10-13T00:06:05Z",
+      "number": 1331,
+      "record": {
+        "mode": "0o644",
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-r7-live-inputs-20261020/pr1331.json",
+        "sha256": "b41f47748477bd21949d85ae8e0b50f2728f91f40eeab81997b4cdf39fb4b97a",
+        "size": 300
+      }
+    },
+    {
+      "contribution": "Folder recovery including strict literal process parsing, absent-PID conjunction, exact terminal registration, archive protection and adjacent tests; obsolete one-time Mu release omitted.",
+      "head": "2ca41aa9e3de508f9b1db475455ee181df4733d7",
+      "merge": "a9c4e699fd51c13d9501304d5c629d0212e33602",
+      "merged_at": "2026-10-13T09:23:04Z",
+      "number": 1333,
+      "record": {
+        "mode": "0o644",
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-r7-live-inputs-20261020/pr1333.json",
+        "sha256": "9eddc919c4411184fc88534aefdd85ffaeea2579e92f9165f0381416d489e87f",
+        "size": 300
+      }
+    },
+    {
+      "contribution": "Executor process-release, recovered-retry and status-refresh continuation changes. Lifecycle source/doc/tests and recovery_gate source/tests match PR1333 exactly; no later authorship of strict watcher guards claimed.",
+      "head": "51f575945e2bd3563cc8d0a77506c5ae0f78c432",
+      "merge": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "merged_at": "2026-10-14T05:02:20Z",
+      "number": 1334,
+      "record": {
+        "mode": "0o644",
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-r7-live-inputs-20261020/pr1334.json",
+        "sha256": "d5b659d7bc1806e48b0f01a76df41904e123312bf2a28d4748ae77a2115e2cfc",
+        "size": 300
+      }
+    },
+    {
+      "contribution": "Shared real foreground controller/reaper, paused-parent and observer-boundary fixture controls. Aggregate replacement anchor contains ancestor contributions; does not author all of them.",
+      "head": "8404536fb2aba4b9e9726635d1e5fd5be1ff5068",
+      "merge": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+      "merged_at": "2026-10-20T00:51:26Z",
+      "number": 1339,
+      "record": {
+        "mode": "0o644",
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-r7-live-inputs-20261020/pr1339.json",
+        "sha256": "84f07e25aa62b573046a328f0482cd8beb7657750325dd028c15746ed80cc961",
+        "size": 300
+      }
+    },
+    {
+      "contribution": "R6 coverage governance landing and later separately verified native1330/1338 disposition; no new product source implementation.",
+      "head": "5b21abaa49d5df544e85f0ae7fd7b72e6687502c",
+      "merge": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "merged_at": "2026-10-20T02:36:40Z",
+      "number": 1340,
+      "record": {
+        "mode": "0o644",
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-r7-live-inputs-20261020/pr1340.json",
+        "sha256": "9a62cedab08fe4eb051cf619049337c23969fc651eb89cad4fde3bb15751f1a3",
+        "size": 300
+      }
+    }
+  ],
+  "coverage": {
+    "hunk_resolutions": {
+      "evidence_only": 14,
+      "landed": 40,
+      "superseded": 8
+    },
+    "hunks": 62,
+    "manifest_sha256": "87bfab8b04a60523474ef9dfb02a8b446395d0c0edccf1cd1f3abc3fb97bba9c",
+    "path_resolutions": {
+      "evidence_only": 12,
+      "landed": 5,
+      "superseded": 3
+    },
+    "paths": 20,
+    "semantic_review": "Bridge round1 blocking ledger rationale corrected against the retained original artifact; independent native semantic review remains pending. Hash equality alone is not semantic equivalence.",
+    "shape_and_source_errors": []
+  },
+  "created_utc": "2026-10-20T03:11:58.362320+00:00",
+  "current_artifact_inventory": {
+    "files": [
+      {
+        "kind": "file",
+        "mode": "0o644",
+        "path": "CHANGELOG.md",
+        "sha256": "51766d0dc50eae03241d6cfd4e49c9183d23063f006100e5765bda66bf75465f",
+        "size": 262907
+      },
+      {
+        "kind": "file",
+        "mode": "0o644",
+        "path": "STATUS.md",
+        "sha256": "b81c3a9e6f544e3c267f5a643f41f7e2399cba84ae81f09e1ebe3233d4973f0f",
+        "size": 15962
+      },
+      {
+        "kind": "file",
+        "mode": "0o644",
+        "path": "TASKS.md",
+        "sha256": "5bbd2d2481b8a21cc22efb17faf379be8832b5aac2e4978a21d9c9544385d07a",
+        "size": 3280403
+      },
+      {
+        "kind": "file",
+        "mode": "0o644",
+        "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
+        "sha256": "d911f76aeb3f1534c1b0fa383eda41efa5703ad0af4b8a041648286e27061894",
+        "size": 13059
+      },
+      {
+        "kind": "file",
+        "mode": "0o644",
+        "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json",
+        "sha256": "2c5f623a7e41c0f8518742f0eaf85d217e6aa6f297cd8c66edd276846fb1a698",
+        "size": 106143
+      },
+      {
+        "kind": "file",
+        "mode": "0o644",
+        "path": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md",
+        "sha256": "2a354eb63e2257c9250cae6758240a241320a743de60fe8c42915921571af6a0",
+        "size": 11725
+      },
+      {
+        "kind": "file",
+        "mode": "0o644",
+        "path": "reports/l4_wave_indicators/workingrcx-fleet-pr-coverage-r7-2026-10-20.json",
+        "sha256": "82a61a694a045bb2f3780253c657a654e8dae597253a105af8bd9d822ebd6f4f",
+        "size": 623
+      }
+    ],
+    "observed_utc": "2026-10-20T03:48:58.549421+00:00",
+    "scope": "Current repair delivery is separate from all immutable historical and fresh run maps. Only the evidence report receives results/inventory metadata after the sweep; detached final inventory binds its delivered bytes."
+  },
+  "entry_observation": {
+    "branch": "jabramsja/workingrcx-fleet-pr-coverage-r7-2026-10-20",
+    "canonical_ids": [
+      "ACTIVE-CODEX-AUTONOMOUS-QUEUE",
+      "AGENT-DEFAULTS-OPUS-4-8",
+      "ANTI-DRIFT-ENFORCEMENT",
+      "BOT-REMEDIATION-PREPUSH-SELECTOR-BOUNDS",
+      "BRIDGE-ADAPTER-BUFFERED-STDERR-ENVELOPE-TERMINATION-R1",
+      "BRIDGE-REVIEW-PRESERVATION-ARTIFACT-BOUNDS",
+      "CANONICAL-DOCS-TRUTH-INTEGRATION",
+      "CLAUDE-LOCAL-DURABILITY-TRACKING",
+      "CODEX-AUTOPING-IDLE-SUMMARY-REFRESH-2026-06-20",
+      "CODEX-EFFECTIVE-MODEL-CATALOG-AUTHORITY",
+      "CODEX-STARTUP-HARDENING",
+      "COMMIT-EXECUTOR-E2E",
+      "COMMIT-GENERATED-GOVERNANCE-RETRY-IDEMPOTENCY",
+      "COMMIT-GENERATED-GOVERNANCE-RETRY-IDEMPOTENCY-R3",
+      "COMMIT-SUPERVISOR-NEEDS-PHASE-A-TERMINAL-RETRY-FENCE",
+      "DEFERRED-CONSOLIDATION",
+      "DEFERRED-FINDINGS-SWEEP",
+      "DEFERRED-REPORT-TRUTH-CLEANUP",
+      "DIALECTIC-CONTINUATION-DELIVERY-AND-LINEAGE",
+      "EXECUTOR-SURFACES",
+      "FLEET-CLEANUP-APPLY",
+      "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION",
+      "FLEET-CLEANUP-CENSUS-BUILDER",
+      "FLEET-CLEANUP-CENSUS-R3",
+      "FLEET-CLEANUP-CENSUS-R3-CI-FIXTURE-ISOLATION",
+      "FLEET-CLEANUP-CLASSIFICATION",
+      "FLEET-NATIVE-LIFECYCLE-PREVENTION",
+      "FOUNDER-ORDERED-REDTEAM-BRIDGE-DOC-ACCURACY-CLOSEOUT",
+      "FOUNDER-ORDERED-REDTEAM-DOCS-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-DOCS-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-NEXT-SLICE",
+      "FOUNDER-ORDERED-REDTEAM-MU-STRUCTURAL-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-REPO-CODE-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-TESTS-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-TESTS-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-TESTS-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-TOOLING-AUDIT",
+      "FOUNDER-ORDERED-REDTEAM-TOOLING-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-TOOLING-NON-BLOCKING-REMEDIATION",
+      "FOUNDER-ORDERED-REDTEAM-WAVE-QUEUE",
+      "FOUNDER-QUESTION-AUTHENTICATED-RESOLUTION-AUTHORITY",
+      "GENERIC-NEXT-ROUTE-RECONCILIATION",
+      "L4-GROWTH-CAP-PREBUMP-BUILDER",
+      "LAUNCH-WAVE-DETERMINISTIC-CANDIDATE-CARRY-FORWARD-BUILDER",
+      "LAUNCH-WAVE-NATIVE-STUB-PACKET-CONTRACT-R1",
+      "LAUNCH-WAVE-OVERRIDE-AUTHORITY-PRODUCER-R1",
+      "LAUNCH-WAVE-POST-COMMIT-CONTINUATION-CONSUMER-R2",
+      "LAUNCH-WAVE-POST-COMMIT-CONTINUATION-CONSUMER-R4",
+      "LAUNCH-WAVE-POST-COMMIT-CONTINUATION-PRODUCER-R3",
+      "LEGACY-N3-LOCAL-EVIDENCE-ADJUDICATION",
+      "META-BRIDGE-BOUNDED-REVIEW-FIX",
+      "META-BRIDGE-S1",
+      "META-BRIDGE-S2",
+      "MU-COINDUCTION-PRODUCTION-PROOF",
+      "MU-EVIDENCE-RESIDUES",
+      "MU-FIXPOINT-PRODUCTION-PROOF",
+      "MU-OPTIMIZATION-LAST",
+      "MU-PREPRODUCTION-REDTEAM",
+      "N3-ENGINE-PIPELINE-RUN-ALGORITHM-AUTHORITY-SOURCE-PREREQ",
+      "N3-JS-DEBT-SUMMARY-KERNEL-MARKER-TRUTH-SYNC",
+      "N3-JS-KERNEL-ITERATION-MARKER-TRUTH-ALIGNMENT",
+      "N3-KERNEL-DRIVER-MU-DRIVER-BOUNDARY-DESIGN",
+      "N3-KERNEL-DRIVER-MU-FUEL-LOOP-ELIMINATION",
+      "N3-KERNEL-DRIVER-POST-CONTINUATION-MARKER-REDUCTION",
+      "N3-KERNEL-DRIVER-RESIDUAL-HOST-LOOP-ELIMINATION-FOLLOWUP",
+      "N3-PROJECTION-LOADER-JS-BINARY-DECODER-PARITY",
+      "N3-STAGE0-MARKER-TRUTH-CURRENT-PATH-SYNC",
+      "NATIVE-STUB-PHASE-B-SAME-CONFIG-RELAUNCH-REPAIR",
+      "NEVER-BEHIND-FLEET-AUTHORITY",
+      "NEXT-CODEX-POST-REDTEAM",
+      "NIGHTLY-ADMISSION-INTEGRATION",
+      "NIGHTLY-BOOT1-WORKLOAD-CONTRACT-RECONCILIATION-2026-06-30",
+      "NIGHTLY-DEADLINE-TELEMETRY-PROOF",
+      "NIGHTLY-FULL-VERIFY-2026-06-30",
+      "NIGHTLY-JS-MIRROR-PRE-COMMIT-RETRY-2026-06-30",
+      "NIGHTLY-NR5-FULL-GREEN-VERIFY-2026-06-30",
+      "NIGHTLY-NR5-STRUCTURAL-TRACE-META-RESIDUAL-2026-06-30",
+      "NOW-CODEX-REDTEAM",
+      "NR-3",
+      "NR-4",
+      "NR-5",
+      "NR-5-FOLLOW-UP",
+      "OBSERVER-DURABILITY",
+      "ORCHESTRATOR-SWITCH-DRIFT-FIX",
+      "ORCHESTRATOR-SWITCH-DRIFT-FIX-2026-06-30",
+      "P0IBRRCP-HYBRID-READER-TERMINALITY-R1",
+      "P0IBRRCP-POSTMERGE-BATON-QUEUE-R1-2026-08-26",
+      "P0IBRRCP-PROVIDER-NEUTRAL-BRIDGE-CONTEXT-R4",
+      "P1",
+      "P2",
+      "P3",
+      "P4",
+      "P5",
+      "P6",
+      "P7",
+      "P8",
+      "P9",
+      "PAGER-ORCHESTRATOR-LABEL-TRUTH",
+      "PARALLEL-PIPELINE",
+      "PASS",
+      "PBNOGO-INTEGRATION",
+      "PENDING-UNTIL-MERGE",
+      "PHASE-A-POST-REMEDIATION-LINE-REF-PREBRIDGE-GUARD",
+      "PHASE-B-BLOCKING-FINDING-CONVERGENCE-HARDENING-2026-06-20",
+      "PHASE-B-EVIDENCE-COMMAND-WHOLE-FILE-DOMINANCE-R1",
+      "PHASE-B-LAUNCH-TRACKER-AUTHORITY-CONTINUITY-R4C-2026-09-08",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B-R2",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-ACTIVATION-R4B-R3",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-BOOTSTRAP-R3",
+      "PHASE-B-LAUNCH-TRACKER-RESTORE-CAPABILITY-R4A",
+      "PHASE-B-PRIVATE-REVIEW-BYTE-PRESERVING-RESUME-R1",
+      "PHASE-B-PRIVATE-REVIEW-BYTE-PRESERVING-RESUME-R2",
+      "PHASEB-EXACT-STAGE-JS-PARSER-FIX-2026-06-30",
+      "PIPELINE-AGENT-MODEL-EFFORT-BUILDER",
+      "PIPELINE-AGENT-PAGER",
+      "PIPELINE-EASY-SWITCH-PROPAGATION-2026-06-20",
+      "PIPELINE-FIX-17",
+      "PIPELINE-FIX-29",
+      "PIPELINE-FIX-31",
+      "PIPELINE-FIX-33",
+      "PIPELINE-FIX-34",
+      "PIPELINE-FIX-38",
+      "PIPELINE-FIX-50",
+      "PIPELINE-FIX-52",
+      "PIPELINE-FIX-53",
+      "PIPELINE-FIX-54A3",
+      "PIPELINE-FIX-55",
+      "PIPELINE-FIX-56",
+      "PIPELINE-FIX-57",
+      "PIPELINE-FIX-60B",
+      "PIPELINE-FIX-60C",
+      "PIPELINE-FIX-60D",
+      "PIPELINE-FIX-61",
+      "PIPELINE-FIX-62C",
+      "PIPELINE-NR5-DEFECT-HANDOFF-TRUTH",
+      "PIPELINE-NR5-DEFECT-HANDOFF-TRUTH-2026-06-30",
+      "PIPELINE-RECOVERY",
+      "PIPELINE-REENTRY-REROUTE",
+      "PIPELINE-TEST-RUN",
+      "PR-DISPOSITION-APPLY",
+      "PR-DISPOSITION-EXECUTION",
+      "PR-DISPOSITION-R2-NO-REPLAY-FINALIZATION-R1-2026-09-10",
+      "PR-DISPOSITION-R2-PRESERVED-CANDIDATE-ADOPTION-ENABLER-R1-2026-09-10",
+      "PR-DISPOSITION-RECONCILIATION",
+      "PR-DISPOSITION-TERMINAL-SWEEP-ENABLER-R1-2026-09-10",
+      "PR-LIVE-CENSUS-RECONCILIATION",
+      "PR-LIVE-CENSUS-RECONCILIATION-R1",
+      "PR1219-P0IAR-CANONICAL-PHASE-B-REVIEW-RECEIPT",
+      "PR1219-P0IB1",
+      "PR1219-P0IB2",
+      "PR1219-P0IBRR",
+      "PR1219-P0IBRRC",
+      "PR1219-P0IBRRCO",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C4",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C5",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C5-R2",
+      "PR1219-P0IBRRCO-BRIDGE-FIX-REPLAY-R3C6-R4",
+      "PR1219-P0IBRRCO-L4-INDICATOR-COMPARISON-PROVENANCE-R1",
+      "PR1219-P0IBRRCP-ADAPTER-FINALITY-R2",
+      "PR1219-P0IBRRCP-ADAPTER-FINALITY-R3",
+      "PR1219-P0IBRRCP-ADAPTER-FRAMING-R4A",
+      "PR1219-P0IBRRCP-AUTO-DEFER-AMEND-PUSH-DURABILITY-PREREQ-R1",
+      "PR1219-P0IBRRCP-AUTO-DEFER-TIMEOUT-ONLY-PREREQ-R2",
+      "PR1219-P0IBRRCP-AUTO-DEFER-TIMEOUT-ONLY-PREREQ-R3",
+      "PR1219-P0IBRRCP-BRIDGE-ADAPTER-STOP-AFTER-AUTHORITY-PREREQ-R1",
+      "PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R1",
+      "PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R2",
+      "PR1219-P0IBRRCP-CODEX-ROLE-PAGER-DEFAULT-PREREQ-R1",
+      "PR1219-P0IBRRCP-COMMIT-EVIDENCE-REFRESH-PREREQ-R1",
+      "PR1219-P0IBRRCP-COMMIT-EVIDENCE-REFRESH-PREREQ-R2",
+      "PR1219-P0IBRRCP-EXACT-CLOSURE",
+      "PR1219-P0IBRRCP-PBNOGO-DECISION-PRESERVATION-PREREQ-R1",
+      "PR1219-P0IBRRCP-PHASE-B-EVIDENCE-AUTHORITY-PREREQ-R1",
+      "PR1219-P0IBRRCP-PHASE-B-EVIDENCE-HANDOFF-R2",
+      "PR1219-P0IBRRCP-PHASE-B-EXPLICIT-EVIDENCE-PRESERVATION-R1",
+      "PR1219-P0IBRRCP-PROVIDER-NEUTRAL-BRIDGE-CONTEXT-R2",
+      "PR1219-P0IBRRCP-PROVIDER-NEUTRAL-BRIDGE-ROLE-CONTEXT-PREREQ-R1",
+      "PR1219-P0IBRRCP-RECOVERY-TIMEOUT-ENV-CONTAINMENT-PREREQ-R1",
+      "PR1219-P0IBRRCP-REENTRY-DECISION-RESUME-CONTEXT-PREREQ-R1",
+      "PR1219-P0IBRRCP-REVIEWER-CANDIDATE-CAUSALITY-AUTHORITY-R2",
+      "PR1219-P0IBRRCP-REVIEWER-DELTA-SCOPE-AUTHORITY-R1",
+      "PR1219-P0IBRRCP-ROUTING-AUTHORITY-BOOTSTRAP-R4",
+      "PR1219-P0IBRRT",
+      "PR1219-P0IMF-LAUNCH-BOUND-MODEL-AUTHORITY-FREEZE-2026-08-22",
+      "PR1219-P0IMLG-LAUNCH-SOURCE-COMMON-DIR-GUARD-2026-08-22",
+      "PR1219-P0IMQR-CURRENT-ROW-IDENTITY-2026-08-22",
+      "PR1219-P0IMRB-RECOVERY-DELEGATE-BUS-AUTHORITY-2026-08-22",
+      "PR1219-P0IMRP-COMMIT-TARGET-ROLE-AUTHORITY-2026-08-22",
+      "PR1219-P0IMRP-COMMIT-TARGET-ROLE-AUTHORITY-ACTIVATION-2026-08-22",
+      "PR1219-P0IMRP-RECEIPT-MODEL-PROVENANCE-2026-08-22",
+      "PR1219-P0IMRP-RECEIPT-MODEL-PROVENANCE-ACTIVATION-2026-08-22",
+      "PR1219-P0IMRP-RECOVERY-STDOUT-PROVENANCE-2026-08-22",
+      "PR1219-P0IMRP-TARGET-ROLE-TEST-FIXTURE-PREREQUISITE-2026-08-22",
+      "PR1219-P0IMRPA-AUTHORITY-PROVENANCE-BOOTSTRAP",
+      "PR1219-P0IX-CONTROL-PATH",
+      "PRE-COMMIT-SUPERVISOR-STANDING",
+      "PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX",
+      "PRECOMMIT-L4-AUTH-ANCHOR-RETENTION-FIX-2026-06-30",
+      "PREPUSH-RECOVERY-CONTEXT-AUTHORITY",
+      "PRIMARY-FFSYNC-TRACKED-WIP-PRESERVE-2026-06-20",
+      "QUESTION-CHECKPOINT-AND-INV2-AUTHORITY",
+      "RECEIPT-COMMIT-ROBUSTNESS-BOUNDED-SUCCESSORS",
+      "RECOVERY-TIER3-WIRING",
+      "REVIEW-CONVERGENCE-STOPPED-REVIEWER-EDGES",
+      "REVIEWER-EVIDENCE-BUDGET-ENFORCEMENT-R1",
+      "ROLE-SWITCH-CONVERGENCE",
+      "ROLES-ALL-CODEX-PR1219-P0-ROLE-MODEL-BOOTSTRAP",
+      "ROLES-ALL-CODEX-PR1219-P0A-DETACHED-CHILD-CLEANUP",
+      "ROLES-ALL-CODEX-PR1219-P0B-MONITOR-EXCEPTION-CLEANUP",
+      "ROLES-ALL-CODEX-PR1219-P0C-PRIVATE-ATTR-POSTFIX-RESUME",
+      "ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IAH-CANDIDATE-AUTHORITY-TRUST-ORDERING-HARDENING",
+      "ROLES-ALL-CODEX-PR1219-P0IB-PRECOMMIT-INVENTORY-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRC-REENTRY-PRIVATE-ATTR-CHECKPOINT-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-BRIDGE-ENVELOPE-VALIDATION-PREREQ-R3",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-CODEX-ROLE-PAGER-DEFAULT-PREREQ-R2",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-NORMAL-ROOT-RECORDED-CHILD-CLEANUP",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-PROVIDER-TERMINAL-R4B",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-RECEIPT-AUTHORITY-R1",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-REVIEWER-CANDIDATE-CAUSALITY-AUTHORITY-R3",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-REVIEWER-CANDIDATE-CAUSALITY-AUTHORITY-R4",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-ROUTING-AUTHORITY-BOOTSTRAP-R4",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRCP-SHARED-ENVELOPE-FRAMING-R4A2",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRQ2-CURRENT-NEXT-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IBRRT-PHASE-B-REFUSAL-TRANSPORT",
+      "ROLES-ALL-CODEX-PR1219-P0IC0-THEATER-ALLOWLIST-EXPIRY-RENEWAL",
+      "ROLES-ALL-CODEX-PR1219-P0IC1-LINKED-WORKTREE-REPO-IDENTITY",
+      "ROLES-ALL-CODEX-PR1219-P0IC2-COMMIT-GENERATED-GOVERNANCE-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0IC3-IDEMPOTENT-GENERATED-GOVERNANCE-CONTINUATION",
+      "ROLES-ALL-CODEX-PR1219-P0IC4R-TASKS-BASE-AUTHORITY-RECOVERY",
+      "ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP",
+      "ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP-RESTART-2-2026-08-22",
+      "ROLES-ALL-CODEX-PR1219-P0L-PHASE-B-TERMINAL-LIFECYCLE",
+      "ROLES-ALL-CODEX-PR1219-P0R-ROLE-MODEL-AUTHORITY-RECOVERY",
+      "ROLES-ALL-CODEX-PR1219-P0R2-ROLE-MODEL-AUTHORITY",
+      "ROLES-ALL-CODEX-PR1219-P0T1-TERMINAL-IDENTITY-QUESTION-JOURNAL",
+      "ROLES-ALL-CODEX-PR1219-P0T2-PRIVATE-REVIEW-DURABILITY",
+      "ROLES-ALL-CODEX-PR1219-P0T3-PROCESS-TREE-CLOSURE",
+      "ROLES-ALL-CODEX-PR1219-P0T4-INV2-SEMANTIC-PROOF",
+      "ROLES-ALL-CODEX-PR1219-P1-BRIDGE-TERMINAL-REFUSAL",
+      "ROLES-ALL-CODEX-PR1219-P2-REVIEW-BINDING",
+      "ROLES-ALL-CODEX-PR1219-P3-RECOVERY-CHECKPOINTS",
+      "ROLES-ALL-CODEX-PR1219-P4-RECOVERY-AUTHORITY-ISOLATION",
+      "ROLES-ALL-CODEX-PR1219-P5-FINAL-RECONCILIATION",
+      "ROLES-ALL-CODEX-PR1219-ROOT-EXIT-R4C",
+      "S1",
+      "S1-SCHED",
+      "S2",
+      "S3",
+      "S4",
+      "S5",
+      "STAGE0-CONTENT-ADDRESSED-TYPEDISPATCH-DECISION-RECOVERY-2026-06-20",
+      "STALE-2026-08-21-COMBINED-PR-FLEET-CONFIGS",
+      "STRUCTURAL-NUMBERS-GCD-JS-PARITY-2026-06-19",
+      "STRUCTURAL-NUMBERS-GCD-PYTHON-2026-06-19",
+      "STRUCTURAL-NUMBERS-RATIONALS-2026-06-19",
+      "STRUCTURAL-NUMBERS-STAGE4-DESIGN-2026-06-19",
+      "STRUCTURAL-NUMBERS-STAGE4-INT-FIRST-CUTOVER-2026-06-19",
+      "STRUCTURAL-NUMBERS-STAGE5-ORDINAL-TO-N-2026-06-19",
+      "TEST-PROVIDER-ISOLATION-ROOT-R2-2026-08-26",
+      "TEST-PROVIDER-ISOLATION-ROOT-R3-2026-08-26",
+      "TEST-PROVIDER-ISOLATION-ROOT-R4",
+      "THEATER-CLASSIFIER-PROOF-REGISTRY",
+      "THEATER-RATCHET-EXPIRY-POLICY",
+      "URGENT-PR-FLEET-QUEUE-AUTHORITY-R1",
+      "WIP-PRESERVATION-DIRTY-WORKTREE-RECOVERY-2026-06-20"
+    ],
+    "head": "5921cf352db0f52aa469655371e8977c3f1a0848",
+    "index_entries_sha256": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+    "observed_utc": "2026-10-20T03:11:58.362320+00:00",
+    "ordered_owners": [
+      [
+        "0",
+        "ROLES-ALL-CODEX-PR1219-P0IC0-THEATER-ALLOWLIST-EXPIRY-RENEWAL"
+      ],
+      [
+        "1",
+        "ROLES-ALL-CODEX-PR1219-P0IC1-LINKED-WORKTREE-REPO-IDENTITY"
+      ],
+      [
+        "2",
+        "ROLES-ALL-CODEX-PR1219-P0IC2-COMMIT-GENERATED-GOVERNANCE-AUTHORITY"
+      ],
+      [
+        "3",
+        "ROLES-ALL-CODEX-PR1219-P0IC3-IDEMPOTENT-GENERATED-GOVERNANCE-CONTINUATION"
+      ],
+      [
+        "4",
+        "ROLES-ALL-CODEX-PR1219-P0IC4R-TASKS-BASE-AUTHORITY-RECOVERY"
+      ],
+      [
+        "5",
+        "ROLES-ALL-CODEX-PR1219-P0IA-PRE-REVIEW-CANDIDATE-AUTHORITY"
+      ],
+      [
+        "6",
+        "ROLES-ALL-CODEX-PR1219-P0IAH-CANDIDATE-AUTHORITY-TRUST-ORDERING-HARDENING"
+      ],
+      [
+        "7",
+        "PR1219-P0IAR-CANONICAL-PHASE-B-REVIEW-RECEIPT"
+      ],
+      [
+        "8",
+        "PR1219-P0IX-CONTROL-PATH"
+      ],
+      [
+        "9",
+        "PR1219-P0IMF-LAUNCH-BOUND-MODEL-AUTHORITY-FREEZE-2026-08-22"
+      ],
+      [
+        "10",
+        "PR1219-P0IMQR-CURRENT-ROW-IDENTITY-2026-08-22"
+      ],
+      [
+        "11",
+        "PR1219-P0IMRPA-AUTHORITY-PROVENANCE-BOOTSTRAP"
+      ],
+      [
+        "12",
+        "PR1219-P0IMRP-RECEIPT-MODEL-PROVENANCE-ACTIVATION-2026-08-22"
+      ],
+      [
+        "13",
+        "PR1219-P0IMRP-TARGET-ROLE-TEST-FIXTURE-PREREQUISITE-2026-08-22"
+      ],
+      [
+        "14",
+        "PR1219-P0IMRP-COMMIT-TARGET-ROLE-AUTHORITY-ACTIVATION-2026-08-22"
+      ],
+      [
+        "15",
+        "PR1219-P0IMRP-RECOVERY-STDOUT-PROVENANCE-2026-08-22"
+      ],
+      [
+        "16",
+        "PR1219-P0IMRB-RECOVERY-DELEGATE-BUS-AUTHORITY-2026-08-22"
+      ],
+      [
+        "17",
+        "PR1219-P0IMLG-LAUNCH-SOURCE-COMMON-DIR-GUARD-2026-08-22"
+      ],
+      [
+        "18",
+        "ROLES-ALL-CODEX-PR1219-P0IM-CODEX-MODEL-BOOTSTRAP"
+      ],
+      [
+        "19",
+        "ROLES-ALL-CODEX-PR1219-P0IBRRQ2-CURRENT-NEXT-AUTHORITY"
+      ],
+      [
+        "20",
+        "pr1219-p0ibrrcp-phase-b-disposition-authority-prereq-r1-2026-08-25"
+      ],
+      [
+        "21",
+        "pr1219-p0ibrrcp-shared-envelope-framing-r4a2-2026-08-25"
+      ],
+      [
+        "22",
+        "pr1219-p0ibrrcp-reentry-decision-resume-context-prereq-r2-2026-08-25"
+      ],
+      [
+        "23",
+        "pr1219-p0ibrrcp-normal-root-recorded-child-cleanup-r4-2026-09-01"
+      ],
+      [
+        "24",
+        "PBNOGO-INTEGRATION"
+      ],
+      [
+        "25",
+        "PR1219-P0IBRRCP-AUTO-DEFER-TIMEOUT-ONLY-PREREQ-R3"
+      ],
+      [
+        "26",
+        "PR1219-P0IBRRCP-RECOVERY-TIMEOUT-ENV-CONTAINMENT-PREREQ-R1"
+      ],
+      [
+        "27",
+        "pr1219-p0ibrrcp-provider-terminal-r4b-2026-08-25"
+      ],
+      [
+        "28",
+        "PR1219-P0IBRRCP-EXACT-CLOSURE"
+      ],
+      [
+        "29",
+        "PR1219-P0IBRRCO"
+      ],
+      [
+        "30",
+        "PR1219-P0IBRRC"
+      ],
+      [
+        "31",
+        "PR1219-P0IBRRT"
+      ],
+      [
+        "32",
+        "PR1219-P0IBRR"
+      ],
+      [
+        "33",
+        "PR1219-P0IB1"
+      ],
+      [
+        "34",
+        "ROLES-ALL-CODEX-PR1219-P0T1-TERMINAL-IDENTITY-QUESTION-JOURNAL"
+      ],
+      [
+        "35",
+        "ROLES-ALL-CODEX-PR1219-P0T2-PRIVATE-REVIEW-DURABILITY"
+      ],
+      [
+        "36",
+        "ROLES-ALL-CODEX-PR1219-P0T3-PROCESS-TREE-CLOSURE"
+      ],
+      [
+        "37",
+        "PIPELINE-FIX-53"
+      ],
+      [
+        "38",
+        "FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION"
+      ],
+      [
+        "39",
+        "workingrcx-fleet-live-recovery-r3-2026-09-16"
+      ],
+      [
+        "40",
+        "FLEET-NATIVE-LIFECYCLE-PREVENTION"
+      ],
+      [
+        "41",
+        "MU-FIXPOINT-PRODUCTION-PROOF"
+      ],
+      [
+        "42",
+        "MU-EVIDENCE-RESIDUES"
+      ],
+      [
+        "43",
+        "MU-OPTIMIZATION-LAST"
+      ]
+    ],
+    "packet_sha256": "9313d0171368a878de5eaf124e6780ed23aea4de1d2865a081150b3ef125f551",
+    "ra_sha256": "5c722bcfd20ff331521a0ce27ff2e70578ceaf82952d66e0842f21877cbf77c2",
+    "raw_index_sha256": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+    "restoration_state": {
+      "mode": "0o644",
+      "path": ".agent_bus-fleet-pr-coverage-r7-20261020/executors/phase_b_launch_tracker_restore_v1.json",
+      "sha256": "dfe3b409892ce9d1b3402577e64492e2fd6f97428b042adc0fc96f0c1d9c4f11",
+      "size": 7287
+    },
+    "status_short": " M TASKS.md\n?? reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md\n?? reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json\n",
+    "tasks_sha256": "1b8235d167eaa9460a3f7fbcb798453cee6dfa699af7683d74a5d0665e01d048"
+  },
+  "existing_builder_packet_retained": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
+  "files_authored_or_changed": [
+    "TASKS.md",
+    "STATUS.md",
+    "CHANGELOG.md",
+    "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json",
+    "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+    "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md"
+  ],
+  "fixture_lineage_inspection": {
+    "kind": "static source inspection, no extra test module invoked",
+    "observations": [
+      "Only unchanged positive late consumer retains the coherent OS observer; adverse callbacks restore original before injection.",
+      "R5 foreign-proof setup and readiness-timeout/early-exit/missing-owner controls remain in current source; original23consumer cases retained.",
+      "Entire committed GreenGate workflow has no tmux string; local fixture still asserts availability."
+    ],
+    "paths": [
+      {
+        "path": "mu/tests/tools/test_phase_b_executor.py",
+        "ranges": [
+          [
+            126,
+            215
+          ],
+          [
+            726,
+            770
+          ],
+          [
+            829,
+            934
+          ]
+        ],
+        "sha256": "40089193b504e65e93b7693ba0a90ee3d0df24c980e5ae36c2e4ec4e7e2e8f42"
+      },
+      {
+        "path": ".github/workflows/green_gate.yml",
+        "ranges": [
+          [
+            50,
+            66
+          ]
+        ],
+        "sha256": "1d9f01c11cc7dbf276e3628747bfa2107ab4136ea165fd34142e5c4b43dd34e3"
+      }
+    ]
+  },
+  "growth_cap_boundary": "No hand adjustment. Native outer owns applicability and generated transition or exact no-op.",
+  "handoff_boundary": "Native outer restores Ra, generates indicators and growth-cap applicability, stages required standing file, verifies actual indexed L4 and independent review/precommit_inventory, then fullprepush/currentheadCI/protectedmerge/MainSync/lane completion. Separate fresh public1329 lifecycle disposition only after actual landed authority. No such actions executed here.",
+  "handoff_observation": {
+    "actual_indexed_l4": "PENDING_NATIVE_OUTER_NOT_RUN_BY_IMPLEMENTER",
+    "admitted_inputs_unchanged": true,
+    "branch": "jabramsja/workingrcx-fleet-pr-coverage-r7-2026-10-20",
+    "changed_since_final_run": [
+      {
+        "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+        "reason": "Fresh run receipts and handoff metadata only; source/index maps are unchanged historical observations."
+      }
+    ],
+    "changed_tracked_files_in_this_correction": [
+      "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json",
+      "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json"
+    ],
+    "cited_sources_exact_comparison_bytes": true,
+    "head": "5921cf352db0f52aa469655371e8977c3f1a0848",
+    "independent_review": "BRIDGE_ROUND_1_CORRECTION_READY_FOR_NATIVE_OUTER_REVIEW",
+    "index_entries_sha256": "2c443225bf533bb1528ff7da0ec124854c6a6f9861060c1aca67653f44017d41",
+    "index_unchanged_by_implementer": true,
+    "native_coverage_shape_and_source_errors": [],
+    "observed_utc": "2026-10-20T03:48:58.549421+00:00",
+    "packet_predicate": {
+      "call": "phase_a_executor.validate_native_stub_packet_contract(route, packet_path, packet_content, allow_post_lock_machine_sections=True)",
+      "contract_digest": "f385feb205766cfee0abd1c8995dd800c6fbce74f8c8f13a8a1e0edf8a1f9870",
+      "observed_utc": "2026-10-20T03:48:58.131343+00:00",
+      "packet_sha256_as_observed": "d911f76aeb3f1534c1b0fa383eda41efa5703ad0af4b8a041648286e27061894",
+      "post_lock_section_limit": "Only existing native-generated indicator reconciliation is admitted; implementer did not edit packet bytes.",
+      "result": true,
+      "route_sha256_as_observed": "38c63c758f09730f4906ef8e29de848e4191a8921b65798c37bbcb8ab02b4001"
+    },
+    "pre_existing_staged_paths": [
+      "CHANGELOG.md",
+      "STATUS.md",
+      "TASKS.md",
+      "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
+      "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json",
+      "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+      "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md",
+      "reports/l4_wave_indicators/workingrcx-fleet-pr-coverage-r7-2026-10-20.json"
+    ],
+    "ra_and_restore_anchors_preserved": true,
+    "raw_index_sha256": "5cd25d26ac96da377f9cb59ec57473797ffc3b86197409838d7051fe1723a090",
+    "standing_report_present_in_index_with_exact_worktree_bytes": true,
+    "task_ids_owners_and_history": "TASKS.md byte-exact to repair entry; no tracker edits in this correction."
+  },
+  "historical_before_bridge_round_1_correction": {
+    "completed_local_validation_utc": "2026-10-20T03:29:24.076333+00:00",
+    "completed_utc": "2026-10-20T03:30:29.114102+00:00",
+    "coverage": {
+      "hunk_resolutions": {
+        "evidence_only": 14,
+        "landed": 40,
+        "superseded": 8
+      },
+      "hunks": 62,
+      "manifest_sha256": "805c3a4a278772925540419d497a1baa0ba0aa8e0ad887f4c2e9d9a2f67a9a92",
+      "path_resolutions": {
+        "evidence_only": 12,
+        "landed": 5,
+        "superseded": 3
+      },
+      "paths": 20,
+      "semantic_review": "Implementer accounting completed; independent native review remains pending. Hash equality alone is not semantic equivalence.",
+      "shape_and_source_errors": []
+    },
+    "current_artifact_inventory": {
+      "files": [
+        {
+          "bytes": 3277044,
+          "mode": "0o644",
+          "path": "TASKS.md",
+          "sha256": "8d91457b728bfcac8de071b780cff7883898d90bf56d6b9d2a63678666a7bd29"
+        },
+        {
+          "bytes": 15962,
+          "mode": "0o644",
+          "path": "STATUS.md",
+          "sha256": "b81c3a9e6f544e3c267f5a643f41f7e2399cba84ae81f09e1ebe3233d4973f0f"
+        },
+        {
+          "bytes": 262907,
+          "mode": "0o644",
+          "path": "CHANGELOG.md",
+          "sha256": "51766d0dc50eae03241d6cfd4e49c9183d23063f006100e5765bda66bf75465f"
+        },
+        {
+          "bytes": 104820,
+          "mode": "0o644",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json",
+          "sha256": "9d10fea2f77b3a136ff038f9a9ab16c2783a17b1159049dffeb5b64ba25c0727"
+        },
+        {
+          "bytes": 11725,
+          "mode": "0o644",
+          "path": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md",
+          "sha256": "2a354eb63e2257c9250cae6758240a241320a743de60fe8c42915921571af6a0"
+        },
+        {
+          "bytes": 11799,
+          "mode": "0o644",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
+          "sha256": "9313d0171368a878de5eaf124e6780ed23aea4de1d2865a081150b3ef125f551"
+        }
+      ],
+      "observed_utc": "2026-10-20T03:30:29.114102+00:00",
+      "scope": "Current delivered artifacts separate from every historical run source map. Evidence self-hash omitted; detached WD handoff inventory records final evidence bytes."
+    },
+    "handoff_observation": {
+      "actual_indexed_l4": "PENDING_NATIVE_OUTER_NOT_RUN_BY_IMPLEMENTER",
+      "admitted_inputs_unchanged": true,
+      "branch": "jabramsja/workingrcx-fleet-pr-coverage-r7-2026-10-20",
+      "canonical_ids": 268,
+      "changed_since_final_run": [
+        {
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+          "reason": "Evidence receipts and final metadata only; original source/index maps remain immutable."
+        }
+      ],
+      "changed_tracked_files": [
+        "CHANGELOG.md",
+        "STATUS.md",
+        "TASKS.md"
+      ],
+      "cited_sources_exact_comparison_bytes": true,
+      "head": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "independent_review": "PENDING_NATIVE_OUTER",
+      "index_entries_sha256": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+      "native_coverage_shape_and_source_errors": [],
+      "observed_utc": "2026-10-20T03:30:29.114102+00:00",
+      "ordered_owners": 44,
+      "packet_predicate": {
+        "call": "phase_a_executor.validate_native_stub_packet_contract(route, packet_path, packet_content)",
+        "contract_digest": "f385feb205766cfee0abd1c8995dd800c6fbce74f8c8f13a8a1e0edf8a1f9870",
+        "packet_sha256_as_observed": "9313d0171368a878de5eaf124e6780ed23aea4de1d2865a081150b3ef125f551",
+        "result": true
+      },
+      "ra_and_restore_anchors_preserved": true,
+      "raw_index_sha256": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+      "staged_changes": [],
+      "untracked_scope_files": [
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md"
+      ]
+    },
+    "native_outputs_pending": [
+      "Ra tracker restoration",
+      "indicators",
+      "growth-cap transition or exact no-op",
+      "actual indexed L4",
+      "standing-report inclusion and empty-findings cleanup verification",
+      "independent native review",
+      "precommit_inventory",
+      "full prepush",
+      "current-head CI",
+      "protected merge",
+      "MainSync",
+      "lane completion",
+      "separate fresh public1329 lifecycle-plan/apply/verify after actual landing"
+    ],
+    "post_gate_source_changes": [
+      {
+        "kind": "evidence metadata only",
+        "new_test_result": false,
+        "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+        "reason": "Attach immutable receipts after both runs; historical run maps/timestamps are never refreshed."
+      }
+    ],
+    "runs": [
+      {
+        "after": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T032330Z/complete_declared_gate-after.json",
+          "sha256": "d86c2994345e878bf3c36c971d38ebbf7f40feff9819bf2dcdefa92802d668ef"
+        },
+        "before": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T032330Z/complete_declared_gate-before.json",
+          "sha256": "8b29b7fa83d4be8f78437f74793f1e8f3b19ac1b8f03ffd0d92a2565fb89dd82"
+        },
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py --tb=short",
+        "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r7-20261020",
+        "duration_seconds": 174.081704,
+        "ended_utc": "2026-10-20T03:26:25.443979+00:00",
+        "environment": {
+          "python3": "/Users/jeffabrams/.local/bin/python3",
+          "tmux": "/opt/homebrew/bin/tmux",
+          "tmux_version": "tmux 3.6a"
+        },
+        "exit_code": 0,
+        "index_entries_sha256_after": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+        "index_entries_sha256_before": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+        "log": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T032330Z/complete_declared_gate.log",
+          "sha256": "f3eb859defc44636f7011a6d56c9a4eb271a3a54f7077332581ff5dfa2ae708c"
+        },
+        "proof_limit": "Fresh local complete run at these observed bytes; not independent native review, hosted provisioning, indexed L4 or landing approval.",
+        "raw_index_sha256_after": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+        "raw_index_sha256_before": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+        "receipt": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T032330Z/complete_declared_gate-receipt.json",
+          "sha256": "f61782240d849dfb3e52352f6affa2a78794edd7e6b3021e624830926ff7e180"
+        },
+        "run": "complete_declared_gate",
+        "source_file_count": 3195,
+        "source_map_sha256_after": "cdfa6a8c7d4032f7eef093108438d4156c340530202aaf69b10ceb953b0652f5",
+        "source_map_sha256_before": "cdfa6a8c7d4032f7eef093108438d4156c340530202aaf69b10ceb953b0652f5",
+        "started_utc": "2026-10-20T03:23:31.361579+00:00",
+        "summary_tail": "........................................................................ [ 60%]\n........................................................................ [ 64%]\n........................................................................ [ 67%]\n........................................................................ [ 71%]\n........................................................................ [ 74%]\n........................................................................ [ 78%]\n........................................................................ [ 82%]\n........................................................................ [ 85%]\n........................................................................ [ 89%]\n........................................................................ [ 92%]\n........................................................................ [ 96%]\n........................................................................ [ 99%]\n...                                                                      [100%]\n2019 passed in 173.73s (0:02:53)",
+        "unchanged": {
+          "branch": true,
+          "head": true,
+          "index_entries_sha256": true,
+          "raw_index_sha256": true,
+          "source_map_sha256": true
+        }
+      },
+      {
+        "after": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T032330Z/independent_identical_sweep-after.json",
+          "sha256": "e5c2dbbda05d0e575ed03736fa4ebd7ba36d376e750662a2143c36f280c0c97d"
+        },
+        "before": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T032330Z/independent_identical_sweep-before.json",
+          "sha256": "a39e19cf92ac6434f1b86efc3dce91c2b04c27d1faaab938e8e72a9a7a56554f"
+        },
+        "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py --tb=short",
+        "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r7-20261020",
+        "duration_seconds": 177.303778,
+        "ended_utc": "2026-10-20T03:29:23.549181+00:00",
+        "environment": {
+          "python3": "/Users/jeffabrams/.local/bin/python3",
+          "tmux": "/opt/homebrew/bin/tmux",
+          "tmux_version": "tmux 3.6a"
+        },
+        "exit_code": 0,
+        "index_entries_sha256_after": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+        "index_entries_sha256_before": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+        "log": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T032330Z/independent_identical_sweep.log",
+          "sha256": "6683577457d3dcd991917f80d0cc22c26bced3b71149dbe44e4e4fb1254636c2"
+        },
+        "proof_limit": "Fresh local complete run at these observed bytes; not independent native review, hosted provisioning, indexed L4 or landing approval.",
+        "raw_index_sha256_after": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+        "raw_index_sha256_before": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+        "receipt": {
+          "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T032330Z/independent_identical_sweep-receipt.json",
+          "sha256": "958a698cd917bbe82a1e30efc33866e23a2ea62c8feb80072aa284550c3c53ba"
+        },
+        "run": "independent_identical_sweep",
+        "source_file_count": 3195,
+        "source_map_sha256_after": "cdfa6a8c7d4032f7eef093108438d4156c340530202aaf69b10ceb953b0652f5",
+        "source_map_sha256_before": "cdfa6a8c7d4032f7eef093108438d4156c340530202aaf69b10ceb953b0652f5",
+        "started_utc": "2026-10-20T03:26:26.244671+00:00",
+        "summary_tail": "........................................................................ [ 60%]\n........................................................................ [ 64%]\n........................................................................ [ 67%]\n........................................................................ [ 71%]\n........................................................................ [ 74%]\n........................................................................ [ 78%]\n........................................................................ [ 82%]\n........................................................................ [ 85%]\n........................................................................ [ 89%]\n........................................................................ [ 92%]\n........................................................................ [ 96%]\n........................................................................ [ 99%]\n...                                                                      [100%]\n2019 passed in 173.45s (0:02:53)",
+        "unchanged": {
+          "branch": true,
+          "head": true,
+          "index_entries_sha256": true,
+          "raw_index_sha256": true,
+          "source_map_sha256": true
+        }
+      }
+    ],
+    "stage": "PHASE_B_LOCAL_IMPLEMENTATION_COMPLETE_NATIVE_HANDOFF_PENDING",
+    "standing_advisory_delivery": {
+      "actual_indexed_handoff": "PENDING_NATIVE_OUTER",
+      "empty_findings_cleanup": "Admission disposable check passed; actual handoff cleanup verification remains pending.",
+      "exists": true,
+      "path": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md"
+    },
+    "status": "LOCAL_GATES_PASS_INDEPENDENT_NATIVE_REVIEW_PENDING",
+    "tracker_authority": "TASKS.md native2026-10-20 R7 tracker sync note is canonical; exact frozen note is temporarily removed by Phase B, with restoration anchors/state retained for the outer native owner.",
+    "validation_log_directory": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T032330Z",
+    "validation_summary": {
+      "all_exit_zero": true,
+      "complete_runs": 2,
+      "earlier_two_runs": "Retained separately before documented lineage correction; not substituted for final corrected-candidate proof.",
+      "identical_commands": true,
+      "no_skips_or_xfails_reported": true,
+      "pytest_seconds": [
+        173.73,
+        173.45
+      ],
+      "source_file_count": 3195,
+      "stable_before_after_across": true,
+      "tests_per_run": 2019,
+      "wrapper_duration_seconds": [
+        174.081704,
+        177.303778
+      ]
+    }
+  },
+  "historical_completed_local_validation_utc": "2026-10-20T03:22:09.176591+00:00",
+  "historical_process_event_limits": {
+    "later_R5_and_R2": "Distinct retained events from the PR1339/R3 implementation evidence: both R5 Linux zombie failures and R2 changing-PID refusal, with original causes qualified.",
+    "original1329": "The locked plan retains an original unknown-reader lifetime failure; no raw historical failure is rerun here and no cause is inferred from later changes.",
+    "reference": "reports/control_plane/workingrcx-private-tmux-fixture-r3-2026-10-19_implementation_evidence.json"
+  },
+  "historical_runs_before_lineage_correction": [
+    {
+      "after": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T031555Z/complete_declared_gate-after.json",
+        "sha256": "0972a262d61f9cde38376e747a7420090833638eb47799b6c898cf10914e4e8b"
+      },
+      "before": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T031555Z/complete_declared_gate-before.json",
+        "sha256": "11905fd3954fc598f9425ba02217541f5db2e07b6e26f5d5436ef7acbf24ffe0"
+      },
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r7-20261020",
+      "duration_seconds": 198.378762,
+      "ended_utc": "2026-10-20T03:19:14.184951+00:00",
+      "environment": {
+        "python3": "/Users/jeffabrams/.local/bin/python3",
+        "tmux": "/opt/homebrew/bin/tmux",
+        "tmux_version": "tmux 3.6a"
+      },
+      "exit_code": 0,
+      "index_entries_sha256_after": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+      "index_entries_sha256_before": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+      "log": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T031555Z/complete_declared_gate.log",
+        "sha256": "7ad60d5481ea44c1da0b7f79e1365ba258a40736143f03fdc617320f721d9b84"
+      },
+      "proof_limit": "Fresh local complete run at these observed bytes; not independent native review, hosted provisioning, indexed L4 or landing approval.",
+      "raw_index_sha256_after": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+      "raw_index_sha256_before": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T031555Z/complete_declared_gate-receipt.json",
+        "sha256": "a0d4b8c5f3d5a835e7a0c86259b29f177012b54ce1bd5ee7c95edbf28573fe02"
+      },
+      "run": "complete_declared_gate",
+      "source_file_count": 3195,
+      "source_map_sha256_after": "2adf7152ef0a6690fb1ae0d12d1d3b3262c24f82dc2c7619a8f43cbf7cc22522",
+      "source_map_sha256_before": "2adf7152ef0a6690fb1ae0d12d1d3b3262c24f82dc2c7619a8f43cbf7cc22522",
+      "started_utc": "2026-10-20T03:15:55.805399+00:00",
+      "summary_tail": "........................................................................ [ 60%]\n........................................................................ [ 64%]\n........................................................................ [ 67%]\n........................................................................ [ 71%]\n........................................................................ [ 74%]\n........................................................................ [ 78%]\n........................................................................ [ 82%]\n........................................................................ [ 85%]\n........................................................................ [ 89%]\n........................................................................ [ 92%]\n........................................................................ [ 96%]\n........................................................................ [ 99%]\n...                                                                      [100%]\n2019 passed in 172.82s (0:02:52)",
+      "unchanged": {
+        "branch": true,
+        "head": true,
+        "index_entries_sha256": true,
+        "raw_index_sha256": true,
+        "source_map_sha256": true
+      }
+    },
+    {
+      "after": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T031555Z/independent_identical_sweep-after.json",
+        "sha256": "c4667b80e3a31d1cc0cca418025e8d53debcbff0ad0c899cd9d559073c5d2044"
+      },
+      "before": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T031555Z/independent_identical_sweep-before.json",
+        "sha256": "72027078f60121048aa56eb351531efd2e6fd94f9c1e0bd02bf25895fc2c3602"
+      },
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r7-20261020",
+      "duration_seconds": 173.699903,
+      "ended_utc": "2026-10-20T03:22:08.684632+00:00",
+      "environment": {
+        "python3": "/Users/jeffabrams/.local/bin/python3",
+        "tmux": "/opt/homebrew/bin/tmux",
+        "tmux_version": "tmux 3.6a"
+      },
+      "exit_code": 0,
+      "index_entries_sha256_after": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+      "index_entries_sha256_before": "94f3c8eb413608186be4c8e74dd0cfe3aaddf388caa573fc0705d3823a41317a",
+      "log": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T031555Z/independent_identical_sweep.log",
+        "sha256": "4cc23da1b943c48f5ff1a97e834c157a2068f115068eff19bfe30d3f5fc83c2f"
+      },
+      "proof_limit": "Fresh local complete run at these observed bytes; not independent native review, hosted provisioning, indexed L4 or landing approval.",
+      "raw_index_sha256_after": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+      "raw_index_sha256_before": "b960c154aeef6b2ac15f6021ebebdf34a3b7a2403697570726b45d1e80a2bc05",
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-phase-b-20261020T031555Z/independent_identical_sweep-receipt.json",
+        "sha256": "e4cf711466715041676e913805889a67f78399f00ff86d81b7c4279d03a9a7e7"
+      },
+      "run": "independent_identical_sweep",
+      "source_file_count": 3195,
+      "source_map_sha256_after": "2adf7152ef0a6690fb1ae0d12d1d3b3262c24f82dc2c7619a8f43cbf7cc22522",
+      "source_map_sha256_before": "2adf7152ef0a6690fb1ae0d12d1d3b3262c24f82dc2c7619a8f43cbf7cc22522",
+      "started_utc": "2026-10-20T03:19:14.984025+00:00",
+      "summary_tail": "........................................................................ [ 60%]\n........................................................................ [ 64%]\n........................................................................ [ 67%]\n........................................................................ [ 71%]\n........................................................................ [ 74%]\n........................................................................ [ 78%]\n........................................................................ [ 82%]\n........................................................................ [ 85%]\n........................................................................ [ 89%]\n........................................................................ [ 92%]\n........................................................................ [ 96%]\n........................................................................ [ 99%]\n...                                                                      [100%]\n2019 passed in 173.33s (0:02:53)",
+      "unchanged": {
+        "branch": true,
+        "head": true,
+        "index_entries_sha256": true,
+        "raw_index_sha256": true,
+        "source_map_sha256": true
+      }
+    }
+  ],
+  "historical_validation_summary_before_lineage_correction": {
+    "all_exit_zero": true,
+    "complete_runs": 2,
+    "identical_commands": true,
+    "stable_before_after_across": true
+  },
+  "invariants": {
+    "host_authority_sites": [
+      217,
+      217
+    ],
+    "net_host_semantic_delta": 0,
+    "ordered_owners": 44,
+    "proof_limit": "No runtime/source edit; unchanged counts grounded in existing baselines and source inventory, not fresh host-ratchet execution.",
+    "runtime_substrate_delta": 0,
+    "task_ids": 268,
+    "total_inventory_sites": [
+      312,
+      312
+    ],
+    "tracked_debt_markers": [
+      5,
+      5
+    ]
+  },
+  "issues_encountered": [
+    {
+      "detail": "Original P2 tmux prerequisite remains OPEN; coverage-only acceptance bounded to observed provisioned environments and existing row40; independent review may HOLD.",
+      "kind": "POLICY_BOUND"
+    },
+    {
+      "detail": "Old one-time Mu release and15parameter test absent and superseded; useful current archive guards retained, no source retirement or exception reactivation.",
+      "kind": "POLICY_BOUND"
+    },
+    {
+      "detail": "R6 PhaseB/unmerged frontage was stale after actual1340 landing and1330/1338 CLOSED_VERIFIED. Preserved original historical entries and recovered captured PRIMARY notes outside native anchors.",
+      "kind": "DOC_ACCURACY"
+    },
+    {
+      "detail": "Inherited startup guard exit1/three failed commands, attestation exit0; no startup repair or rerun.",
+      "kind": "OBSERVATION"
+    },
+    {
+      "detail": "First in-memory manifest authoring pass stopped on an unhandled monitor path before writing any candidate. Completed that path, then native schema/source checks passed; not a test failure or source change.",
+      "kind": "LOCAL_AUTHORING"
+    },
+    {
+      "detail": "Direct actual merged diff corrects the locked-plan shorthand: PR1333 already introduced strict watcher lifecycle checks; PR1334 changed executor process-release/recovered-retry/status-refresh continuations, not those watcher source/doc/test files. Frozen packet not edited.",
+      "kind": "DOC_ACCURACY"
+    },
+    "Bridge round1 DOC_ACCURACY blocker: useful_work_coverage.json had the separate PR1325 manifest rationale. Corrected against the original schema1 19-source ledger; existing tmux prerequisite remains OPEN under row40 bounded acceptance."
+  ],
+  "limits": [
+    "No future/self-referential replacement SHA.",
+    "Original source/raw commit/full tracked HEAD tree retained; standalone full parent/untracked history uses separate preservation records.",
+    "No current mechanical check is independent semantic approval.",
+    "Every original run/source/index receipt retains its actual timestamp; final current inventory will be separate.",
+    "No source/branch/archive retirement, consumed-intent rearm, stash replay or live provider/CI mutation."
+  ],
+  "lineage_correction": {
+    "actual_pr1334_patch_sha256": "f71a564c8def80590e9974410adec7e2be2f985d94616622d142b1703d607ed8",
+    "files_before_correction_sha256": {
+      "CHANGELOG.md": "0240a2b91eca72ffa24c8a9b7173423e7b2fb3af431eec59737c2bc2cac4f9bc",
+      "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json": "a006355c84f23389679bfc285af5a1a7412ccb9676c59d5efa36ed335ce6b964",
+      "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json": "e46755f7859de57ea5e79beddc5689cbbbc8f7e5eb5667b478cfd04be8911df5",
+      "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md": "c699b7d2fc295e184a2637ec5ec764e66f7b41b56ae10c2c931dae9e935ba909"
+    },
+    "identical_comparisons": [
+      {
+        "identical": true,
+        "path": "mu/tools/executors/worktree_lifecycle.py",
+        "pr1333_sha256": "b4e6e08e852d0bbbafe87a7a81d054de86a566f626f4a0ab991354d6ee80ad3c",
+        "pr1334_sha256": "b4e6e08e852d0bbbafe87a7a81d054de86a566f626f4a0ab991354d6ee80ad3c"
+      },
+      {
+        "identical": true,
+        "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+        "pr1333_sha256": "d594cfb71e1ed62e7804b9de25da1eb7011263263ea93553d59e418a2a8fe163",
+        "pr1334_sha256": "d594cfb71e1ed62e7804b9de25da1eb7011263263ea93553d59e418a2a8fe163"
+      },
+      {
+        "identical": true,
+        "path": "mu/tests/tools/test_worktree_lifecycle.py",
+        "pr1333_sha256": "434601056e28e3091e8010f7f0a3f20e605467cf48cbeb061d9a51b9ceab164e",
+        "pr1334_sha256": "434601056e28e3091e8010f7f0a3f20e605467cf48cbeb061d9a51b9ceab164e"
+      },
+      {
+        "identical": true,
+        "path": "mu/tests/tools/test_recovery_gate.py",
+        "pr1333_sha256": "e13565c6b2d92cfde60cee185af0e44460620c85c0f8616077ee1ddec1faeaac",
+        "pr1334_sha256": "e13565c6b2d92cfde60cee185af0e44460620c85c0f8616077ee1ddec1faeaac"
+      },
+      {
+        "identical": true,
+        "path": "mu/tools/executors/recovery_gate.py",
+        "pr1333_sha256": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3",
+        "pr1334_sha256": "2a9ffc70e859208caa98cb9c8d86c22a83091f1fe22e7f918b0217875ca9b0b3"
+      }
+    ],
+    "observed_utc": "2026-10-20T03:23:10.044776+00:00",
+    "pr1333_merge": "a9c4e699fd51c13d9501304d5c629d0212e33602",
+    "pr1334_actual_executable_and_test_paths": [
+      "mu/tests/tools/test_executor_common.py",
+      "mu/tests/tools/test_executor_dispatch.py",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tools/executors/executor_common.py",
+      "mu/tools/executors/executor_dispatch.py",
+      "mu/tools/executors/launch_wave.py",
+      "mu/tools/executors/phase_b_executor.py"
+    ],
+    "pr1334_merge": "b75972546901e3a09e08047f1a10c7684bf875bd",
+    "prior_validation_scope": "Two2019pass runs remain immutable historical proof before this coverage/prose attribution correction. Repeat the exact complete gate and independent identical sweep on corrected bytes; no test filtering or source changes.",
+    "reason": "Direct actual merged diff corrects the locked-plan shorthand: PR1333 already introduced strict watcher lifecycle checks; PR1334 changed executor process-release/recovered-retry/status-refresh continuations, not those watcher source/doc/test files. Frozen packet not edited."
+  },
+  "native_authority_configuration": {
+    "outer_owned": true,
+    "pager_route": "codex",
+    "pre_review_authority": true,
+    "precommit_inventory": true,
+    "role_agents": {
+      "implementer": "codex",
+      "reviewer": "codex"
+    }
+  },
+  "native_outputs_pending": [
+    "growth-cap transition or exact no-op",
+    "actual indexed L4",
+    "standing-report inclusion and empty-findings cleanup verification",
+    "independent native review",
+    "precommit_inventory",
+    "full prepush",
+    "current-head CI",
+    "protected merge",
+    "MainSync",
+    "lane completion",
+    "separate fresh public1329 lifecycle-plan/apply/verify after actual landing"
+  ],
+  "native_packet": {
+    "contract_digest": "f385feb205766cfee0abd1c8995dd800c6fbce74f8c8f13a8a1e0edf8a1f9870",
+    "limits": "This timestamp predates native outer tracker/indicator/commit sections; original source-bound observations remain immutable.",
+    "observed_utc": "2026-10-20T03:11:58.362320+00:00",
+    "predicate": "phase_a_executor.validate_native_stub_packet_contract",
+    "result": true,
+    "sha256_as_observed": "9313d0171368a878de5eaf124e6780ed23aea4de1d2865a081150b3ef125f551"
+  },
+  "original_files_read": [
+    {
+      "bytes": 203833,
+      "lines": 3358,
+      "path": "CHANGELOG.md",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "655aa63410877544a2f2302ec895c06895a20f36e74c61ead0737c98fef5375e"
+    },
+    {
+      "bytes": 1973477,
+      "lines": 2759,
+      "path": "TASKS.md",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "01a9583aa85711ecc1c8b623ccb02d68a92b642c87782a558c963aacf5288b0b"
+    },
+    {
+      "bytes": 39650,
+      "lines": 607,
+      "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "30f10900b5a3d0cb08336260d209eb2dcf762199f8620bb63c76caaf561ea2c6"
+    },
+    {
+      "bytes": 61362,
+      "lines": 1509,
+      "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "545c3cb4281ba94c4c178a124f84b5b3e6c14dc8dd057faaddaacd609089152e"
+    },
+    {
+      "bytes": 1015349,
+      "lines": 22774,
+      "path": "mu/tests/tools/test_recovery_gate.py",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "9b3e9c1c440bc80384e0b0f062b2b407e52bc152910ed079cc6136462f86d0c1"
+    },
+    {
+      "bytes": 51330,
+      "lines": 916,
+      "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "31341d1107cad1dd89942fe1f44ac1f58aafa6d0a21b9211dfb1a9b5eea99faf"
+    },
+    {
+      "bytes": 89903,
+      "lines": 1634,
+      "path": "mu/tests/tools/test_worktree_lifecycle.py",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "fdb2d0c4d823ef6c6dabbcfd67f46855a2f186cf4a0f73132044983504934746"
+    },
+    {
+      "bytes": 61764,
+      "lines": 907,
+      "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "b081bdebb26c37f46c79f1c444b617f4c2a7f86ec34de3f583aea1ae45b9acb9"
+    },
+    {
+      "bytes": 62539,
+      "lines": 1075,
+      "path": "mu/tools/executors/worktree_lifecycle.py",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "feaaca6320eeb90184e378a2762be27ddf6a8b42febed50f26d8135b2cd36948"
+    },
+    {
+      "bytes": 47903,
+      "lines": 1489,
+      "path": "mu/tools/observability/pipeline_monitor.sh",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "bf0809a40a3597fd71e1bd1f04f0af9da2ddf3c48d50f8f2f8d7e56618b82a77"
+    },
+    {
+      "bytes": 27167,
+      "lines": 176,
+      "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_2026-10-04.md",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "40ac0a88793f6e25a0aac077f3c2ecfdfb88f906dcdcfefa3ebaed45e4029dca"
+    },
+    {
+      "bytes": 1923737,
+      "lines": 32081,
+      "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_apply_plan.json",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "300350b673d7972cd875a832e4acd20fca32e41158538c09d638fb9196789442"
+    },
+    {
+      "bytes": 1210562,
+      "lines": 22889,
+      "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_census.json",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "8ab915d983fe1384e2431384097ff0a86a18d3449159c3888aa176bf2b1a2904"
+    },
+    {
+      "bytes": 3038267,
+      "lines": 52128,
+      "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_classification.json",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "7f6dd0587dfcd1333ea23a520c20d92f0296aada5fde4dd3b12e469441d12b71"
+    },
+    {
+      "bytes": 61312,
+      "lines": 1035,
+      "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_coverage.json",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "02ddd7a7773bc258c88690977da021ea82c7bb0553f53a600fb4672e0c03c623"
+    },
+    {
+      "bytes": 195507,
+      "lines": 2910,
+      "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_implementation_evidence.json",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "1cbaf49d2b6093c4c12e56d4cd3b7bb2d5695ba873dc820cdb24bbaef80e9365"
+    },
+    {
+      "bytes": 40552,
+      "lines": 717,
+      "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_retirement_evidence.json",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "287b8b8f86f8389be92dee4e2289a3173a3fb2c25e07a82a502b8165655c8475"
+    },
+    {
+      "bytes": 1760547,
+      "lines": 28693,
+      "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_useful_work.json",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "5286617cfb4b9adb61121e7bb33a16a0182333be899d04bd6d6ccc7baa77ee0d"
+    },
+    {
+      "bytes": 1808026,
+      "lines": 31045,
+      "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_useful_work_coverage.json",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "ab5d63a2571b26acf703884379dad8622a0152d0206249164c51ec1b2f0b1cbf"
+    },
+    {
+      "bytes": 631,
+      "lines": 25,
+      "path": "reports/l4_wave_indicators/workingrcx-fleet-residual-pr-folders-r2-2026-10-04.json",
+      "read_scope": "full original blob read; changed hunks semantically accounted individually",
+      "sha256": "f5d945cbc53ab1c5da03840943c79b491357b3a60344f8342680d96d5abfdf10"
+    }
+  ],
+  "post_gate_source_changes": [
+    {
+      "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+      "reason": "Records actual repair validation receipts and final inventory; no executable, workflow, fixture, packet, tracker, advisory or manifest changes after the fresh runs."
+    }
+  ],
+  "prior_landing": {
+    "evidence": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-r6-disposition-verified-preserved/preservation.json",
+    "main_sync": "Recorded complete for1340; linked dev ownership remains separate HOLD.",
+    "merge": "5921cf352db0f52aa469655371e8977c3f1a0848",
+    "native_1330_1338": "CLOSED_VERIFIED as captured2026-10-20T02:46:50.300316+00:00; both local/remote original branches retained",
+    "pr": 1340
+  },
+  "quota_observations": [
+    {
+      "observed_utc": "2026-10-20T03:07:42.431Z",
+      "source": "current-session rate_limits event read once before implementation",
+      "stop_required": false,
+      "values_private": true
+    },
+    {
+      "available": true,
+      "checked_utc": "2026-10-20T03:15:55.181762+00:00",
+      "observed_utc": "2026-10-20T03:14:58.710Z",
+      "source": "one-shot current-session usage observation",
+      "stop_required": false,
+      "values_private": true
+    },
+    {
+      "available": true,
+      "checked_utc": "2026-10-20T03:23:30.771800+00:00",
+      "observed_utc": "2026-10-20T03:23:10.093Z",
+      "source": "one-shot current-session usage observation",
+      "stop_required": false,
+      "values_private": true
+    },
+    {
+      "available": true,
+      "checked_utc": "2026-10-20T03:30:26.395513+00:00",
+      "observed_utc": "2026-10-20T03:29:28.834Z",
+      "source": "one-shot current-session observation before handoff",
+      "stop_required": false,
+      "values_private": true
+    }
+  ],
+  "recovery_volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+  "review_threads": {
+    "adjudication": "P2 remains OPEN. Bounded row40 acceptance for governance-only coverage and tmux-provisioned local evidence; universal provisioning/tmux-less support unproved. Independent review may HOLD; no comment resolution or workflow/assertion change.",
+    "complete_pagination": true,
+    "source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-r7-live-inputs-20261020/pr1329.json",
+    "threads": {
+      "nodes": [
+        {
+          "comments": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "chatgpt-codex-connector"
+                },
+                "body": "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Provision or conditionally exclude the tmux regression tests**\n\nWhen `tmux` is not installed, this helper asserts during setup instead of treating the external executable as an unavailable test prerequisite. This breaks every new caller of `stale_live_watcher`—five failures in `test_pipeline_monitor_autofollow.py` and `test_worktree_lifecycle.py` were reproduced in a tmux-less environment—and therefore prevents the otherwise supported Python test suite from running. Provision `tmux` in every test environment or gate these integration cases consistently with the repository's other optional-system-tool tests.\n\nUseful? React with 👍 / 👎.",
+                "commit": {
+                  "oid": "537fb0461e7272e063c170e6d7d1cfa4de1b52a2"
+                },
+                "createdAt": "2026-10-04T09:04:10Z",
+                "url": "https://github.com/jabramsja/rcx-pi-core/pull/1329#discussion_r4176869500"
+              }
+            ],
+            "pageInfo": {
+              "hasNextPage": false
+            }
+          },
+          "id": "PRRT_kwDOQvy8bs6owpXc",
+          "isOutdated": false,
+          "isResolved": false,
+          "line": 152,
+          "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py"
+        }
+      ],
+      "pageInfo": {
+        "endCursor": "Y3Vyc29yOnYyOpK0MjAyNi0xMC0wNFQwOTowNDoxMFrOqMKV3A==",
+        "hasNextPage": false
+      }
+    }
+  },
+  "runs": [
+    {
+      "after": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/complete_declared_gate-after.json",
+        "sha256": "6d7ce3eb9c06422f3940ce65028b4f09dbe35ebf3d383ba8b65dafc1dfafceaa"
+      },
+      "before": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/complete_declared_gate-before.json",
+        "sha256": "3ffb86d9fd3542d17e29db8194155de70f082e3e838fbb2852519d233bd0b8ed"
+      },
+      "changed_sources": [],
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r7-20261020",
+      "duration_seconds": 178.26970566692762,
+      "ended_utc": "2026-10-20T03:45:51.063563+00:00",
+      "environment": {
+        "python3": "/Users/jeffabrams/.local/bin/python3",
+        "tmux": "/opt/homebrew/bin/tmux",
+        "tmux_version": "tmux 3.6a"
+      },
+      "exit_code": 0,
+      "index_entries_sha256_after": "2c443225bf533bb1528ff7da0ec124854c6a6f9861060c1aca67653f44017d41",
+      "index_entries_sha256_before": "2c443225bf533bb1528ff7da0ec124854c6a6f9861060c1aca67653f44017d41",
+      "log": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/complete_declared_gate.log",
+        "sha256": "abc6584ffcb6fc277ffd8f611e6e3e44e60173ba8c58ffa131067c33a0a0e0c0"
+      },
+      "proof_limit": "Fresh complete local run at observed repair bytes; not independent native review, universal tmux provisioning, indexed L4, hosted CI or landing approval.",
+      "quota_observation": {
+        "available": true,
+        "checked_utc": "2026-10-20T03:42:52.505050+00:00",
+        "observed_utc": "2026-10-20T03:42:21.658Z",
+        "source": "one-shot current-session usage observation",
+        "stop_required": false,
+        "values_private": true
+      },
+      "raw_index_sha256_after": "5cd25d26ac96da377f9cb59ec57473797ffc3b86197409838d7051fe1723a090",
+      "raw_index_sha256_before": "5cd25d26ac96da377f9cb59ec57473797ffc3b86197409838d7051fe1723a090",
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/complete_declared_gate-receipt.json",
+        "sha256": "ac975874c508c1e5239eaf0b49f28b4b53d68e0860a57898fee957cde9df364b"
+      },
+      "run": "complete_declared_gate",
+      "source_file_count": 3193,
+      "source_map_sha256_after": "6d73a16e83d628d84a6ab17e0a13b0cfe6e4be7ce2b8ccfd66a9c0f1eedca60b",
+      "source_map_sha256_before": "6d73a16e83d628d84a6ab17e0a13b0cfe6e4be7ce2b8ccfd66a9c0f1eedca60b",
+      "started_utc": "2026-10-20T03:42:52.793165+00:00",
+      "summary_tail": "........................................................................ [ 57%]\n........................................................................ [ 60%]\n........................................................................ [ 64%]\n........................................................................ [ 67%]\n........................................................................ [ 71%]\n........................................................................ [ 74%]\n........................................................................ [ 78%]\n........................................................................ [ 82%]\n........................................................................ [ 85%]\n........................................................................ [ 89%]\n........................................................................ [ 92%]\n........................................................................ [ 96%]\n........................................................................ [ 99%]\n...                                                                      [100%]\n2019 passed in 173.94s (0:02:53)",
+      "unchanged": true
+    },
+    {
+      "after": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/identical_independent_sweep-after.json",
+        "sha256": "f6e8e7bd1f4dc5845cdc871d817ff624a30d97f15436d6244a2dfde123468e58"
+      },
+      "before": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/identical_independent_sweep-before.json",
+        "sha256": "c00cc7a441ec230c1126db4effffaf5daa30f8c48b5f59232a658a93826ca71c"
+      },
+      "changed_sources": [],
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/fleet-pr-coverage-r7-20261020",
+      "duration_seconds": 177.2171944999136,
+      "ended_utc": "2026-10-20T03:48:53.282406+00:00",
+      "environment": {
+        "python3": "/Users/jeffabrams/.local/bin/python3",
+        "tmux": "/opt/homebrew/bin/tmux",
+        "tmux_version": "tmux 3.6a"
+      },
+      "exit_code": 0,
+      "index_entries_sha256_after": "2c443225bf533bb1528ff7da0ec124854c6a6f9861060c1aca67653f44017d41",
+      "index_entries_sha256_before": "2c443225bf533bb1528ff7da0ec124854c6a6f9861060c1aca67653f44017d41",
+      "log": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/identical_independent_sweep.log",
+        "sha256": "cbdc5593a20260093b99637ce7c177a25bab6a302a9ae45820017e8a423f0b28"
+      },
+      "proof_limit": "Fresh complete local run at observed repair bytes; not independent native review, universal tmux provisioning, indexed L4, hosted CI or landing approval.",
+      "quota_observation": {
+        "available": true,
+        "checked_utc": "2026-10-20T03:45:55.739631+00:00",
+        "observed_utc": "2026-10-20T03:45:51.441Z",
+        "source": "one-shot current-session usage observation",
+        "stop_required": false,
+        "values_private": true
+      },
+      "raw_index_sha256_after": "5cd25d26ac96da377f9cb59ec57473797ffc3b86197409838d7051fe1723a090",
+      "raw_index_sha256_before": "5cd25d26ac96da377f9cb59ec57473797ffc3b86197409838d7051fe1723a090",
+      "receipt": {
+        "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z/identical_independent_sweep-receipt.json",
+        "sha256": "748166c936e601e913b81173718aa87a292c01489ebe35db1d3effecb9398852"
+      },
+      "run": "identical_independent_sweep",
+      "source_file_count": 3193,
+      "source_map_sha256_after": "6d73a16e83d628d84a6ab17e0a13b0cfe6e4be7ce2b8ccfd66a9c0f1eedca60b",
+      "source_map_sha256_before": "6d73a16e83d628d84a6ab17e0a13b0cfe6e4be7ce2b8ccfd66a9c0f1eedca60b",
+      "started_utc": "2026-10-20T03:45:56.064523+00:00",
+      "summary_tail": "........................................................................ [ 57%]\n........................................................................ [ 60%]\n........................................................................ [ 64%]\n........................................................................ [ 67%]\n........................................................................ [ 71%]\n........................................................................ [ 74%]\n........................................................................ [ 78%]\n........................................................................ [ 82%]\n........................................................................ [ 85%]\n........................................................................ [ 89%]\n........................................................................ [ 92%]\n........................................................................ [ 96%]\n........................................................................ [ 99%]\n...                                                                      [100%]\n2019 passed in 173.62s (0:02:53)",
+      "unchanged": true
+    }
+  ],
+  "schema_version": 1,
+  "scope": "Single1329exact20path62hunk governance coverage; no production/workflow/fixture edit.",
+  "stage": "PHASE_B_LOCAL_IMPLEMENTATION_COMPLETE_NATIVE_HANDOFF_PENDING",
+  "standing_advisory_delivery": {
+    "actual_indexed_handoff": "PENDING_NATIVE_OUTER",
+    "empty_findings_cleanup": "Admission disposable check passed; actual handoff cleanup verification remains pending.",
+    "exists": true,
+    "index_matches_worktree": true,
+    "path": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md",
+    "present_in_current_index": true,
+    "repair_observed_utc": "2026-10-20T03:48:58.549421+00:00"
+  },
+  "startup": {
+    "attestation": {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-startup-attest.log",
+      "sha256": "045d5f563b14f7e2884ba0bb867a712191bfc2ed7578d3f50766141265957045",
+      "size": 372
+    },
+    "attestation_exit": 0,
+    "failing_commands": 3,
+    "guard": {
+      "mode": "0o644",
+      "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-startup-guard.log",
+      "sha256": "c5d227f831636ce40c0b6c510dd184c05466715f8299b4dd0d5929b4487a9f24",
+      "size": 60840
+    },
+    "guard_exit": 1,
+    "limits": "Inherited admission observations; no all-green startup claimed; no binary/cache/hooks/Claude/backup change.",
+    "rerun": false
+  },
+  "status": "LOCAL_GATES_PASS_INDEPENDENT_NATIVE_REVIEW_PENDING",
+  "tracker_authority": "TASKS.md native2026-10-20 R7 tracker note remains canonical. The note and native indicator scope section were restored/generated by the outer actor before this repair entry; their bytes and restoration state are preserved unchanged in this correction.",
+  "tracker_reconciliation": {
+    "anchors_preserved": true,
+    "applied_non_Ra_primary_diff_regions": 4,
+    "canonical_ids": 268,
+    "held_stash": "991ef3e02a0f76e967829f29d85ef5a868d92187",
+    "held_transaction": "f82a652ae9ca461aa1b5a069948e73f4",
+    "limits": "Selective non-Ra captured hunks only. Native R7 tracker note remains removed for outer restoration; no copied old approval or stash replay.",
+    "linked_dev_ownership_sync": "HOLD; separate row40 obligation",
+    "ordered_owners": 44,
+    "primary_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-admission/PRIMARY-TASKS.md",
+    "primary_sha256": "bb90de978337dfa213ecd538b11a7363cdef300081dc41a7d0898ba80c96ac7b",
+    "ra_sha256_at_entry_and_after_reconciliation": "5c722bcfd20ff331521a0ce27ff2e70578ceaf82952d66e0842f21877cbf77c2",
+    "recovered_primary_lines": 16,
+    "restoration_state_sha256": "dfe3b409892ce9d1b3402577e64492e2fd6f97428b042adc0fc96f0c1d9c4f11"
+  },
+  "validation_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py mu/tests/tools/test_pipeline_monitor_autofollow.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py --tb=short",
+  "validation_log_directory": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-coverage-r7-bridge-round-1-20261020T034037Z",
+  "validation_summary": {
+    "all_exit_zero": true,
+    "complete_runs": 2,
+    "earlier_runs": "Retained at their original timestamps under historical_before_bridge_round_1_correction and historical_runs_before_lineage_correction; not substituted for corrected-candidate proof.",
+    "identical_commands": true,
+    "no_skips_or_xfails_reported": true,
+    "pytest_seconds": [
+      173.94,
+      173.62
+    ],
+    "source_file_count": 3193,
+    "stable_before_after_across": true,
+    "tests_per_run": 2019,
+    "wrapper_duration_seconds": [
+      178.26970566692762,
+      177.2171944999136
+    ]
+  },
+  "wave_id": "workingrcx-fleet-pr-coverage-r7-2026-10-20"
+}

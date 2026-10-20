@@ -189,7 +189,22 @@ the retained historical failures are recorded in
 That report retains the original local results and their source bindings;
 PR1339 CI and landing do not approve a later coverage candidate.
 
-**PR1330/PR1338 coverage R6 (Phase B, 2026-10-20):** existing row38 owns fresh
+**PR1329 coverage R7 (Phase B, 2026-10-20):** actual parent is PR1340 merge
+`5921cf352db0f52aa469655371e8977c3f1a0848`. R6 has LANDED, Main synchronization
+and native lifecycle completed, and later native public apply/verify recorded
+PR1330/PR1338 CLOSED_VERIFIED with both original local/remote branches retained.
+R7 accounts for PR1329 exact20paths62hunks against PR1339 and contributing
+PR1333/1331/1334 lineage. The old one-time Mu release is superseded; original Mu
+protection/work remain. The original tmux-less P2 remains OPEN under bounded
+row40 acceptance; provisioned local/hosted passes do not prove global availability.
+See [R7 evidence](reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json)
+and the [required standing obligations](reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md).
+Independent review, generated/indexed authority and complete native landing gates
+remain pending for R7 before separate fresh public1329 disposition. Linked dev
+ownership sync remains HOLD; preserve transactionf82a652ae9ca461aa1b5a069948e73f4
+and stash991ef3e02a0f76e967829f29d85ef5a868d92187, plus all older held WIP.
+
+**Historical PR1330/PR1338 coverage R6 observation (Phase B before PR1340 landing, 2026-10-20):** existing row38 owns fresh
 schema2 accounting for all 7 paths/14 hunks of PR1330 and 9 paths/20 hunks of
 PR1338 against actual merged PR1334 and PR1339. Both original targets remain
 OPEN at the admitted heads; independent native review, indexed authority,
@@ -206,8 +221,8 @@ linked-checkout hold or consume the preserved transaction/stash.
 - Debt marker history: [`archive/status_debt_history.md`](archive/status_debt_history.md)
 - L3/L4 architecture details: [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchitecture.v0.md)
 
-**Last updated:** 2026-10-20 (R6 Phase B governance; admitted HEAD and `origin/dev` equal actual PR1339 merge `ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654`. Main synchronized; this coverage candidate remains unmerged. Phase 8c/L4 bounded-reduction posture and debt counts unchanged.)
+**Last updated:** 2026-10-20 (R7 Phase B governance at actual PR1340 merge `5921cf352db0f52aa469655371e8977c3f1a0848`; R6 landed and PR1330/PR1338 CLOSED_VERIFIED. R7 is unmerged. Phase 8c/L4 bounded-reduction posture and debt counts unchanged.)
 **Next milestone:** First clear the ordered control-plane root-fix queue in TASKS.md if it blocks autonomous execution, then continue with **Coinduction** as the next program-structural wave. Recursive ordinals landed in PR #1160 (`b538b8d9`), W-types / inductive types landed in PR #1161 (`6a6b4217`), the nightly StructuralNumbers regression repair landed across PRs #1181-#1187, and Codex/default pager routing landed in PR #1194 (`4734ed2a`). Fixpoint follows Coinduction; Optimization remains LAST. Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET). Canonical authorization remains TASKS.md.
-**Active NEXT items:** See `TASKS.md` PROGRAM QUEUE. Existing row38 owns PR1330/PR1338 R6 coverage; both originals and other independently owned PR obligations remain OPEN at admission. R19/retention/Mu/monitor work and linked dev ownership sync HOLD remain separately owned.
+**Active NEXT items:** See `TASKS.md` PROGRAM QUEUE. Existing row38 owns exact PR1329 coverage R7. PR1329/1325/1335/1336/1337 remain independently OPEN at admission; PR1330/PR1338 are CLOSED_VERIFIED. R19/retention/Mu/monitor, tmux prerequisite policy and linked dev ownership HOLD remain separately owned.
 
 **Historical 2026-07-01 operational snapshot:** See `TASKS.md` PROGRAM QUEUE for the active Codex autonomous queue. Current operational merge evidence includes PR #1194 (`4734ed2a`, committed and missing-config pager fallback routes to Codex), PR #1193 (`0eb8c34c`, commit-executor draft-PR-ready hardening), PR #1192 (`f98c445c`, route/xdist hardening), PR #1191 (`c8c65c4a`, PR #1166 Codex-default preservation), PR #1190 (`5303862f`, recovery/pre-push blocker hardening), PR #1189 (`ea782dc1`, PR #1173 never-behind preservation), PR #1188 (`675f6de8`, WIP/unmerged-PR preservation), and PRs #1181-#1187 (nightly NR structural-numeral repair and verification). Original stale PRs #1173 and #1166 are closed as superseded, and GitHub reported no open PRs against `dev` during this sync. Recurring local cron/autoping/tmux was intentionally stopped after #1194 to conserve model usage; do not assume those local observer surfaces are live until explicitly restarted.
