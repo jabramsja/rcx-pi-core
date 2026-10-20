@@ -387,8 +387,8 @@
         "kind": "file",
         "mode": "0o644",
         "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
-        "sha256": "d911f76aeb3f1534c1b0fa383eda41efa5703ad0af4b8a041648286e27061894",
-        "size": 13059
+        "sha256": "7f23648a87329e4467b14169ee743dd25f2bd9fe8c6b1d9a59a6cda24c7e9574",
+        "size": 18100
       },
       {
         "kind": "file",
@@ -408,12 +408,12 @@
         "kind": "file",
         "mode": "0o644",
         "path": "reports/l4_wave_indicators/workingrcx-fleet-pr-coverage-r7-2026-10-20.json",
-        "sha256": "82a61a694a045bb2f3780253c657a654e8dae597253a105af8bd9d822ebd6f4f",
+        "sha256": "fda8aefa2f5d81810d0bdb5e6d2cebb1e957e4772c6ce03fe788d85f75c34586",
         "size": 623
       }
     ],
-    "observed_utc": "2026-10-20T03:48:58.549421+00:00",
-    "scope": "Current repair delivery is separate from all immutable historical and fresh run maps. Only the evidence report receives results/inventory metadata after the sweep; detached final inventory binds its delivered bytes."
+    "observed_utc": "2026-10-20T05:07:09.117665+00:00",
+    "scope": "Current on-disk artifact bytes after native generation, refreshed for PR1341 bot remediation round1. The earlier inventory and post-gate change statement are preserved under historical_before_pr1341_round_1_inventory_refresh. Historical packet predicates and source/index/run receipts retain their original bytes and timestamps; they do not validate the later generated packet or indicator. This inventory refresh is not a gate rerun or landing approval. Evidence self-hash is omitted to avoid self-reference."
   },
   "entry_observation": {
     "branch": "jabramsja/workingrcx-fleet-pr-coverage-r7-2026-10-20",
@@ -1221,6 +1221,69 @@
       ]
     }
   },
+  "historical_before_pr1341_round_1_inventory_refresh": {
+    "current_artifact_inventory": {
+      "files": [
+        {
+          "kind": "file",
+          "mode": "0o644",
+          "path": "CHANGELOG.md",
+          "sha256": "51766d0dc50eae03241d6cfd4e49c9183d23063f006100e5765bda66bf75465f",
+          "size": 262907
+        },
+        {
+          "kind": "file",
+          "mode": "0o644",
+          "path": "STATUS.md",
+          "sha256": "b81c3a9e6f544e3c267f5a643f41f7e2399cba84ae81f09e1ebe3233d4973f0f",
+          "size": 15962
+        },
+        {
+          "kind": "file",
+          "mode": "0o644",
+          "path": "TASKS.md",
+          "sha256": "5bbd2d2481b8a21cc22efb17faf379be8832b5aac2e4978a21d9c9544385d07a",
+          "size": 3280403
+        },
+        {
+          "kind": "file",
+          "mode": "0o644",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
+          "sha256": "d911f76aeb3f1534c1b0fa383eda41efa5703ad0af4b8a041648286e27061894",
+          "size": 13059
+        },
+        {
+          "kind": "file",
+          "mode": "0o644",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json",
+          "sha256": "2c5f623a7e41c0f8518742f0eaf85d217e6aa6f297cd8c66edd276846fb1a698",
+          "size": 106143
+        },
+        {
+          "kind": "file",
+          "mode": "0o644",
+          "path": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md",
+          "sha256": "2a354eb63e2257c9250cae6758240a241320a743de60fe8c42915921571af6a0",
+          "size": 11725
+        },
+        {
+          "kind": "file",
+          "mode": "0o644",
+          "path": "reports/l4_wave_indicators/workingrcx-fleet-pr-coverage-r7-2026-10-20.json",
+          "sha256": "82a61a694a045bb2f3780253c657a654e8dae597253a105af8bd9d822ebd6f4f",
+          "size": 623
+        }
+      ],
+      "observed_utc": "2026-10-20T03:48:58.549421+00:00",
+      "scope": "Current repair delivery is separate from all immutable historical and fresh run maps. Only the evidence report receives results/inventory metadata after the sweep; detached final inventory binds its delivered bytes."
+    },
+    "post_gate_source_changes": [
+      {
+        "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+        "reason": "Records actual repair validation receipts and final inventory; no executable, workflow, fixture, packet, tracker, advisory or manifest changes after the fresh runs."
+      }
+    ]
+  },
   "historical_completed_local_validation_utc": "2026-10-20T03:22:09.176591+00:00",
   "historical_process_event_limits": {
     "later_R5_and_R2": "Distinct retained events from the PR1339/R3 implementation evidence: both R5 Linux zombie failures and R2 changing-PID refusal, with original causes qualified.",
@@ -1612,7 +1675,15 @@
   "post_gate_source_changes": [
     {
       "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
-      "reason": "Records actual repair validation receipts and final inventory; no executable, workflow, fixture, packet, tracker, advisory or manifest changes after the fresh runs."
+      "reason": "Records the repair validation receipts and refreshes the current artifact inventory after native generation; historical run/source/index receipts remain unchanged."
+    },
+    {
+      "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
+      "reason": "Native generation appended machine sections after the recorded local runs. The current inventory binds the resulting packet bytes; earlier packet predicates remain historical observations."
+    },
+    {
+      "path": "reports/l4_wave_indicators/workingrcx-fleet-pr-coverage-r7-2026-10-20.json",
+      "reason": "Native collection regenerated the indicator at 2026-10-20T04:05:16Z, after the recorded local runs. The current inventory binds the regenerated bytes."
     }
   ],
   "prior_landing": {
