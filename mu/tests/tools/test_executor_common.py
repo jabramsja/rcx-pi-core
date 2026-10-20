@@ -1,6 +1,8 @@
 """Typed transport of the immutable launch override sibling."""
 
 import copy
+import ctypes
+import hashlib
 import json
 import os
 import signal
@@ -53,7 +55,14 @@ def complete_process_observation(*modules):
 
             with patch.object(subprocess, "run", side_effect=query):
                 result = observe(owner, cwd=cwd)
-            records.append({"complete": result.complete, "error": result.error,
+            # Preserve real state/ancestry diagnostics without serializing
+            # command lines or environment values from the full OS census.
+            rows = [row.split(None, 8) for row in snapshot.stdout.splitlines()] if snapshot else []
+            records.append({"observed_ns": time.monotonic_ns(),
+                            "snapshot_sha256": hashlib.sha256(snapshot.stdout.encode()).hexdigest()
+                            if snapshot else None,
+                            "process_states": [row[:8] for row in rows],
+                            "complete": result.complete, "error": result.error,
                             "owned": [dict(pid=item.pid, ppid=item.ppid, started=item.started)
                                       for item in result.identities.values() if item.owned]})
             return result
@@ -64,6 +73,32 @@ def complete_process_observation(*modules):
             stack.enter_context(patch.object(module, "observe_executor_processes",
                                             side_effect=wrap(module.observe_executor_processes)))
         yield records
+
+
+@contextmanager
+def fixture_orphan_reaper():
+    """Own Linux fixture orphans until explicit, PID-specific teardown waits.
+
+    This never reaps during a release observation. Negative reparented-child
+    tests still see a live process outside the root tree. On macOS launchd owns
+    orphans; callers must still prove their actual absence during teardown.
+    """
+    previous = ctypes.c_int()
+    libc = None
+    if sys.platform == "linux":
+        libc = ctypes.CDLL(None, use_errno=True)
+        assert libc.prctl(37, ctypes.byref(previous), 0, 0, 0) == 0, ctypes.get_errno()
+        assert libc.prctl(36, 1, 0, 0, 0) == 0, ctypes.get_errno()
+    receipt = dict(linux_subreaper=libc is not None, previous=previous.value, restored=False)
+    try:
+        yield receipt
+    finally:
+        if libc is not None:
+            assert libc.prctl(36, previous.value, 0, 0, 0) == 0, ctypes.get_errno()
+            current = ctypes.c_int()
+            assert libc.prctl(37, ctypes.byref(current), 0, 0, 0) == 0, ctypes.get_errno()
+            assert current.value == previous.value
+        receipt["restored"] = True
 
 
 @pytest.mark.parametrize("turns", [None, 1, 1000])
@@ -142,6 +177,36 @@ def test_complete_owned_process_observation_and_release(owned_process, tmp_path)
         assert common.executor_release_evidence_error(evidence, cwd=tmp_path) is None
     with pytest.raises(ProcessLookupError):
         os.kill(proc.pid, 0)
+
+
+def test_real_unreaped_process_is_present_until_parent_wait(owned_process, tmp_path):
+    proc, owner = owned_process
+    with complete_process_observation(common) as records:
+        observed = common.observe_executor_processes(owner, cwd=tmp_path)
+        assert observed.complete, records
+        identity = observed.identities[proc.pid]
+        # Only exercise the validator with metadata from the real live census.
+        # This is not a dispatcher release receipt or permission to resume.
+        candidate = dict(version=1, owner=owner, root_pid=proc.pid,
+                         members=[dict(pid=identity.pid, started=identity.started)])
+        os.kill(proc.pid, signal.SIGKILL)  # Do not poll/wait: preserve the zombie.
+        deadline = time.monotonic() + 5
+        while True:
+            state = common.observe_executor_processes(owner, cwd=tmp_path)
+            assert state.complete, records
+            row = next(row for row in records[-1]["process_states"] if int(row[0]) == proc.pid)
+            if row[7].startswith("Z"):
+                break
+            assert time.monotonic() < deadline, row
+            time.sleep(0.01)
+        os.kill(proc.pid, 0)
+        assert common.executor_release_evidence_error(candidate, cwd=tmp_path) is not None
+        assert proc.returncode is None
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+        with pytest.raises(ProcessLookupError):
+            os.kill(proc.pid, 0)
+        assert common.executor_release_evidence_error(candidate, cwd=tmp_path) is None
+    (tmp_path / "unreaped-process-observations.json").write_text(json.dumps(records) + "\n")
 
 
 def test_real_reparenting_between_queries_is_uncertain(owned_process, monkeypatch, tmp_path):

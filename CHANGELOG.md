@@ -6,6 +6,39 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-20
 
+### Private tmux/process fixture R4 (Phase B implementation; unmerged)
+
+- Compare a real waitable controller's PID, PPID and birth time while retaining
+  startup/current command diagnostics and independent private-socket server
+  identity. Add actual exec/title-transition and identity/server drift controls.
+- Give the positive detached timeout fixture a real waiting parent. Require its
+  child wait acknowledgement and actual absence before root termination, then
+  run the unchanged production signal and release checks. Keep negative
+  observation boundaries intact; add interrupted-fixture teardown and real
+  unreaped-process controls. Linux fixture orphan adoption is scoped and restored.
+- Retain both R7 CI failure logs. Attempt1's exact cause remains unproved;
+  attempt2 demonstrates mutable command text with unchanged PID/PPID/birth.
+  Record local commands and source/index bindings in the R4 implementation
+  evidence. Independent native review and delivery stages remain pending.
+- Reconcile captured PRIMARY history without replacing native tracker restore
+  anchors; retain all 268 task IDs and 44 ordered owners. STATUS architecture,
+  host debt, production executors and runtime semantics are unchanged.
+- Re-entry repair: give fixture descendants a private cleanup pipe and unwind
+  root waits, streams and descendant absence checks even after a teardown query
+  failure. Preserve birth-checked signaling and propagate the original error.
+  Add real-process persistent-query and changed-birth controls for waiting,
+  open-pipe and reparented descendants; keep earlier gate receipts historical.
+
+### Coverage PR1340 landed; originals PR1330 / PR1338 closed
+
+- Captured native/provider evidence records PR1340 merged at
+  `5921cf352db0f52aa469655371e8977c3f1a0848` on 2026-10-20T02:36:40Z,
+  Main synchronized and lifecycle COMPLETE. The original PRs1330/1338 are
+  CLOSED_VERIFIED with their branches retained. PR1339 was already landed.
+- R7/PR1341 and original PR1329 remain OPEN/unmerged/HOLD after the two failed
+  current-head CI attempts and correct scope rejection. Retention and R19
+  remain unmerged. The following R6 entry is its historical Phase B observation.
+
 ### PR1330 and PR1338 coverage R6 (Phase B; unmerged)
 
 - Account independently for PR1330's 7 paths/14 hunks and PR1338's 9 paths/20

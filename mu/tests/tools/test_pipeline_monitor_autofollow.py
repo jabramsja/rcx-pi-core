@@ -202,6 +202,76 @@ def test_monitor_health_holds_on_unreaped_watcher(tmp_path, monkeypatch):
         assert run("display-message", "-p", "-t", pane, "#{@rcx_log_reader_protocol}") == ""
 
 
+def _require_fixture_controller(controller, expected, actual, *, server_pid=None):
+    """A waitable parent's identity survives exec/title changes, not PID reuse."""
+    diagnostics = dict(expected=expected, observed=actual, server_pid=server_pid)
+    if (
+        controller.poll() is not None or expected is None or actual is None
+        or any(actual[key] != expected[key] for key in ("pid", "ppid", "started"))
+        or actual["pid"] != controller.pid or actual["ppid"] != os.getpid()
+        or (server_pid is not None and server_pid != controller.pid)
+    ):
+        # Keep both complete records: pytest truncates an assert's dictionary
+        # message while rewriting it, losing precisely the observed diagnosis.
+        raise AssertionError(diagnostics)
+
+
+def test_fixture_controller_accepts_real_exec_title_transition(tmp_path):
+    from mu.tests.tools.test_worktree_lifecycle import observed_process_identity
+    # Synchronize an actual exec without relying on catching tmux's short
+    # startup title. The same Popen child must stay waitable across the exec.
+    with subprocess.Popen(["bash", "-c", "echo ready; read -r ready; exec sleep 60"],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL, text=True) as controller:
+        try:
+            assert controller.stdout.readline() == "ready\n"
+            before = observed_process_identity(controller.pid)
+            controller.stdin.write("ready\n")
+            controller.stdin.flush()
+            after = _wait_for(lambda: (
+                actual if (actual := observed_process_identity(controller.pid))["command"] == "sleep 60"
+                else None
+            ), timeout=5)
+            assert after["command"] != before["command"]
+            _require_fixture_controller(controller, before, after)
+            print(json.dumps(dict(expected=before, observed=after)))
+        finally:
+            controller.kill()
+            controller.wait(timeout=5)
+    assert controller.stdin.closed and controller.stdout.closed
+    with pytest.raises(ProcessLookupError):
+        os.kill(controller.pid, 0)
+
+
+@pytest.mark.parametrize("drift", ["pid", "ppid", "started", "absent", "foreign-server", "exited"])
+def test_fixture_controller_rejects_identity_and_server_drift(tmp_path, monkeypatch, drift):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, observed_process_identity
+    primary, lane, _, env = make_native_lane(tmp_path, monkeypatch)
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (run, pane, old, _, _):
+        server = int(run("display-message", "-p", "-t", pane, "#{pid}"))
+        expected = observed_process_identity(server)
+        # Mutate only inputs to the fixture assertion, never the real server,
+        # observer or signaling path. The actual controller still gets reaped.
+        actual = dict(expected)
+        if drift in ("pid", "ppid"):
+            actual[drift] += 1
+        elif drift == "started":
+            actual["started"] = "Mon Jan  1 00:00:00 2001"
+        elif drift == "absent":
+            actual = None
+        controller = type("ControllerProbe", (), {
+            "pid": server, "poll": lambda self: 0 if drift == "exited" else None,
+        })()
+        with pytest.raises(AssertionError) as rejected:
+            _require_fixture_controller(
+                controller, expected, actual,
+                server_pid=old.pid if drift == "foreign-server" else server,
+            )
+        assert rejected.value.args[0]["expected"] == expected
+        assert rejected.value.args[0]["observed"] == actual
+        print(json.dumps(dict(drift=drift, expected=expected, observed=actual)))
+
+
 @contextmanager
 def stale_live_watcher(tmp_path, primary, lane, env, monkeypatch, *, pause_reaper=False):
     """Keep a real pre-coordination Bash/tail alive while its file is updated.
@@ -252,6 +322,7 @@ while true; do sleep 0.1; done
     real_run, real_kill = subprocess.run, os.kill
     controller = None
     parent = None
+    server_pid = None
     reaper = None
     stop_reaper = threading.Event()
     reaper_errors, observations = [], []
@@ -271,9 +342,9 @@ while true; do sleep 0.1; done
         return dict(pid=pid, ppid=int(fields[1]), started=" ".join(fields[2:7]), command=fields[7])
 
     def require_controller():
-        assert controller.poll() is None, "Fixture controller exited before its children"
-        assert observe(controller.pid) == parent, "Fixture controller identity changed"
-        assert parent["ppid"] == os.getpid()
+        actual = observe(controller.pid)
+        _require_fixture_controller(controller, parent, actual, server_pid=server_pid)
+        return actual
 
     def notify_child(expected, *, kill, observing=False):
         actual = observe(expected["pid"])
@@ -298,7 +369,7 @@ while true; do sleep 0.1; done
         # Preserve the production launch shape, including shell setup before
         # the final Bash watcher (not a synthetic direct exec-only pane).
         # Keep the selected source in the environment, as the live autofollow
-        # resolver does. tmux retains its initial argv: embedding the source
+        # resolver does. tmux may retain its initial argv: embedding the source
         # there would correctly make the server itself a retirement hold.
         launch = ("cd " + shlex.quote(str(primary)) + " && RCX_AGENT_BUS_DIR=.agent_bus bash "
                   + shlex.quote(str(script)))
@@ -312,13 +383,14 @@ while true; do sleep 0.1; done
         old = type("Watcher", (), {"pid": pid})()
         tails = _wait_for(lambda: _watcher_tails(old, log))
         owned_pids.update([old.pid, *tails])
-        assert int(run("display-message", "-p", "-t", pane, "#{pid}")) == controller.pid
-        require_controller()
+        server_pid = int(run("display-message", "-p", "-t", pane, "#{pid}"))
+        current_parent = require_controller()
         child = observe(old.pid)
         assert parent["ppid"] == os.getpid()
         assert child["ppid"] == controller.pid
         (tmp_path / "controller-identity.json").write_text(json.dumps(
-            dict(controller=parent, watcher=child, tails=tails), indent=2) + "\n")
+            dict(controller=parent, current_controller=current_parent,
+                 private_server_pid=server_pid, watcher=child, tails=tails), indent=2) + "\n")
 
         def notify_reaper():
             try:
