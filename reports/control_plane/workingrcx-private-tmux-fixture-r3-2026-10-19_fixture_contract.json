@@ -1,0 +1,80 @@
+{
+  "artifact_type": "private_tmux_test_fixture_contract",
+  "wave_id": "workingrcx-private-tmux-fixture-r3-2026-10-19",
+  "owner": "FLEET-NATIVE-LIFECYCLE-PREVENTION",
+  "is_schema2_lifecycle_PR_coverage": false,
+  "production_delta": "none",
+  "topology": {
+    "controller": "pytest-owned subprocess.Popen(tmux -D -f /dev/null -S unique-private-socket); waitable child of current worker; independent real PID/PPID/birth/command observation",
+    "watcher": "real Bash tmux pane and raw tail child; observed watcher PPID equals owned controller PID; source replacement preserves pre-update live process",
+    "notification": "fixture thread may send real SIGCHLD only after exact watcher PID/PPID/birth match, defunct observation, matching live controller identity and current-worker ownership",
+    "completion": "production PID absence remains mandatory; no zombie accepted as absent; fresh OS observations, real signals, ownership checks and parsers stay active",
+    "teardown": "stop and join fixture observer; resume exactly owned stopped controller; discover owned descendants, terminate panes, notify/reap children before parent exit; wait Popen, close output, remove unique socket; exact absent checks for controller and every recorded child"
+  },
+  "controls": {
+    "positive": [
+      "shared watcher parent ownership",
+      "normal and delayed monitor health adoption",
+      "normal and delayed native completion"
+    ],
+    "holds": [
+      "unreaped stopped parent refuses monitor adoption",
+      "unreaped stopped parent refuses lifecycle claim/release",
+      "writer and unknown-reader holds",
+      "retained PID-reuse, query, permission and owner guards"
+    ],
+    "failure_cleanup": [
+      "setup before yield",
+      "live child caller exception",
+      "unreaped child caller exception",
+      "blocker setup early exit",
+      "foreign-proof readiness timeout, early exit and missing owner"
+    ]
+  },
+  "consumer_boundary": {
+    "positive": "unchanged only",
+    "adverse_cases": [
+      "source",
+      "index",
+      "seal",
+      "restored",
+      "wrong-bus",
+      "missing-release",
+      "false-release",
+      "release-type",
+      "checkpoint-hash",
+      "malformed-release",
+      "unknown-release-field",
+      "missing-proof",
+      "proof-version",
+      "proof-owner-type",
+      "proof-member",
+      "proof-pid-reuse",
+      "release-query",
+      "revived-owner",
+      "proof-owner-changed",
+      "proof-from-another-launch",
+      "late-partial-identities",
+      "late-partial-graph"
+    ],
+    "lifetime_controls": [
+      "positive/adverse fresh OS query counts",
+      "callback abort restores observer",
+      "consumer abort restores observer",
+      "real absence of transported process after every control"
+    ],
+    "foreign_proof_setup": "actual R5 33ac function content retained from verified donor, including all three setup negatives"
+  },
+  "source_sha256": {
+    "mu/tests/tools/test_phase_b_executor.py": "40089193b504e65e93b7693ba0a90ee3d0df24c980e5ae36c2e4ec4e7e2e8f42",
+    "mu/tests/tools/test_pipeline_monitor_autofollow.py": "4b060706167f5e3936020856fb60a14b03776493e2943c4954c1e02e5b798137",
+    "mu/tests/tools/test_worktree_lifecycle.py": "f23ed73bd503c487b2da052d792c300a757caa0a61b3c5b9748fda22e7b08d05"
+  },
+  "evidence_ref": "reports/control_plane/workingrcx-private-tmux-fixture-r3-2026-10-19_implementation_evidence.json",
+  "historical_limits": [
+    "Historical CI defunct identities established; exact tmux cause unproved.",
+    "R2 unknown changing PID not retained; no inference from a later pass."
+  ],
+  "remaining_obligations_ref": "reports/deferred/non_blocking/workingrcx-private-tmux-fixture-r3-2026-10-19_remaining_obligations.md",
+  "validation_status": "Phase B-local complete gate and identical independent sweep each passed 1704 tests; both retain 22 actual controller cleanup receipts and six boundary receipts. Native refreshed wave_evidence, independent review and landing remain required."
+}

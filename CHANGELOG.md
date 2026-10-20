@@ -4,6 +4,28 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-19
+
+### Private tmux watcher fixtures R3 (Phase B implementation, unmerged)
+
+- Port only the three hash/mode-verified donor test deltas. Own and reap the
+  private foreground tmux controller and its real watcher children; retain
+  paused-parent HOLD, delayed reaping, writer/unknown-reader, identity/query
+  refusals and teardown controls. Production release and claim guards stay intact.
+- Reproduce premature restoration of the positive late-consumer observer, then
+  retain coherent fresh OS observation only for the unchanged consumer. Restore
+  the original observer before every adverse callback; preserve all 23 original
+  cases and the R5 foreign-proof setup repair with three failure controls.
+  Added controls verify fresh query counts and restoration on callback/consumer
+  interruption, with actual released-process absence.
+- Keep the generated packet untouched. Reconcile captured PRIMARY history
+  outside byte-exact native Ra and restoration anchors, preserving 268 IDs and
+  44 ordered owners. Exact local results and all limitations belong in
+  `reports/control_plane/workingrcx-private-tmux-fixture-r3-2026-10-19_implementation_evidence.json`.
+  Historical Linux zombies and R2's unknown changing PID remain qualified;
+  refreshed native evidence, independent review, commit/prepush/CI/merge and
+  PRIMARY synchronization remain required.
+
 ## 2026-10-13
 
 ### Native timeout recovery R4 (Phase B implementation)

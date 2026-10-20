@@ -27,6 +27,7 @@ import json
 import os
 import re
 import select
+import threading
 import signal
 import shlex
 import shutil
@@ -141,18 +142,80 @@ def generated_log_watcher(tmp_path, lane, env, *, monitor_env=None):
             watcher.wait(timeout=10)
 
 
+def test_shared_stale_watcher_owns_waitable_parent(tmp_path, monkeypatch):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, observed_process_identity
+    primary, lane, _, env = make_native_lane(tmp_path, monkeypatch)
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (run, pane, old, tails, log):
+        controller = int(run("display-message", "-p", "-t", pane, "#{pid}"))
+        parent = observed_process_identity(controller)
+        watcher = observed_process_identity(old.pid)
+        assert watcher["ppid"] == controller
+        assert parent["ppid"] == os.getpid(), parent
+        assert _watcher_tails(old, log) == tails
+    for pid in [controller, old.pid, *tails]:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+def monitor_health_command(primary, command):
+    """Execute the actual monitor shell functions and their Python CLI child."""
+    source = (OBSERVABILITY_DIR / "pipeline_monitor.sh").read_text()
+    functions = "\n".join(re.search(r"^" + name + r"\(\) \{\n.*?^\}", source, re.M | re.S).group()
+        for name in ("normalize_path", "log_reader_protocol", "tmux_session_health_detail", "ensure_tmux_session"))
+    setup = "\n".join([
+        "SESSION=reader-test", "SCRIPT_DIR=" + shlex.quote(str(OBSERVABILITY_DIR)),
+        "EXPECTED_PANE_1='PANE 1 · LIVE PIPELINE LOG'", "EXPECTED_PANE_2='PANE 2 · REVIEW FINDINGS'",
+        "EXPECTED_PANE_3='PANE 3 · PLAIN-ENGLISH STATUS'", "EXPECTED_PANE_4='PANE 4 · SESSION TIMELINE'",
+        functions, "rebuild_tmux_session() { return 91; }"])
+    return ["bash", "-c", setup + "\n" + command + " " + shlex.quote(str(primary))]
+
+
+def test_monitor_health_holds_on_unreaped_watcher(tmp_path, monkeypatch):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, observed_process_identity
+    primary, lane, _, env = make_native_lane(tmp_path, monkeypatch)
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch, pause_reaper=True) as (run, pane, old, tails, _):
+        controller = int(run("display-message", "-p", "-t", pane, "#{pid}"))
+        original = observed_process_identity(old.pid)
+        assert original["ppid"] == controller
+        try:
+            held = subprocess.run(monitor_health_command(primary, "ensure_tmux_session"),
+                                  capture_output=True, text=True, timeout=_TIMEOUT_S)
+            assert held.returncode == 1, held.stdout + held.stderr
+            assert "Old log watcher exit not acknowledged; no new retirement claim" in held.stderr
+            evidence = json.loads(held.stderr.split("evidence=", 1)[1])
+            zombie = observed_process_identity(old.pid)
+            assert evidence == dict(expected=original, last_process=zombie, pid_absent=None)
+            assert "defunct" in zombie["command"]
+            assert zombie["ppid"] == controller and zombie["started"] == original["started"]
+            os.kill(old.pid, 0)
+            assert lane.exists()
+            print(json.dumps(dict(controller=controller, monitor_hold=evidence), sort_keys=True))
+        finally:
+            os.kill(controller, signal.SIGCONT)
+        for pid in [old.pid, *tails]:
+            _wait_for(lambda: str(pid) not in subprocess.run(
+                ["ps", "-A", "-o", "pid="], check=True, capture_output=True,
+                text=True, timeout=_TIMEOUT_S).stdout.split())
+            with pytest.raises(ProcessLookupError):
+                os.kill(pid, 0)
+        assert int(run("display-message", "-p", "-t", pane, "#{pane_pid}")) == old.pid
+        assert run("display-message", "-p", "-t", pane, "#{@rcx_log_reader_protocol}") == ""
+
+
 @contextmanager
-def stale_live_watcher(tmp_path, primary, lane, env, monkeypatch):
+def stale_live_watcher(tmp_path, primary, lane, env, monkeypatch, *, pause_reaper=False):
     """Keep a real pre-coordination Bash/tail alive while its file is updated.
 
-    A private tmux server owns the pane, just as the observed old monitor did.
-    No model processes or developer tmux sessions are touched by this fixture.
+    Own the foreground private tmux parent and reap it after its panes exit.
+    Its fixture supervisor observes real identities independently of the caller,
+    including monitor health's Bash/Python subprocesses. A matching zombie only
+    triggers SIGCHLD to its real parent; production must still prove absence.
     """
     tmux = shutil.which("tmux")
     assert tmux, "The stale live watcher regression requires tmux"
     # AF_UNIX paths are short on macOS; pytest's per-worker path is too long.
     socket_dir = tempfile.TemporaryDirectory(prefix="rcx-reader-", dir="/tmp")
-    socket = Path(socket_dir.name) / "tmux.sock"
+    socket = Path(socket_dir.name).resolve() / "tmux.sock"
     bindir = tmp_path / "reader-bin"
     bindir.mkdir()
     shim = bindir / "tmux"
@@ -167,7 +230,7 @@ def stale_live_watcher(tmp_path, primary, lane, env, monkeypatch):
     script.write_text('''#!/usr/bin/env bash
 tail -f "$RCX_TEST_OLD_LOG" &
 tail_pid=$!
-trap 'kill "$tail_pid" 2>/dev/null; wait "$tail_pid" 2>/dev/null' EXIT
+trap 'kill "$tail_pid" 2>/dev/null; wait "$tail_pid" 2>/dev/null; if [ "$RCX_TEST_PAUSE_REAPER" = 1 ]; then kill -STOP "$PPID"; fi' EXIT
 trap 'exit 0' TERM INT
 while true; do sleep 0.1; done
 ''')
@@ -179,13 +242,59 @@ while true; do sleep 0.1; done
         "RCX_OBS_LIFECYCLE_HELPER": worktree_lifecycle.__file__,
         "RCX_PIPELINE_LIVE_LOG": str(tmp_path / "unused-log"),
         "RCX_LOG_WATCHER_HEARTBEAT_SECONDS": "300",
+        "RCX_TEST_PAUSE_REAPER": "1" if pause_reaper else "0",
     }
     def run(*args):
         result = subprocess.run([tmux, "-f", os.devnull, "-S", str(socket), *args], cwd=primary,
-            env=launch_env, capture_output=True, text=True)
+            env=launch_env, capture_output=True, text=True, timeout=_TIMEOUT_S)
         assert result.returncode == 0, result.stderr
         return result.stdout.strip()
+    real_run, real_kill = subprocess.run, os.kill
+    controller = None
+    parent = None
+    reaper = None
+    stop_reaper = threading.Event()
+    reaper_errors, observations = [], []
+    owned_pids = set()
+    output = (tmp_path / "controller.log").open("wb")
+
+    def observe(pid):
+        # A fresh real query may race with reaping. Only ps's exact absent
+        # result is absence; query/permission errors remain fixture failures.
+        result = real_run(["ps", "-ww", "-p", str(pid), "-o", "pid=,ppid=,lstart=,command="],
+            capture_output=True, text=True, timeout=5, env=env | {"LC_ALL": "C"})
+        if result.returncode == 1 and not result.stdout.strip() and not result.stderr:
+            return None
+        assert result.returncode == 0 and not result.stderr, result
+        fields = result.stdout.rstrip("\n").split(None, 7)
+        assert len(fields) == 8 and int(fields[0]) == pid, result.stdout
+        return dict(pid=pid, ppid=int(fields[1]), started=" ".join(fields[2:7]), command=fields[7])
+
+    def require_controller():
+        assert controller.poll() is None, "Fixture controller exited before its children"
+        assert observe(controller.pid) == parent, "Fixture controller identity changed"
+        assert parent["ppid"] == os.getpid()
+
+    def notify_child(expected, *, kill, observing=False):
+        actual = observe(expected["pid"])
+        if actual is None:
+            return False
+        assert all(actual[k] == expected[k] for k in ("pid", "ppid", "started")), actual
+        if observing and stop_reaper.is_set():
+            return False
+        if "defunct" in actual["command"]:
+            assert actual["ppid"] == controller.pid
+            require_controller()
+            observations.append(dict(controller=parent, watcher=actual))
+            kill(controller.pid, signal.SIGCHLD)
+        return True
+
     try:
+        controller = subprocess.Popen([tmux, "-D", "-f", os.devnull, "-S", str(socket)],
+            cwd=primary, env=launch_env, start_new_session=True, stdout=output, stderr=output)
+        parent = observe(controller.pid)
+        assert parent is not None and parent["ppid"] == os.getpid()
+        _wait_for(lambda: controller.poll() is None and socket.exists(), timeout=5)
         # Preserve the production launch shape, including shell setup before
         # the final Bash watcher (not a synthetic direct exec-only pane).
         # Keep the selected source in the environment, as the live autofollow
@@ -202,34 +311,127 @@ while true; do sleep 0.1; done
         pid = int(run("display-message", "-p", "-t", pane, "#{pane_pid}"))
         old = type("Watcher", (), {"pid": pid})()
         tails = _wait_for(lambda: _watcher_tails(old, log))
+        owned_pids.update([old.pid, *tails])
+        assert int(run("display-message", "-p", "-t", pane, "#{pid}")) == controller.pid
+        require_controller()
+        child = observe(old.pid)
+        assert parent["ppid"] == os.getpid()
+        assert child["ppid"] == controller.pid
+        (tmp_path / "controller-identity.json").write_text(json.dumps(
+            dict(controller=parent, watcher=child, tails=tails), indent=2) + "\n")
+
+        def notify_reaper():
+            try:
+                while not stop_reaper.wait(0.02):
+                    # No SIGCONT here: a stopped parent must still force HOLD.
+                    # This is real notification, never a successful observation.
+                    if not notify_child(child, kill=os.kill, observing=True):
+                        return
+            except BaseException as exc:
+                reaper_errors.append(exc)
+
+        reaper = threading.Thread(target=notify_reaper, name="fixture-tmux-reaper")
+        reaper.start()
         source = (OBSERVABILITY_DIR / "pipeline_monitor.sh").read_text()
         current = source.split("  cat <<'WATCHER_EOF'\n", 1)[1].split("\nWATCHER_EOF", 1)[0]
         script.write_text(current)
         # Updating disk alone leaves the same raw child of the same Bash alive.
         assert _watcher_tails(old, log) == tails
         yield run, pane, old, tails, log
+        assert controller.poll() is None, "Fixture reaper exited during adoption"
+        assert not reaper_errors, reaper_errors
     finally:
-        subprocess.run([tmux, "-S", str(socket), "kill-server"], capture_output=True)
-        socket_dir.cleanup()
+        stop_reaper.set()
+        if reaper is not None:
+            reaper.join(timeout=6)
+        try:
+            if controller is not None and controller.poll() is None:
+                require_controller()
+                real_kill(controller.pid, signal.SIGCONT)
+                # Discover the actual owned tree even if setup or a caller
+                # failed before yielding. Include replacement panes and tails.
+                rows = real_run(["ps", "-A", "-o", "pid=,ppid="], check=True,
+                                capture_output=True, text=True, timeout=5)
+                pairs = [tuple(map(int, row.split())) for row in rows.stdout.splitlines()]
+                descendants = {controller.pid}
+                while children := {pid for pid, ppid in pairs if ppid in descendants and pid not in descendants}:
+                    descendants.update(children)
+                owned_pids.update(descendants - {controller.pid})
+                panes = []
+                for pid, ppid in pairs:
+                    if ppid == controller.pid and (identity := observe(pid)) is not None:
+                        assert identity["ppid"] == controller.pid
+                        panes.append(identity)
+                        if "defunct" not in identity["command"]:
+                            try:
+                                real_kill(pid, signal.SIGTERM)
+                            except ProcessLookupError:
+                                pass
+                # Reap pane children before killing their real parent. This
+                # also releases an injected pause when a test fails early.
+                def panes_reaped():
+                    require_controller()
+                    real_kill(controller.pid, signal.SIGCONT)
+                    for identity in panes:
+                        notify_child(identity, kill=real_kill)
+                    rows = real_run(["ps", "-A", "-o", "pid="], check=True,
+                                    capture_output=True, text=True, timeout=5)
+                    return not owned_pids.intersection(map(int, rows.stdout.split()))
+                _wait_for(panes_reaped, timeout=5)
+        finally:
+            try:
+                real_run([tmux, "-S", str(socket), "kill-server"], capture_output=True, timeout=5)
+            finally:
+                try:
+                    if controller is not None:
+                        try:
+                            controller.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            controller.kill()
+                            controller.wait(timeout=5)
+                finally:
+                    output.close()
+                    socket_dir.cleanup()
+                    (tmp_path / "reaper-observations.json").write_text(json.dumps(observations, indent=2) + "\n")
+        assert reaper is None or not reaper.is_alive(), "Fixture observer did not stop"
+        assert not reaper_errors, reaper_errors
+        for pid in owned_pids | ({controller.pid} if controller is not None else set()):
+            with pytest.raises(ProcessLookupError):
+                real_kill(pid, 0)
+        (tmp_path / "controller-cleanup.json").write_text(json.dumps(dict(
+            controller=parent, children=sorted(owned_pids), all_absent=True,
+            observer_stopped=reaper is None or not reaper.is_alive(), output_closed=output.closed,
+            socket_removed=not socket.exists()), indent=2) + "\n")
 
 
-def test_monitor_health_adopts_already_live_pre_update_watcher(tmp_path, monkeypatch):
-    from mu.tests.tools.test_worktree_lifecycle import make_native_lane
+@pytest.mark.parametrize("pause_reaper", [False, True], ids=["normal-reaper", "delayed-reaper"])
+def test_monitor_health_adopts_already_live_pre_update_watcher(tmp_path, monkeypatch, pause_reaper):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, observed_process_identity
     primary, lane, _, env = make_native_lane(tmp_path, monkeypatch)
-    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (run, pane, old, tails, log):
-        source = (OBSERVABILITY_DIR / "pipeline_monitor.sh").read_text()
-        functions = "\n".join(re.search(r"^" + name + r"\(\) \{\n.*?^\}", source, re.M | re.S).group()
-            for name in ("normalize_path", "log_reader_protocol", "tmux_session_health_detail", "ensure_tmux_session"))
-        setup = "\n".join([
-            "SESSION=reader-test", "SCRIPT_DIR=" + shlex.quote(str(OBSERVABILITY_DIR)),
-            "EXPECTED_PANE_1='PANE 1 · LIVE PIPELINE LOG'", "EXPECTED_PANE_2='PANE 2 · REVIEW FINDINGS'",
-            "EXPECTED_PANE_3='PANE 3 · PLAIN-ENGLISH STATUS'", "EXPECTED_PANE_4='PANE 4 · SESSION TIMELINE'",
-            functions, "rebuild_tmux_session() { return 91; }"])
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch, pause_reaper=pause_reaper) as (run, pane, old, tails, log):
         def health(command):
-            return subprocess.run(["bash", "-c", setup + "\n" + command + " " + shlex.quote(str(primary))],
-                                  capture_output=True, text=True)
+            return subprocess.run(monitor_health_command(primary, command),
+                                  capture_output=True, text=True, timeout=_TIMEOUT_S)
         assert health("tmux_session_health_detail").returncode == 2
-        adopted = health("ensure_tmux_session")
+        if pause_reaper:
+            controller = observed_process_identity(old.pid)["ppid"]
+            with subprocess.Popen(monitor_health_command(primary, "ensure_tmux_session"),
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as adopting:
+                try:
+                    _wait_for(lambda: "defunct" in observed_process_identity(old.pid)["command"])
+                    assert adopting.poll() is None  # No success before the parent can reap.
+                    os.kill(old.pid, 0)
+                finally:
+                    os.kill(controller, signal.SIGCONT)
+                    try:
+                        stdout, stderr = adopting.communicate(timeout=_TIMEOUT_S)
+                    except subprocess.TimeoutExpired:
+                        adopting.kill()
+                        adopting.communicate(timeout=5)
+                        raise
+                adopted = subprocess.CompletedProcess(adopting.args, adopting.returncode, stdout, stderr)
+        else:
+            adopted = health("ensure_tmux_session")
         assert adopted.returncode == 0, adopted.stdout + adopted.stderr
         assert health("tmux_session_health_detail").returncode == 0
         new_pid = int(run("display-message", "-p", "-t", pane, "#{pane_pid}"))
@@ -240,6 +442,40 @@ def test_monitor_health_adopts_already_live_pre_update_watcher(tmp_path, monkeyp
         for pid in [old.pid, *tails]:
             with pytest.raises(ProcessLookupError):
                 os.kill(pid, 0)
+
+
+@pytest.mark.parametrize("failure_stage", ["setup", "live-child", "unreaped-child"])
+def test_stale_watcher_teardown_after_caller_failure(tmp_path, monkeypatch, failure_stage):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, observed_process_identity
+    primary, lane, _, env = make_native_lane(tmp_path, monkeypatch)
+    pause_reaper = failure_stage == "unreaped-child"
+    real_run = subprocess.run
+    failed = False
+
+    def fail_after_pane_creation(command, *args, **kwargs):
+        nonlocal failed
+        if not failed and "select-pane" in command and command[-1] == "PANE 4 · SESSION TIMELINE":
+            failed = True
+            raise RuntimeError("injected caller failure during setup")
+        return real_run(command, *args, **kwargs)
+
+    if failure_stage == "setup":
+        monkeypatch.setattr(subprocess, "run", fail_after_pane_creation)
+    with pytest.raises(RuntimeError, match="injected caller failure"):
+        with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch,
+                                pause_reaper=pause_reaper) as (_, _, old, _, _):
+            if pause_reaper:
+                os.kill(old.pid, signal.SIGTERM)
+                _wait_for(lambda: "defunct" in observed_process_identity(old.pid)["command"])
+                os.kill(old.pid, 0)
+            raise RuntimeError("injected caller failure")
+    cleanup = json.loads((tmp_path / "controller-cleanup.json").read_text())
+    assert failed == (failure_stage == "setup")
+    assert cleanup["all_absent"] and cleanup["observer_stopped"]
+    assert cleanup["output_closed"] and cleanup["socket_removed"]
+    for pid in [cleanup["controller"]["pid"], *cleanup["children"]]:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
 
 
 def test_generated_watcher_releases_terminal_reader_on_heartbeat_and_restart(tmp_path, monkeypatch):

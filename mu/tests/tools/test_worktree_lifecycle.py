@@ -285,13 +285,67 @@ def test_related_literal_log_filename_retains_hold_and_claim_evidence(native_lan
     assert lane.exists()
 
 
+@contextmanager
+def owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch):
+    """Lifecycle consumers share the same real parent/reaper as monitor health."""
+    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as watcher:
+        yield watcher
+
+
+def test_real_defunct_watcher_with_paused_reaper_holds_before_claim(native_lane, tmp_path, monkeypatch):
+    primary, lane, _, env = native_lane
+    with owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (run, pane, old, tails, _):
+        controller = int(run("display-message", "-p", "-t", pane, "#{pid}"))
+        original = observed_process_identity(old.pid)
+        assert original["ppid"] == controller
+        real_kill = os.kill
+
+        def pause_reaper_at_signal(pid, signum):
+            if pid == old.pid and signum == signal.SIGTERM:
+                real_kill(controller, signal.SIGSTOP)
+            return real_kill(pid, signum)
+
+        directory = register_from_exited_owner(lane, env, status="success")
+        authority = {p: p.read_bytes() for p in directory.glob("*.json")}
+        try:
+            with pytest.MonkeyPatch.context() as fault:
+                fault.setattr(os, "kill", pause_reaper_at_signal)
+                result = lifecycle.complete_pending(directory, delay=0)
+            zombie = observed_process_identity(old.pid)
+            assert zombie["ppid"] == controller and zombie["started"] == original["started"]
+            assert "defunct" in zombie["command"]
+            os.kill(old.pid, 0)  # A zombie is still present, never release proof.
+            assert result["state"] == "ESCALATED", result
+            assert "Old log watcher exit not acknowledged" in result["reason"]
+            assert not list(directory.glob("attempt-*"))
+            assert not (directory / "reader-release.json").exists()
+            assert lane.exists()
+            assert all(p.read_bytes() == raw for p, raw in authority.items())
+            receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
+        finally:
+            real_kill(controller, signal.SIGCONT)
+        deadline = time.monotonic() + 5
+        for pid in [old.pid, *tails]:
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.01)
+            else:
+                pytest.fail(f"Fixture controller did not reap {pid} after resuming")
+        assert lifecycle.complete_pending(directory, delay=0) == result
+        assert {p: p.read_bytes() for p in directory.rglob("*.json")} == receipts
+
+
 @pytest.mark.parametrize("folder", ["watcher's", "watcher folder", "watcher's folder"])
 def test_literal_watcher_path_requires_unambiguous_live_owner(native_lane, tmp_path, monkeypatch, folder):
-    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher, _watcher_tails
+    from mu.tests.tools.test_pipeline_monitor_autofollow import _watcher_tails
     primary, lane, _, env = native_lane
     watcher_root = tmp_path / folder
     watcher_root.mkdir()
-    with stale_live_watcher(watcher_root, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
+    with owned_stale_live_watcher(watcher_root, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
         observed = observed_process_identity(old.pid)
         assert observed["command"].endswith(str(watcher_root / "rcx_log_watcher.sh"))
         assert lifecycle.monitor_reader_protocol("reader-test") is False
@@ -385,34 +439,67 @@ def test_finished_generated_reader_releases_within_native_completion_budget(nati
 
 
 @pytest.mark.parametrize("obstruction", [None, "writer", "unknown-reader"])
-def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_path, monkeypatch, obstruction):
-    from mu.tests.tools.test_pipeline_monitor_autofollow import stale_live_watcher
+@pytest.mark.parametrize("pause_reaper", [False, True], ids=["normal-reaper", "delayed-reaper"])
+def test_pre_update_live_raw_tail_adopts_before_native_claim(
+        native_lane, tmp_path, monkeypatch, obstruction, pause_reaper):
+    from mu.tests.tools.test_pipeline_monitor_autofollow import _wait_for
     primary, lane, _, env = native_lane
     blocker = None
-    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
-        if obstruction:
-            blocker = subprocess.Popen([sys.executable, "-c",
-                "import json,os,sys; f=open(os.environ['READER_TEST_PATH'],os.environ['READER_TEST_MODE']); "
-                "s=os.fstat(f.fileno()); "
-                "print(json.dumps(dict(pid=os.getpid(),fd=f.fileno(),device=s.st_dev,inode=s.st_ino)),flush=True); "
-                "sys.stdin.readline()"], cwd=primary,
-                env=env | {"READER_TEST_PATH": str(log),
-                           "READER_TEST_MODE": "a" if obstruction == "writer" else "r"},
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-            assert select.select([blocker.stdout], [], [], 10)[0]
-            descriptor = json.loads(blocker.stdout.readline())
-            assert descriptor["pid"] == blocker.pid
-            # PR1328 isolates lsof evidence in every disposable native lane.
-            # Bind this response to the real blocker descriptor instead of
-            # letting the fixture's default empty response conceal that owner.
-            access = "w" if obstruction == "writer" else "r"
-            Path(env["RCX_TEST_LSOF_RESPONSE"]).write_text(json.dumps(dict(
-                returncode=0, stderr="", stdout=(
-                    f"p{blocker.pid}\ncPython\nf{descriptor['fd']}\na{access}\ntREG\n"
-                    f"D{descriptor['device']:x}\ni{descriptor['inode']}\nn{log}\n"))))
+    with owned_stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (_, _, old, tails, log):
+        original = observed_process_identity(old.pid)
+        controller = original["ppid"]
+        real_kill = os.kill
+        notifications = []
         try:
+            if obstruction:
+                blocker = subprocess.Popen([sys.executable, "-c",
+                    "import json,os,sys; f=open(os.environ['READER_TEST_PATH'],os.environ['READER_TEST_MODE']); "
+                    "s=os.fstat(f.fileno()); "
+                    "print(json.dumps(dict(pid=os.getpid(),fd=f.fileno(),device=s.st_dev,inode=s.st_ino)),flush=True); "
+                    "sys.stdin.readline()"], cwd=primary,
+                    env=env | {"READER_TEST_PATH": str(log),
+                               "READER_TEST_MODE": "a" if obstruction == "writer" else "r"},
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                assert select.select([blocker.stdout], [], [], 10)[0]
+                descriptor = json.loads(blocker.stdout.readline())
+                assert descriptor["pid"] == blocker.pid
+                # PR1328 isolates lsof evidence in every disposable native lane.
+                # Bind this response to the real blocker descriptor instead of
+                # letting the fixture's default empty response conceal that owner.
+                access = "w" if obstruction == "writer" else "r"
+                Path(env["RCX_TEST_LSOF_RESPONSE"]).write_text(json.dumps(dict(
+                    returncode=0, stderr="", stdout=(
+                        f"p{blocker.pid}\ncPython\nf{descriptor['fd']}\na{access}\ntREG\n"
+                        f"D{descriptor['device']:x}\ni{descriptor['inode']}\nn{log}\n"))))
             directory = register_from_exited_owner(lane, env, status="success")
-            result = lifecycle.complete_pending(directory, delay=0)
+            authority = {p: p.read_bytes() for p in directory.glob("*.json")}
+
+            def delay_reaping_until_notified(pid, signum):
+                if pid == old.pid and signum == signal.SIGTERM:
+                    real_kill(controller, signal.SIGSTOP)
+                    _wait_for(lambda: subprocess.run(
+                        ["ps", "-p", str(controller), "-o", "stat="], check=True,
+                        capture_output=True, text=True, timeout=10).stdout.strip().startswith("T"))
+                if pid == controller and signum == signal.SIGCHLD and not notifications:
+                    # Hold the actual parent until the fixture observes its
+                    # unreaped child. No retirement claim may precede reaping.
+                    state = subprocess.run(["ps", "-p", str(old.pid), "-o", "stat="],
+                        check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+                    assert state.startswith("Z"), state
+                    assert not list(directory.glob("attempt-*"))
+                    assert not (directory / "reader-release.json").exists()
+                    assert all(p.read_bytes() == raw for p, raw in authority.items())
+                    notifications.append(pid)
+                    real_kill(pid, signum)
+                    return real_kill(controller, signal.SIGCONT)
+                return real_kill(pid, signum)
+
+            with monkeypatch.context() as fault:
+                if pause_reaper:
+                    fault.setattr(os, "kill", delay_reaping_until_notified)
+                result = lifecycle.complete_pending(directory, delay=0)
+            if pause_reaper:
+                assert notifications == [controller], result
             if obstruction is None:
                 references = []
                 if result["state"] != "COMPLETE":
@@ -423,6 +510,7 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
             if obstruction:
                 assert result["state"] == "ESCALATED", result
                 assert result.get("attempts_exhausted") == 3, result.get("reason", result)
+                assert len(list(directory.glob("attempt-*/claim.json"))) == lifecycle.MAX_ATTEMPTS
                 assert "Open target files/processes or uncertain lsof evidence" in result["reason"], result
                 assert lane.exists() and blocker.poll() is None
             else:
@@ -435,16 +523,57 @@ def test_pre_update_live_raw_tail_adopts_before_native_claim(native_lane, tmp_pa
             assert len(release["watcher_adoptions"]) == 1, release
             adoption = release["watcher_adoptions"][0]
             assert adoption["previous"]["pid"] == old.pid, adoption
+            assert adoption["previous"] == original, adoption
             assert adoption["current"]["pid"] != old.pid, adoption
             for pid in [old.pid, *tails]:
                 with pytest.raises(ProcessLookupError):
                     os.kill(pid, 0)
             receipts = {p: p.read_bytes() for p in directory.rglob("*.json")}
         finally:
-            if blocker is not None:
-                blocker.communicate(input="done\n", timeout=10)
+            try:
+                if pause_reaper:
+                    real_kill(controller, signal.SIGCONT)
+            finally:
+                if blocker is not None:
+                    try:
+                        blocker.communicate(input="done\n", timeout=10)
+                    finally:
+                        try:
+                            if blocker.poll() is None:
+                                blocker.kill()
+                            blocker.wait(timeout=5)
+                        finally:
+                            blocker.stdin.close()
+                            blocker.stdout.close()
     assert lifecycle.complete_pending(directory, delay=0) == result
     assert all(p.read_bytes() == raw for p, raw in receipts.items())
+
+
+def test_stale_watcher_blocker_setup_failure_reaps_child_and_closes_pipes(
+        native_lane, tmp_path, monkeypatch):
+    real_popen = subprocess.Popen
+    children = []
+
+    def early_blocker_exit(args, **kwargs):
+        if "READER_TEST_MODE" in kwargs.get("env", {}):
+            child = real_popen([sys.executable, "-c", "raise SystemExit(0)"], **kwargs)
+            children.append(child)
+            return child
+        return real_popen(args, **kwargs)
+
+    with monkeypatch.context() as startup:
+        startup.setattr(subprocess, "Popen", early_blocker_exit)
+        with pytest.raises(json.JSONDecodeError):
+            test_pre_update_live_raw_tail_adopts_before_native_claim(
+                native_lane, tmp_path, monkeypatch, "writer", False)
+    assert len(children) == 1
+    assert children[0].poll() is not None
+    assert children[0].stdin.closed and children[0].stdout.closed
+    cleanup = json.loads((tmp_path / "controller-cleanup.json").read_text())
+    assert cleanup["all_absent"] and cleanup["observer_stopped"]
+    for pid in [cleanup["controller"]["pid"], *cleanup["children"]]:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
 
 
 @pytest.mark.parametrize("unobservable", ["ps-present", "still-present", "permission-denied"])

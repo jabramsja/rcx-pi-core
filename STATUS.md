@@ -176,6 +176,18 @@ remain pending; R9 and R8/PR1325 stay preserved under the existing production ow
 
 ## Historical Archives
 
+**Private tmux fixture R3 (Phase B implementation, 2026-10-19):** the test
+fixtures own a private foreground tmux controller, bind its watcher identity,
+and require actual reaping and fresh PID absence. Only the unchanged positive
+late consumer retains coherent OS observation; adverse consumers restore the
+original observer before injection. Production guards, runtime/substrate and
+architectural completion claims are unchanged. Source-bound local results and
+the retained historical failures are recorded in
+[implementation evidence](reports/control_plane/workingrcx-private-tmux-fixture-r3-2026-10-19_implementation_evidence.json).
+Native refreshed evidence, independent review and all landing gates remain
+pending. [Standing obligations](reports/deferred/non_blocking/workingrcx-private-tmux-fixture-r3-2026-10-19_remaining_obligations.md)
+retain the open PRs, retention, native runner and held synchronization work.
+
 - Phase history (Jan-Mar 2026): [`archive/status_history_jan_mar_2026.md`](archive/status_history_jan_mar_2026.md)
 - Debt marker history: [`archive/status_debt_history.md`](archive/status_debt_history.md)
 - L3/L4 architecture details: [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchitecture.v0.md)
