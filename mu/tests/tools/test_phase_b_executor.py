@@ -34,7 +34,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mu.tests.tools.module_loader import load_module
-from mu.tests.tools.test_executor_common import complete_process_observation
+from mu.tests.tools.test_executor_common import complete_process_observation, fixture_orphan_reaper
 
 # Load modules
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
@@ -349,8 +349,119 @@ def test_native_uncertain_process_observation_holds_every_consumer(
     )
 
 
+class FixtureProcessAbort(BaseException):
+    """Exercise cleanup outside dispatcher exception recovery."""
+
+
+@pytest.mark.parametrize("abort_after", ["launch", "reap"])
+def test_native_process_fixture_cleans_up_interrupted_parent(
+    late_native_retry_lane, monkeypatch, tmp_path, abort_after,
+):
+    observer = common_mod.observe_executor_processes
+    signaler = common_mod.signal_owned_executor_process
+    with pytest.raises(FixtureProcessAbort, match=abort_after):
+        _assert_native_real_process_release(
+            late_native_retry_lane, monkeypatch, tmp_path, True, "timeout", abort_after=abort_after,
+        )
+    cleanup = json.loads((tmp_path / "native-release-cleanup.json").read_text())
+    assert cleanup["all_absent"] and cleanup["pipes_closed"]
+    assert json.loads((tmp_path / "orphan-reaper-cleanup.json").read_text())["restored"]
+    assert common_mod.signal_owned_executor_process is signaler
+    # The ordinary recording observer is monkeypatch-scoped; the coherent
+    # boundary has exited and must no longer intercept the production queries.
+    assert not isinstance(common_mod.observe_executor_processes, MagicMock)
+    assert common_mod.observe_executor_processes is not observer
+    for pid in [*cleanup["roots"], cleanup["child"]["pid"]]:
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+@pytest.mark.parametrize("scenario", [
+    None, "exited_parent_open_pipe", "live_parent_reparented_grandchild",
+])
+@pytest.mark.parametrize("fault", ["timeout", "failed-query", "changed-birth"])
+def test_native_process_fixture_cleans_descendant_after_teardown_query_failure(
+    late_native_retry_lane, monkeypatch, tmp_path, scenario, fault,
+):
+    real_run, real_kill = subprocess.run, os.kill
+    queries, signals = [], []
+
+    def faulty_child_query(args, *positional, **kwargs):
+        if args[:3] == ["ps", "-ww", "-p"] and args[-1] == "pid=,ppid=,lstart=,stat=":
+            queries.append(list(args))
+            # Capture the real child's birth first. Every teardown query then
+            # fails: cleanup must not depend on a lucky subsequent ps query.
+            if len(queries) > 1:
+                if fault == "timeout":
+                    raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+                if fault == "failed-query":
+                    raise subprocess.CalledProcessError(1, args, stderr="teardown query failure")
+                observed = real_run(args, *positional, **kwargs)
+                fields = observed.stdout.split()
+                assert len(fields) == 8, observed
+                fields[2:7] = ["Mon", "Jan", "1", "00:00:00", "2001"]
+                return subprocess.CompletedProcess(args, 0, " ".join(fields) + "\n", "")
+        return real_run(args, *positional, **kwargs)
+
+    def record_signal(pid, signum):
+        if signum:
+            signals.append((pid, signum))
+        return real_kill(pid, signum)
+
+    error = {"timeout": subprocess.TimeoutExpired,
+             "failed-query": subprocess.CalledProcessError,
+             "changed-birth": AssertionError}[fault]
+    with monkeypatch.context() as teardown_fault:
+        teardown_fault.setattr(subprocess, "run", faulty_child_query)
+        teardown_fault.setattr(os, "kill", record_signal)
+        with pytest.raises(error) as rejected:
+            _assert_native_real_process_release(
+                late_native_retry_lane, teardown_fault, tmp_path, True, "timeout",
+                scenario=scenario, abort_after="launch",
+            )
+        assert isinstance(rejected.value.__context__, FixtureProcessAbort)
+
+    cleanup = json.loads((tmp_path / "native-release-cleanup.json").read_text())
+    reaper = json.loads((tmp_path / "orphan-reaper-cleanup.json").read_text())
+    child = cleanup["child"]["pid"]
+    assert len(queries) == 2
+    assert cleanup["all_absent"] and cleanup["roots_reaped"] and cleanup["pipes_closed"]
+    assert cleanup["cleanup_pipe_closed"] and reaper["restored"]
+    assert all(pid != child for pid, _ in signals), signals
+    eof = json.loads((tmp_path / "detached-child-cleanup.json").read_text())
+    assert eof["pid"] == child and eof["reason"] == "fixture pipe EOF"
+    for pid in [*cleanup["roots"], child]:
+        observed = real_run(["ps", "-ww", "-p", str(pid), "-o", "pid="],
+                            capture_output=True, text=True, timeout=5)
+        assert observed.returncode == 1 and not observed.stdout.strip() and not observed.stderr
+        with pytest.raises(ProcessLookupError):
+            real_kill(pid, 0)
+        with pytest.raises(ChildProcessError):
+            os.waitpid(pid, os.WNOHANG)
+    assert not (tmp_path / "native-release-observation.json").exists()
+    (tmp_path / "teardown-query-failure.json").write_text(json.dumps(dict(
+        scenario=scenario, fault=fault, queries=queries, signals=signals,
+        cleanup=cleanup, reaper=reaper, eof=eof,
+        original_error_preserved=True, independent_absence_verified=True,
+    )) + "\n")
+
+
 def _assert_native_real_process_release(
-    late_native_retry_lane, monkeypatch, tmp_path, detached, exit_mode, *, scenario=None,
+    late_native_retry_lane, monkeypatch, tmp_path, detached, exit_mode, *, scenario=None, abort_after=None,
+):
+    owner = None
+    try:
+        with fixture_orphan_reaper() as owner:
+            _exercise_native_real_process_release(
+                late_native_retry_lane, monkeypatch, tmp_path, detached, exit_mode,
+                scenario=scenario, abort_after=abort_after,
+            )
+    finally:
+        (tmp_path / "orphan-reaper-cleanup.json").write_text(json.dumps(owner) + "\n")
+
+
+def _exercise_native_real_process_release(
+    late_native_retry_lane, monkeypatch, tmp_path, detached, exit_mode, *, scenario=None, abort_after=None,
 ):
     """Actual process result -> recovery admission -> real checkpoint consumer.
 
@@ -367,9 +478,16 @@ def _assert_native_real_process_release(
     real_popen, recover = subprocess.Popen, dispatch.attempt_recovery
     real_run = subprocess.run
     real_observe = common_mod.observe_executor_processes
+    real_signal = common_mod.signal_owned_executor_process
     observations = []
+    complete_records = []
+    reap_checks = []
     query_failures = []
     child_record = tmp_path / "detached-child.json"
+    child_wait = tmp_path / "detached-child-wait.json"
+    child_cleanup = tmp_path / "detached-child-cleanup.json"
+    child_identity = None
+    cleanup_pipe = []
     heartbeat = tmp_path / "heartbeat"
     checkpoint = fixture["canonical"].parent.parent / "executors/phase_b_state.json"
     restoration = checkpoint.with_name(pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME)
@@ -378,6 +496,40 @@ def _assert_native_real_process_release(
                        repo / fixture["implementation_path"]]
     index_before = []
     processes = []
+
+    def child_state(pid):
+        result = real_run(["ps", "-ww", "-p", str(pid), "-o", "pid=,ppid=,lstart=,stat="],
+                          capture_output=True, text=True, timeout=5,
+                          env={**os.environ, "LC_ALL": "C"})
+        if result.returncode == 1 and not result.stdout.strip() and not result.stderr:
+            return None
+        assert result.returncode == 0 and not result.stderr, result
+        fields = result.stdout.split()
+        assert len(fields) == 8 and int(fields[0]) == pid, result.stdout
+        return dict(pid=pid, ppid=int(fields[1]), started=" ".join(fields[2:7]), state=fields[7])
+
+    def signal_after_parent_wait(identity, owner, signum, *, cwd=None):
+        # This positive fixture specifies a reaped child before root teardown.
+        # The production signal and release validator still run unmodified.
+        # A live/zombie child, missing wait acknowledgement or changed parent
+        # fails this premise; no observation is edited and no release is minted.
+        if processes and identity.pid == processes[0].pid:
+            deadline = time.monotonic() + 5
+            while not child_wait.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert child_wait.exists(), {"child": child_identity, "last": child_state(child_identity["pid"])}
+            waited = json.loads(child_wait.read_text())
+            assert waited["parent"] == identity.pid
+            assert waited["child"] == child_identity["pid"]
+            assert waited["returncode"] == -signal.SIGKILL
+            assert processes[0].poll() is None
+            assert child_state(waited["child"]) is None, waited
+            with pytest.raises(ProcessLookupError):
+                os.kill(waited["child"], 0)
+            reap_checks.append(dict(waited=waited, absence_observed_ns=time.monotonic_ns()))
+            if abort_after == "reap":
+                raise FixtureProcessAbort("reap")
+        return real_signal(identity, owner, signum, cwd=cwd)
 
     def observe(owner, *, cwd=None):
         result = real_observe(owner, cwd=cwd)
@@ -389,6 +541,7 @@ def _assert_native_real_process_release(
         return result
 
     def start_process(args, **kwargs):
+        nonlocal child_identity
         if len(args) < 2 or Path(str(args[1])).name != "phase_b_executor.py":
             return real_popen(args, **kwargs)
         invocations.append(Path(args[1]).name)
@@ -408,30 +561,56 @@ def _assert_native_real_process_release(
         if len(invocations) == 1:
             protected.update({path: path.read_bytes() for path in protected_paths})
             index_before.append(subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo))
+            if detached:
+                # Only this fixture holds the write end. EOF reaches the actual
+                # child even after reparenting or an identity-query exception;
+                # it grants no PID-based signaling or release authority.
+                cleanup_pipe.extend(os.fdopen(fd, mode, buffering=0)
+                                    for fd, mode in zip(os.pipe(), ("rb", "wb")))
+            pass_fds = (cleanup_pipe[0].fileno(),) if detached else ()
             child_code = (
-                "import json,os,sys,time; from pathlib import Path; "
-                "Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid(),'pgid':os.getpgrp()})); "
-                f"\nwhile True:\n Path({str(heartbeat)!r}).write_text(str(time.monotonic_ns())); time.sleep(0.03)\n"
+                "import json,os,select,sys,time; from pathlib import Path; "
+                "record=Path(sys.argv[1]); pending=record.with_suffix('.tmp'); "
+                "pending.write_text(json.dumps({'pid':os.getpid(),'pgid':os.getpgrp()})); pending.replace(record); "
+                f"\nwhile True:\n"
+                f" Path({str(heartbeat)!r}).write_text(str(time.monotonic_ns()))\n"
+                f" if select.select({list(pass_fds)!r}, [], [], 0.03)[0]:\n"
+                f"  assert os.read({pass_fds[0] if detached else -1}, 1) == b''\n"
+                f"  Path({str(child_cleanup)!r}).write_text(json.dumps(dict("
+                "pid=os.getpid(), reason='fixture pipe EOF', exited_ns=time.monotonic_ns())))\n"
+                "  break\n"
             )
             script = (
                 "import subprocess,sys,time\n"
-                + (f"subprocess.Popen([sys.executable, '-B', '-c', {child_code!r}, {str(child_record)!r}], "
+                + (f"child = subprocess.Popen([sys.executable, '-B', '-c', {child_code!r}, {str(child_record)!r}], "
                    "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, "
-                   "start_new_session=True)\n" if detached else "")
+                   f"start_new_session=True, pass_fds={pass_fds!r})\n" if detached else "")
+                + ("import json,os\nfrom pathlib import Path\n"
+                   "status = child.wait()\n"
+                   f"record=Path({str(child_wait)!r}); pending=record.with_suffix('.tmp')\n"
+                   "pending.write_text(json.dumps(dict(parent=os.getpid(), "
+                   "child=child.pid, returncode=status, reaped_ns=time.monotonic_ns())))\n"
+                   "pending.replace(record)\n"
+                   if detached and exit_mode == "timeout" and scenario is None else "")
                 + ("time.sleep(60)\n" if exit_mode == "timeout" else
                    f"sys.exit({137 if exit_mode == 'transient' else 2})\n")
             )
             if scenario == "exited_parent_open_pipe":
                 script = ("import subprocess,sys\n"
-                          f"subprocess.Popen([sys.executable, '-B', '-c', {child_code!r}, {str(child_record)!r}], start_new_session=True)\n"
+                          f"subprocess.Popen([sys.executable, '-B', '-c', {child_code!r}, {str(child_record)!r}], "
+                          f"start_new_session=True, pass_fds={pass_fds!r})\n"
                           "sys.exit(137)\n")
             elif scenario in {"live_parent_reparented_grandchild", "partial-identities-query"}:
                 intermediate = ("import subprocess,sys\n"
                                 f"subprocess.Popen([sys.executable, '-B', '-c', {child_code!r}, {str(child_record)!r}], "
-                                "start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n")
+                                "start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+                                f"stderr=subprocess.DEVNULL, pass_fds={pass_fds!r})\n")
                 script = ("import subprocess,sys,time\n"
-                          f"subprocess.run([sys.executable, '-B', '-c', {intermediate!r}], check=True)\n"
+                          f"subprocess.run([sys.executable, '-B', '-c', {intermediate!r}], "
+                          f"check=True, pass_fds={pass_fds!r})\n"
                           "time.sleep(60)\n")
+            if detached:
+                kwargs["pass_fds"] = (*kwargs.get("pass_fds", ()), *pass_fds)
         else:
             script = "import sys; sys.exit(2)"
         proc = real_popen([sys.executable, "-B", "-c", script], **kwargs)
@@ -441,6 +620,12 @@ def _assert_native_real_process_release(
             while not child_record.exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
             assert child_record.exists(), "real detached child did not start"
+            child_identity = child_state(json.loads(child_record.read_text())["pid"])
+            assert child_identity is not None
+            if scenario is None and exit_mode == "timeout":
+                assert child_identity["ppid"] == proc.pid
+            if abort_after == "launch":
+                raise FixtureProcessAbort("launch")
         return proc
 
     def recovery(*args, **kwargs):
@@ -489,7 +674,11 @@ def _assert_native_real_process_release(
     try:
         with ExitStack() as complete_boundary:
             if exit_mode == "timeout" and scenario is None:
-                complete_boundary.enter_context(complete_process_observation(common_mod))
+                complete_records = complete_boundary.enter_context(complete_process_observation(common_mod))
+                if detached:
+                    complete_boundary.enter_context(patch.object(
+                        common_mod, "signal_owned_executor_process", side_effect=signal_after_parent_wait,
+                    ))
             if exit_mode == "nonzero":
                 # Exit 2 is not automatically recoverable. Exercise its actual
                 # failure route and consumer without requesting an external actor.
@@ -522,6 +711,9 @@ def _assert_native_real_process_release(
             "actor_calls": dict(fixture["calls"]), "invocations": list(invocations),
             "query_failures": len(query_failures),
             "observations": observations,
+            "complete_observations": complete_records,
+            "parent_wait_checks": reap_checks,
+            "initial_child": child_identity,
             "release_evidence": failed["retry_record"]["native_late_checkpoint"].get("release_evidence"),
         }
         (tmp_path / "native-release-observation.json").write_text(json.dumps(receipt, indent=2) + "\n")
@@ -531,6 +723,12 @@ def _assert_native_real_process_release(
             "released": released, "child_alive": child_alive, "invocations": invocations,
             "consumers": consumers, "calls": fixture["calls"],
         }
+        if expected_resume and detached:
+            assert len(reap_checks) == 1, receipt
+            assert not child_alive
+            proof = receipt["release_evidence"]
+            assert child_identity["pid"] in {member["pid"] for member in proof["members"]}
+            assert complete_records[-1]["complete"] and not complete_records[-1]["owned"]
         assert invocations == ["phase_b_executor.py"] * (2 if expected_resume else 1), observations
         assert consumers == ["final_validation"] * (2 if expected_resume else 1)
         assert fixture["calls"] == {"implementer": 1, "sdk": 1, "bridge": 1,
@@ -600,15 +798,67 @@ def _assert_native_real_process_release(
                               "query_failures": len(query_failures), "protected_files_unchanged": True,
                               "index_unchanged": True, "consumer_outcomes": outcomes}))
     finally:
-        if child_record.exists():
+        def reap_root(proc):
             try:
-                os.kill(json.loads(child_record.read_text())["pid"], signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        for proc in processes:
-            if proc.poll() is None:
-                proc.kill()
-            proc.wait(timeout=5)
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
+            finally:
+                for stream in (proc.stdin, proc.stdout, proc.stderr):
+                    if stream is not None:
+                        stream.close()
+
+        def prove_cleanup():
+            if child_record.exists():
+                child_pid = json.loads(child_record.read_text())["pid"]
+                deadline = time.monotonic() + 5
+                while True:
+                    # No ps dependency here: EOF ends the owned child even
+                    # when the identity query is unavailable. A zombie remains
+                    # present until its parent (or this Linux subreaper) waits.
+                    # Never waitpid(-1) or consume another test's child.
+                    try:
+                        os.waitpid(child_pid, os.WNOHANG)
+                    except ChildProcessError:
+                        pass
+                    try:
+                        os.kill(child_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    assert time.monotonic() < deadline, ("Fixture child still present", child_pid)
+                    time.sleep(0.01)
+            for proc in processes:
+                assert proc.returncode is not None
+                with pytest.raises(ProcessLookupError):
+                    os.kill(proc.pid, 0)
+            assert all(stream.closed for stream in cleanup_pipe)
+            assert all(stream is None or stream.closed for proc in processes
+                       for stream in (proc.stdin, proc.stdout, proc.stderr))
+            (tmp_path / "native-release-cleanup.json").write_text(json.dumps(dict(
+                roots=[proc.pid for proc in processes],
+                child=json.loads(child_record.read_text()) if child_record.exists() else None,
+                all_absent=True, roots_reaped=True, pipes_closed=True, cleanup_pipe_closed=True,
+            )) + "\n")
+
+        with ExitStack() as cleanup:
+            # Register proof first so it runs after EOF and all owned-root
+            # waits, even if a query, birth check or another callback raises.
+            # ExitStack propagates the failure after completing every callback.
+            cleanup.callback(prove_cleanup)
+            for proc in processes:
+                cleanup.callback(reap_root, proc)
+            for stream in cleanup_pipe:
+                cleanup.callback(stream.close)
+            if child_record.exists():
+                child_pid = json.loads(child_record.read_text())["pid"]
+                actual = child_state(child_pid)
+                if actual is not None:
+                    assert child_identity is not None, ("Missing fixture birth identity", actual)
+                    assert actual["started"] == child_identity["started"], (child_identity, actual)
+                    try:
+                        os.kill(child_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
 
 @pytest.mark.parametrize("late_native_retry_lane", [None, ".agent_bus-late-retry"], indirect=True)

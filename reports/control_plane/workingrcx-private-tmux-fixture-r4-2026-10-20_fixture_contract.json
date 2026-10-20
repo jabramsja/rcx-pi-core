@@ -1,0 +1,76 @@
+{
+  "wave_id": "workingrcx-private-tmux-fixture-r4-2026-10-20",
+  "kind": "test-fixture identity and lifecycle contract; not schema2 PR disposition coverage",
+  "executable_scope": [
+    "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+    "mu/tests/tools/test_phase_b_executor.py",
+    "mu/tests/tools/test_executor_common.py"
+  ],
+  "controller": {
+    "stable_identity": [
+      "pid",
+      "ppid",
+      "started"
+    ],
+    "mutable_diagnostics": [
+      "command"
+    ],
+    "waitable_parent": "Popen controller remains live with PPID equal to the test worker; reap via Popen.wait on every exit",
+    "namespace": "new TemporaryDirectory under /tmp, explicit unique -S socket and -f /dev/null for fixture tmux; no default/live socket",
+    "independent_server_provenance": "display-message #{pid} on the private pane equals the owned foreground controller; pane PPID equals controller",
+    "failure_diagnostics": [
+      "expected identity including command",
+      "observed identity including command",
+      "private server PID"
+    ],
+    "semantic_rationale": "A legitimate exec/process-title transition preserves PID/PPID/birth. Initial command can be [tmux] before socket readiness. Full command equality was a startup-state assertion, not identity. True identity and private-server mismatches still fail."
+  },
+  "positive_release": {
+    "scope": "scenario is None, exit_mode timeout only; detached root-signal synchronization additionally requires detached=True",
+    "ownership": "real environment-inheriting detached child remains under the real transport parent while parent blocks in child.wait()",
+    "ordering": [
+      "production freshly observes and signals the owned child",
+      "fixture waits for atomic real-parent wait acknowledgement and verifies child absence with fresh ps and kill(pid,0)",
+      "unchanged production root signal performs fresh identity/owner checks",
+      "unchanged production release validator checks current complete snapshot, owner absence, every member PID and root group",
+      "late consumer revalidates actual release proof"
+    ],
+    "unchanged_deadline_seconds": 1,
+    "bounded_fixture_wait_seconds": 5,
+    "limits": "The fixture specifies reaping before root termination; it does not validate arbitrary production scheduling or prove the historical first CI cause. No synthetic absence, cached successful census, defunct-as-absent, minted release or budget increase."
+  },
+  "observation": {
+    "complete_boundary": "one fresh full ps snapshot per positive observation, deriving the graph and identities from the same rows; real production parser and probes",
+    "diagnostics": "monotonic timestamp, full snapshot SHA256 and sanitized complete PID/PPID/birth/state rows; no command/environment values are serialized",
+    "negative_boundary": "original two-query observer restored before every adverse consumer callback; never enable coherent census for uncertain scenarios"
+  },
+  "cleanup": {
+    "phase_b": "signal only a present fixture child with matching recorded birth identity; each descendant also inherits a private read pipe while only the fixture owns the write end. ExitStack closes both ends, reaps every owned transport root, closes its streams and performs PID-specific orphan waits plus kill(pid,0) absence probes even when identity queries or birth checks raise. Preserve and propagate the original error after cleanup; EOF cleanup never supplies release evidence.",
+    "linux": "scope PR_SET_CHILD_SUBREAPER to fixture, retain original PR_GET_CHILD_SUBREAPER value, reap only known child PIDs in teardown, restore/verify original setting even after abort; no observation-time reaping",
+    "darwin": "launchd owns intentional orphans; teardown still requires actual absence",
+    "tmux": "stop/join observer, independently check controller, resume only own paused parent, terminate/reap actual panes and tails before server, wait controller, close log, remove socket, probe all owned PIDs"
+  },
+  "regressions": {
+    "title_transition": "test_fixture_controller_accepts_real_exec_title_transition",
+    "identity_and_server_drift": "test_fixture_controller_rejects_identity_and_server_drift: pid, ppid, started, absent, foreign-server, exited",
+    "parent_wait_and_release": "test_native_real_process_release_fences_late_consumer: original 12 cases, both buses/attached/detached/modes",
+    "uncertainty": "test_native_uncertain_process_observation_holds_every_consumer: all original 8 cases",
+    "unreaped_presence": "test_real_unreaped_process_is_present_until_parent_wait",
+    "interrupted_teardown": "test_native_process_fixture_cleans_up_interrupted_parent: launch, reap",
+    "teardown_query_failure": "test_native_process_fixture_cleans_descendant_after_teardown_query_failure: persistent timeout, persistent failed query and changed birth crossed with waiting parent, exited parent/open pipe and live parent/reparented grandchild. Verify no child signal, real EOF acknowledgement, fresh independent ps/kill absence, no remaining waitable PID, reaped roots, closed streams/control pipe, restored subreaper and preserved exception.",
+    "tmux_reaper": "original normal/delayed/adoption/unreaped/three caller-failure tests",
+    "late_consumer": "all original 23 parameter values including unchanged positive, and all 3 R5 foreign-proof setup controls retained; original bodies/decorators unchanged"
+  },
+  "proof_status": "Phase B local observations recorded separately in implementation_evidence.json. Native review, Linux CI and delivery pending.",
+  "invariants": {
+    "runtime_substrate_delta": "none",
+    "production_executors_workflows_delta": "none",
+    "host_semantics_delta": "none",
+    "debt_markers_before_after": [
+      5,
+      5
+    ],
+    "task_ids": 268,
+    "ordered_owners": 44
+  }
+}
