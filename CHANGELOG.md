@@ -4,6 +4,37 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-20
+
+### PR1330 and PR1338 coverage R6 (Phase B; unmerged)
+
+- Account independently for PR1330's 7 paths/14 hunks and PR1338's 9 paths/20
+  hunks at their exact retained heads. Cite actual PR1334 budget/recovery and
+  PR1339 foreign-proof/watcher fixture lineage, including exact current-dev
+  whole-file and source-range hashes. Historical packets, draft coverage,
+  indicators and run receipts retain their original authority limits.
+- Record PR1339 merge `ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654`, actual Main
+  synchronization and completed prior lifecycle. Reconcile the captured PRIMARY
+  and its 15 recovered operator notes outside native Ra/restoration anchors,
+  preserving 268 task IDs and 44 ordered owners. Keep the immutable R6 packet.
+- Deliver a required standing report separate from optional bridge findings:
+  partial stdout/stderr preservation has landed evidence; unchanged undersized
+  retry suppression remains unproved. Native runner/R19, retention, Mu, monitor
+  and linked dev ownership sync HOLD retain their existing owners.
+- Local validation and its source-bound receipts belong in
+  `reports/control_plane/workingrcx-fleet-pr-coverage-r6-2026-10-20_implementation_evidence.json`.
+  Both original PRs remain OPEN. Native indexed indicators/growth applicability,
+  independent review, precommit, full prepush, current-head CI, protected merge,
+  Main sync and released ownership precede separately verified public lifecycle
+  disposition. No production/fixture change, source retirement or purge.
+
+### Private tmux fixture prerequisite actually landed
+
+- PR1339 merged at `ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654` on
+  2026-10-20T00:51:26Z, with Main synchronized and native lifecycle COMPLETE.
+  Its 14,882-pass/22-skip CI group and separate 1/516/154-pass groups apply to
+  that landed head only. The following Phase B entry remains historical.
+
 ## 2026-10-19
 
 ### Private tmux watcher fixtures R3 (Phase B implementation, unmerged)

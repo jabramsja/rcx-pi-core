@@ -1,0 +1,671 @@
+{
+  "comparison_commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+  "manifest_sha256": "2beea5d1313179e47b612b32ec4450954e9402e167f9416f6bc7cbf1a9429622",
+  "repository": {
+    "id": "R_kgDOQvy8bg",
+    "nameWithOwner": "jabramsja/rcx-pi-core",
+    "url": "https://github.com/jabramsja/rcx-pi-core"
+  },
+  "schema_version": 2,
+  "targets": [
+    {
+      "coverage": [
+        {
+          "hunks": [
+            {
+              "header": "@@ -4,6 +4,27 @@ This file is a selected historical changelog, not the complete current",
+              "reason": "The 2026-10-04 budget implementation and historical 108-pass diagnosis describe the stopped PR1330 attempt. Retain original chronology at its exact source; use actual PR1334 landing and fresh R6 receipts for current state.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "b031e9ae422964120756e2a266533707bafed0db346825203a0508e6296e8097"
+            }
+          ],
+          "patch_sha256": "a80fd5a78d1068eea5e99005df80f8644aa33676cafa9786e9799f0c73642ed4",
+          "path": "CHANGELOG.md",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -11,7 +11,9 @@ Founder model selection (2026-09-11): every selected local model-bearing pipelin",
+              "reason": "The current-to-historical checkpoint transition and diagnostic 260.699s budget motivation are retained in the source history. PR1334 has since landed the enabler; R6 reconciles captured PRIMARY without replaying old pending-stage assertions.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "7c6f3582557b1ad9b1b36ada08c858ec8a06ce04f383eca99262d852fca83a1d"
+            },
+            {
+              "header": "@@ -528,9 +530,11 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Original row38 ownership and postmerge fixture chronology are preserved. Current row38 owns R6 coverage only; PR1329 and other useful-work/lifecycle obligations remain separately open after actual PR1334/PR1339 landing.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "c4cb721a27504733289adfb6eb3ea3406507e4a190821e72efd228e2c4d6f781"
+            },
+            {
+              "header": "@@ -562,7 +566,7 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "The ordered lifecycle-budget -> PR1329 -> exact-target cleanup -> PR1325/Mu sequence is historical authorization, not evidence of completed cleanup. R6 retains all existing owners and requires fresh native authority for each remaining action.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "360c8a9d3a21b26909c788a61a75f063271aad8890a890ae5fa7212e8b1b7a2e"
+            },
+            {
+              "header": "@@ -689,6 +693,8 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "The two row40 topics remain distinct in the required R6 standing report: landed partial timeout streams have bounded source/test evidence, while unchanged undersized-retry suppression remains OPEN. The missing original optional report is not treated as delivered.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "36d739bb9fbbc7ab8c86054b42e79223e1cf93defae0702499d87961ad0bb980"
+            },
+            {
+              "header": "@@ -846,7 +852,7 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "The original single mutation lane and source/index/receipt/counter preservation rule survives in the current R6 lane; the old R1 wave is not reactivated.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "9f2e9cbdd2aac1dfd6a8817062e80ff85ac59703180bf5b9f6be36063628e0f1"
+            },
+            {
+              "header": "@@ -1870,6 +1876,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "The original tracker sync note is source-bound historical L4/package evidence. Its approval, indicator timing and pending supervisor state do not authorize R6; native outer restores the frozen R6 tracker note and builds fresh indexed authority.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "28d392b6243a266e6e84ab8b7e5d35bb41cda24e486b790e3824bebbc2c44f6b"
+            }
+          ],
+          "patch_sha256": "3d1fe53d482ba19f247a7a26c2c4802af92cb3876a6917901a7c49b0d8551236",
+          "path": "TASKS.md",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -130,6 +130,32 @@ def test_retirement_terminal_uses_surviving_primary_and_preserves_detached_sourc",
+              "reason": "All original lifecycle selector, mixed-order 840/1500/1740s, 1800s caller-floor, node-selector and foreign/alternate path controls survive in PR1334. Exact argv, finite deadline, environment and fleet-worker assertions remain; later Phase B controls extend this table.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 230,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+                  "start": 112
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 230,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+                  "start": 112
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "e9f66898f4dea85f4878b0480e07671e6a4352a77ebbd1951819e15490586634"
+            },
+            {
+              "header": "@@ -168,28 +194,51 @@ def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(",
+              "reason": "Original nonzero exits 1/2/3/4/5 still return passed=False with complete stdout/stderr for every original selector/budget; PR1334 adds diagnostic command and timeout metadata. Original timeout matrix remains with finite selected deadlines and caller floors; added output preservation strengthens the old empty-stream-only expectation.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 320,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+                  "start": 233
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 320,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+                  "start": 233
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "1d3f9e68b56aee4e064963bc9a974eb9c1f3233f96115d8708de3ce8c9140fe3"
+            },
+            {
+              "header": "@@ -197,7 +246,7 @@ def test_fleet_pytest_timeout_reports_selected_budget(",
+              "reason": "The original timeout test now calls the same real helper with the original selectors/caller floor; PR1334 retains exit -1 and passed=False, adds command/deadline/timed_out metadata and preserves partial stdout/stderr instead of forcing empty streams.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 320,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "805c926e27cf1112e8c83d635341499db731e7e78d3776eae19f33088cb23b80",
+                  "start": 270
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 320,
+                  "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+                  "sha256": "805c926e27cf1112e8c83d635341499db731e7e78d3776eae19f33088cb23b80",
+                  "start": 270
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "98c961052ac2f03c4df40b3688118a4d966c110d7637596bbc11449878bcb206"
+            }
+          ],
+          "patch_sha256": "91d070e399dd12a0354d938a7956d19caf07097e7e91398500b0f9a1112cfa1f",
+          "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+          "reason": "All original lifecycle selector, mixed-order 840/1500/1740s, 1800s caller-floor, node-selector and foreign/alternate path controls survive in PR1334. Exact argv, finite deadline, environment and fleet-worker assertions remain; later Phase B controls extend this table. Original nonzero exits 1/2/3/4/5 still return passed=False with complete stdout/stderr for every original selector/budget; PR1334 adds diagnostic command and timeout metadata. Original timeout matrix remains with finite selected deadlines and caller floors; added output preservation strengthens the old empty-stream-only expectation. The original timeout test now calls the same real helper with the original selectors/caller floor; PR1334 retains exit -1 and passed=False, adds command/deadline/timed_out metadata and preserves partial stdout/stderr instead of forcing empty streams.",
+          "references": [
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 230,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+              "start": 112
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 230,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "96f6a82418a5ee455ee4925925bdf5ccee93c2ab3e001cf256970e19a9814479",
+              "start": 112
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 320,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+              "start": 233
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 320,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "188de479beb58d9ce8c40bbe28ed6c20d270e0f47d1c377034dd287faf0603a5",
+              "start": 233
+            },
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 320,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "805c926e27cf1112e8c83d635341499db731e7e78d3776eae19f33088cb23b80",
+              "start": 270
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 320,
+              "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+              "sha256": "805c926e27cf1112e8c83d635341499db731e7e78d3776eae19f33088cb23b80",
+              "start": 270
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -4831,8 +4831,15 @@ def _run_pytest_on_files(",
+              "reason": "Exact full lifecycle selector receives 600s; full fleet 900s and all other selectors 240s. Mixed budgets sum and max with caller floor; selector order, markers/import mode, environment, and fleet-only four workers are retained. PR1334 additionally budgets full Phase B at 600s without removing the original policy.",
+              "references": [
+                {
+                  "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+                  "end": 4897,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+                  "start": 4833
+                },
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 4897,
+                  "path": "mu/tools/executors/commit_executor.py",
+                  "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+                  "start": 4833
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "b493e520e05002547921aea6d12d6fd0c54aeefa84ea22e78e2d70bd64ee9054"
+            }
+          ],
+          "patch_sha256": "39edb6351c6bac31f1e5ee2276d0343388b94d0fa0570bfc9626f6d42a51f80f",
+          "path": "mu/tools/executors/commit_executor.py",
+          "reason": "Exact full lifecycle selector receives 600s; full fleet 900s and all other selectors 240s. Mixed budgets sum and max with caller floor; selector order, markers/import mode, environment, and fleet-only four workers are retained. PR1334 additionally budgets full Phase B at 600s without removing the original policy.",
+          "references": [
+            {
+              "commit": "b75972546901e3a09e08047f1a10c7684bf875bd",
+              "end": 4897,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+              "start": 4833
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 4897,
+              "path": "mu/tools/executors/commit_executor.py",
+              "sha256": "794c9e3d5b28b5c4a96c5b25f7c9c7ce6261108c31465a3d8be0ee591d957794",
+              "start": 4833
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,125 @@",
+              "reason": "PR1330 wave packet binds its original scope, command and historical implementation/landing status. Preserve its complete source; it is superseded as current authority by the fresh frozen R6 packet. Executable contributions are accounted separately, remaining standing work is retained, and no prior approval is transferred.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "ed7a8dde15bac5ab3910955e9b9011b157abbac64c3d5ce0d16a355da3a616a5"
+            }
+          ],
+          "patch_sha256": "904a12eedb79784454cca54602b206ac948233be57cf5d3b6517f3221a4fb3ed",
+          "path": "reports/control_plane/workingrcx-lifecycle-gate-budget-r1-2026-10-04_2026-10-04.md",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,105 @@",
+              "reason": "PR1330 local commands, exits, durations, failure diagnoses and before/after maps remain immutable historical receipts at the retained original head. Current artifact hash refresh is not a rerun or approval. R6 keeps historical evidence separate from its new run receipts and native stages.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "a57cd136f466683ff5f21c8034d86ebdb32b217e2bbc94468bdc98ff6b73a20e"
+            }
+          ],
+          "patch_sha256": "2ff1fa7234d9dec6922813701424ce3c62a32ab9d9755ca827f8eb91fba22fb4",
+          "path": "reports/control_plane/workingrcx-lifecycle-gate-budget-r1-2026-10-04_implementation_evidence.json",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "PR1330 timing, comparison commit and staged provenance belong only to that original candidate. Preserve as historical measurement; R6 requires fresh native indexed collection and does not copy these metrics or grant authority from their hash.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "6588bb5720705638d933919cfc4e03309093a2d477da7ae01f62ab85f8a5cbd5"
+            }
+          ],
+          "patch_sha256": "c3f353e1c7daf7ce40e242436e5d0e5b892534290a9c1ca013e3e0ba7dfc09d0",
+          "path": "reports/l4_wave_indicators/workingrcx-lifecycle-gate-budget-r1-2026-10-04.json",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        }
+      ],
+      "evidence_refs": [
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-coverage-r6-admission/source-recovery-record.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-coverage-r6-admission/original-contribution-inventory.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-coverage-r6-admission/pr1330-commit.raw",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-coverage-r6-admission/source-tree-objects.pack",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r6-2026-10-20_implementation_evidence.json",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r6-2026-10-20_row40_advisories.md"
+      ],
+      "owner": {
+        "packet": "reports/control_plane/workingrcx-fleet-pr-coverage-r6-2026-10-20_2026-10-20.md",
+        "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+        "wave_id": "workingrcx-fleet-pr-coverage-r6-2026-10-20"
+      },
+      "preservation_ref": "refs/heads/jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04",
+      "replacement": {
+        "head": "51f575945e2bd3563cc8d0a77506c5ae0f78c432",
+        "id": "PR_kwDOQvy8bs8AAAABIUBvmQ",
+        "merge": "b75972546901e3a09e08047f1a10c7684bf875bd",
+        "number": 1334
+      },
+      "source_base": "35f7c225a25025aec893230c072754cf7d7c76fc",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/workingrcx-lifecycle-gate-budget-r1-2026-10-04",
+        "headRefOid": "817e470362ef632b60ab13bb4321571676f564ee",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABGipA2w",
+        "mergedAt": null,
+        "number": 1330,
+        "state": "OPEN"
+      }
+    },
+    {
+      "coverage": [
+        {
+          "hunks": [
+            {
+              "header": "@@ -4,6 +4,30 @@ This file is a selected historical changelog, not the complete current",
+              "reason": "R5 recorded candidate PR1330 coverage, the foreign-proof setup repair, R4 failure and pending review/landing. Those are preserved attempt history. Fresh R6 coverage cites actual PR1334/PR1339 and retains the unproved historical refusal cause.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "7d792ba772ea6c2171727b855321d227ff0dcf84211c4d0275d5247e0762bb8d"
+            }
+          ],
+          "patch_sha256": "8b16e94b0c5dfcd74f83b4dabc93537de245f38e09e647de1ead10936a1f4d27",
+          "path": "CHANGELOG.md",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -180,6 +180,8 @@ remain pending; R9 and R8/PR1325 stay preserved under the existing production ow",
+              "reason": "The R5 update correctly historicalized the July snapshot and bounded L4 claims at the then-current PR1334 parent. Current R6 STATUS carries actual PR1339/Main synchronization while keeping Phase8c, debt, Hemisphere and all remaining obligations unchanged.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "b7b4ff40e0e9e1e76835286ee97f8c8398917ab2f8183f9df98d382b25b55469"
+            }
+          ],
+          "patch_sha256": "d0a6a5d904344f858360bb8fbb74c4d4a86718e11783daa5af6c8ebdd1752b0e",
+          "path": "STATUS.md",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -15,7 +15,185 @@ Bridge round 1 implementation checkpoint (2026-10-13; native timeout recovery R4",
+              "reason": "R5 checkpoint and imported R1-R19/recovery chronology remain preserved, with failures and pending versus completed stages distinct. Captured latest PRIMARY adds PR1339 landing and 15 recovered operator notes; no R5 local pass is transferred as R6 approval.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "f146d97bc523e0d7ae476723e33e5979481272096be76dd857581bb57c840290"
+            },
+            {
+              "header": "@@ -176,6 +354,315 @@ Historical PRIMARY latest observation checkpoint (2026-10-12 08:57 UTC; R7 Phase",
+              "reason": "Imported operator observations include R4 failure/repair, intermediate supervisor approvals, snapshots and receipts. They remain historical evidence with original source bindings; actual PR1339 lineage and fresh R6 results determine current coverage.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "3b2f3da3c57e31e709a06ee5e3a3bc6382e7d88063b5e50e04b2e446ee01132f"
+            },
+            {
+              "header": "@@ -187,13 +674,69 @@ Active working to-do (synchronized with existing queue owners; no new numbered p",
+              "reason": "Historical checklist and native restored-checkpoint transitions retain original owners and exhausted attempts. They do not turn unmerged R19 or retention work into merged work or a universal prerequisite for independently ready PR coverage.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "6da875dff1750f37c1175178727d614981c8045a7d76cf7a67234ff24664c7bc"
+            },
+            {
+              "header": "@@ -267,12 +810,12 @@ Historical R1 to-do (superseded by fresh R2): Row38/row40: complete current lega",
+              "reason": "The v7 folder/retention/PR-coverage preparations were demoted to historical instructions as later owned waves evolved. Their preserved inputs and unresolved physical/useful-work obligations remain under existing owners; no old launcher or stash is replayed.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "d8c551b61f773356f2d0d617fd6829b542fec76c188a097bd8266aee1ed68805"
+            },
+            {
+              "header": "@@ -801,7 +1344,39 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "R5 row38 ownership and prior owner history remain retained; R6 is now the same existing row38 owner for both exact PRs. The foreign-proof executable contribution is mapped independently below; the unmerged R5 draft coverage is regenerated, not approved by preservation.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "286453bed266b96bbea7cd7fbd3dae878e074ab7305829f111b1130758921444"
+            },
+            {
+              "header": "@@ -1109,7 +1684,21 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Row40 standing advisory delivery and native runner/R19/retention/Mu/monitor/CI obligations are carried in the required R6 standing report. PR1339 fulfills only the shared watcher fixture prerequisite; other obligations stay open without gating unrelated ready coverage.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "471fd1f918b70b9bcf8025e8499d3385829998517cd25d093ddbb53fa7c3ebb8"
+            },
+            {
+              "header": "@@ -1404,7 +1993,9 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "The single-lane preservation rule is retained for R6; former R5 mutation authority remains consumed/stopped. Native outer owns review, staging and landing; existing branches, source/index/history, transactions and stashes remain protected.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "bd339781aedb513e7994c92aead6f871ff538c2b194391f152b4135238023aae"
+            },
+            {
+              "header": "@@ -2575,6 +3166,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "R5 tracker L4/indicator/package provenance is historical and cannot approve a new wave. The frozen R6 native tracker-restoration note is canonical for R6 fields; no manual note crosses its native Ra anchors.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "c14315cc37588da3700df289bc035fbb05d1af0186db7a85cdebafc1ce57e821"
+            }
+          ],
+          "patch_sha256": "2b27ac94e5bdfe81bb16301724b7e4fc764d0f801ee0fedef8ff84ad64e4b1df",
+          "path": "TASKS.md",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -18,6 +18,7 @@ import io",
+              "reason": "The selectors import supports bounded readiness on the real foreign child; imported in actual PR1339, not inferred from the unmerged R5 draft.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 25,
+                  "path": "mu/tests/tools/test_phase_b_executor.py",
+                  "sha256": "20a530f8048043452f9dd69c1cf40c7fd59b717f38cb5d8dbcc3f5e39683400f",
+                  "start": 18
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "e9dd1daf5a0a7d68ef76aa5e60eb2e8f967e8e1dfa0c33472c19f3e00485395e"
+            },
+            {
+              "header": "@@ -635,8 +636,49 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret",
+              "reason": "Foreign proof is prepared before dispatcher exception handling with a five-second readiness wait, real owned child, observed termination proof, reaping and stream closure. PR1339 retains R5 setup. R3 subsequently keeps coherent observation only for the unchanged positive consumer; every adverse callback, including foreign proof, restores the real observer before injection (helper lines126-215 and callback829-835).",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 835,
+                  "path": "mu/tests/tools/test_phase_b_executor.py",
+                  "sha256": "89d359f00637390f91e7fc500240541af740a94aee1da57420a7678d1c8b4696",
+                  "start": 788
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "4f1c7ef525edcde08685f6f8a8dfc1ae2ad7a1e7161fcfac24075f8fd2de2341"
+            },
+            {
+              "header": "@@ -656,20 +698,9 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret",
+              "reason": "Foreign proof injection uses the already observed/reaped unrelated launch and asserts distinct owner identity; it no longer creates a child inside the dispatcher callback. Actual PR1339 still rejects that unrelated proof at the late consumer.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 857,
+                  "path": "mu/tests/tools/test_phase_b_executor.py",
+                  "sha256": "84fd1697cb70e0de35f15f9147fd36ef38f7cb9a69bec2715ac553e96c7282a8",
+                  "start": 850
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "748f5dc9c43f825fdc0c887988142fe7b4f51577f7e489f1d42dabe86e8b0b8d"
+            },
+            {
+              "header": "@@ -716,6 +747,7 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret",
+              "reason": "The explicit two-consumer diagnostic assertion survives; PR1339 additionally asserts observer restoration and routes coherent_consumer only for fault=unchanged. Original 23 fault cases and source/index/no-replay checks are preserved (773-934).",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 934,
+                  "path": "mu/tests/tools/test_phase_b_executor.py",
+                  "sha256": "c7ac979dc51cd47dec7de1f54595466c2eda9763a0424bf40714e9b3a07ce613",
+                  "start": 900
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "8e00979fc7e4a7de2b708716bb783bca01bd801314181c8161584937e4f2f452"
+            },
+            {
+              "header": "@@ -746,6 +778,53 @@ def test_native_late_direct_consumer_revalidates_before_mutation(late_native_ret",
+              "reason": "All three real-child failure controls survive unchanged in behavior: readiness-timeout, early-exit and missing-owner assert visible diagnostics, reaping, closed stdout, original observer, zero actors/validation calls, protected file bytes and exact index. PR1339 moves this function before the parametrized consumer without dropping assertions.",
+              "references": [
+                {
+                  "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+                  "end": 770,
+                  "path": "mu/tests/tools/test_phase_b_executor.py",
+                  "sha256": "19a61956ed7f725dea3fcda09775eecc8333fad3943606b02ecb0c887a4e8c75",
+                  "start": 726
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "99b09a26fa7a100a632048a059556487a9a7ce6b678e97eb7e29119fb92cdd06"
+            }
+          ],
+          "patch_sha256": "8e6147f240edca700da9a92105944e2c2527cd2dccc97995ad662019a8be8d53",
+          "path": "mu/tests/tools/test_phase_b_executor.py",
+          "reason": "The selectors import supports bounded readiness on the real foreign child; imported in actual PR1339, not inferred from the unmerged R5 draft. Foreign proof is prepared before dispatcher exception handling with a five-second readiness wait, real owned child, observed termination proof, reaping and stream closure. PR1339 retains R5 setup. R3 subsequently keeps coherent observation only for the unchanged positive consumer; every adverse callback, including foreign proof, restores the real observer before injection (helper lines126-215 and callback829-835). Foreign proof injection uses the already observed/reaped unrelated launch and asserts distinct owner identity; it no longer creates a child inside the dispatcher callback. Actual PR1339 still rejects that unrelated proof at the late consumer. The explicit two-consumer diagnostic assertion survives; PR1339 additionally asserts observer restoration and routes coherent_consumer only for fault=unchanged. Original 23 fault cases and source/index/no-replay checks are preserved (773-934). All three real-child failure controls survive unchanged in behavior: readiness-timeout, early-exit and missing-owner assert visible diagnostics, reaping, closed stdout, original observer, zero actors/validation calls, protected file bytes and exact index. PR1339 moves this function before the parametrized consumer without dropping assertions.",
+          "references": [
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 25,
+              "path": "mu/tests/tools/test_phase_b_executor.py",
+              "sha256": "20a530f8048043452f9dd69c1cf40c7fd59b717f38cb5d8dbcc3f5e39683400f",
+              "start": 18
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 835,
+              "path": "mu/tests/tools/test_phase_b_executor.py",
+              "sha256": "89d359f00637390f91e7fc500240541af740a94aee1da57420a7678d1c8b4696",
+              "start": 788
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 857,
+              "path": "mu/tests/tools/test_phase_b_executor.py",
+              "sha256": "84fd1697cb70e0de35f15f9147fd36ef38f7cb9a69bec2715ac553e96c7282a8",
+              "start": 850
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 934,
+              "path": "mu/tests/tools/test_phase_b_executor.py",
+              "sha256": "c7ac979dc51cd47dec7de1f54595466c2eda9763a0424bf40714e9b3a07ce613",
+              "start": 900
+            },
+            {
+              "commit": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+              "end": 770,
+              "path": "mu/tests/tools/test_phase_b_executor.py",
+              "sha256": "19a61956ed7f725dea3fcda09775eecc8333fad3943606b02ecb0c887a4e8c75",
+              "start": 726
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,140 @@",
+              "reason": "PR1338 wave packet binds its original scope, command and historical implementation/landing status. Preserve its complete source; it is superseded as current authority by the fresh frozen R6 packet. Executable contributions are accounted separately, remaining standing work is retained, and no prior approval is transferred.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "041b9ddce6e5d3e4c3f85788267d22e209e32e4f6fdc2b3ac51e659a79f3dd38"
+            }
+          ],
+          "patch_sha256": "86197925947e9eee12174298ad21bb9e65fcba5f6f2e738c1687e6daad0c6bd1",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_2026-10-19.md",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,664 @@",
+              "reason": "R5 schema2 data binds only PR1330 to its then-current PR1334 parent. It is preserved draft governance, not merged approval. R6 independently rebuilds all PR1330 and PR1338 paths/hunks against actual current-dev lineage; no old manifest hash or approval is reused.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "5d14edecfe54db62d617e016dfe2986e37a0c9fa59fa1aeb2d90fa304148e922"
+            }
+          ],
+          "patch_sha256": "73b3aa11bdc8f025d7eb0ed7c4f45cf441974c65f8775ae39f2d5954ec531559",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_coverage.json",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,1097 @@",
+              "reason": "PR1338 local commands, exits, durations, failure diagnoses and before/after maps remain immutable historical receipts at the retained original head. Current artifact hash refresh is not a rerun or approval. R6 keeps historical evidence separate from its new run receipts and native stages.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "cecc38fe0af48178269b4834e4d60af7221b6e4b8ec84e121bfceb7223e5a01b"
+            }
+          ],
+          "patch_sha256": "78cf9bd55d6a5ddf778b7b940983a7de9ba8ff3de041e2b04ded3663d237952a",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r5-2026-10-19_implementation_evidence.json",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,101 @@",
+              "reason": "R5 standing report usefully separates landed partial streams from OPEN unchanged undersized-retry suppression and retains independent owners. R6 carries both bounded topics and the native runner/R19/retention/Mu/monitor/linked-dev obligations in its required standing file; this historical report is not a closure or missing-work waiver.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "d35c498317355beb59ab9aeb01101e1af91ce6929129774fc22811e037795bb9"
+            }
+          ],
+          "patch_sha256": "3cdf96817f8e24edc06edfb2210b5cf6f5215f2e8768403bc53dfeeac267f58f",
+          "path": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r5-2026-10-19_row40_advisories.md",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "PR1338 timing, comparison commit and staged provenance belong only to that original candidate. Preserve as historical measurement; R6 requires fresh native indexed collection and does not copy these metrics or grant authority from their hash.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "f5f0d72cb82ff20da85ef833368068c07d5f2fc91dab6c35ada551609d3aafb6"
+            }
+          ],
+          "patch_sha256": "c60000b9132d2928375a7eb346486855e5cf9e646b6fdd1fe466bf449f5cb302",
+          "path": "reports/l4_wave_indicators/workingrcx-fleet-pr-coverage-r5-2026-10-19.json",
+          "reason": "Historical governance and evidence disposition; each original hunk below has separate accounting. Original bytes remain on the retained branch/raw commit/tree closure. Useful pending obligations are retained under existing owners in TASKS.md and the required R6 standing report; this label grants no closure.",
+          "references": [],
+          "resolution": "evidence_only"
+        }
+      ],
+      "evidence_refs": [
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-coverage-r6-admission/source-recovery-record.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-coverage-r6-admission/pr1338-contribution-inventory.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-coverage-r6-admission/pr1338-commit.raw",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1330-pr1338-coverage-r6-admission/source-tree-objects.pack",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r6-2026-10-20_implementation_evidence.json",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r6-2026-10-20_row40_advisories.md"
+      ],
+      "owner": {
+        "packet": "reports/control_plane/workingrcx-fleet-pr-coverage-r6-2026-10-20_2026-10-20.md",
+        "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+        "wave_id": "workingrcx-fleet-pr-coverage-r6-2026-10-20"
+      },
+      "preservation_ref": "refs/heads/jabramsja/workingrcx-fleet-pr-coverage-r5-2026-10-19",
+      "replacement": {
+        "head": "8404536fb2aba4b9e9726635d1e5fd5be1ff5068",
+        "id": "PR_kwDOQvy8bs8AAAABJcW0iA",
+        "merge": "ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654",
+        "number": 1339
+      },
+      "source_base": "b75972546901e3a09e08047f1a10c7684bf875bd",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/workingrcx-fleet-pr-coverage-r5-2026-10-19",
+        "headRefOid": "33ac1eb4e316ed90ccfc3f3926cf98e4a7f334ae",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABJZOntg",
+        "mergedAt": null,
+        "number": 1338,
+        "state": "OPEN"
+      }
+    }
+  ],
+  "wave_id": "workingrcx-fleet-pr-coverage-r6-2026-10-20"
+}
