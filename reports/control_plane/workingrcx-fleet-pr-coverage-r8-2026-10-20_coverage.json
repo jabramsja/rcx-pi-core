@@ -1,0 +1,1887 @@
+{
+  "comparison_commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+  "manifest_sha256": "d67a83298cde14466bab272d168750647d9e482ce5c921bbf61ec1b4e907ad3a",
+  "repository": {
+    "id": "R_kgDOQvy8bg",
+    "nameWithOwner": "jabramsja/rcx-pi-core",
+    "url": "https://github.com/jabramsja/rcx-pi-core"
+  },
+  "schema_version": 2,
+  "targets": [
+    {
+      "coverage": [
+        {
+          "hunks": [
+            {
+              "header": "@@ -4,6 +4,36 @@ This file is a selected historical changelog, not the complete current",
+              "reason": "Selected historical unmerged R2 account of reconstruction, conditional proposal and local gates. Preserve as original evidence; current R8 chronology separates landed1333 protections from the removed Mu exception and retains all unfinished owners.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "652d293dd5c23b930a737153bca7013869894a303a87f5a9d1662f010380837a"
+            }
+          ],
+          "patch_sha256": "9e4e531927cb68604378c9d16fa80656d41d7b2450aafcc7ea942a79881e25f9",
+          "path": "CHANGELOG.md",
+          "reason": "Selected historical unmerged R2 account of reconstruction, conditional proposal and local gates. Preserve as original evidence; current R8 chronology separates landed1333 protections from the removed Mu exception and retains all unfinished owners.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -9,9 +9,11 @@ Founder model selection (2026-09-11): every selected local model-bearing pipelin",
+              "reason": "Historical row38/row40 ownership and R2 tracker fields bind the original wave. Retained source plus captured PRIMARY preserves268IDs/44owners and history; R8 owns only fresh1329/1341 accounting and does not reactivate R2 retirement intent. Hunk purpose: current queue checkpoint.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "c2553d25505e60bce07e65c93d482a0268dcc848b484c8addd41b2a17711760e"
+            },
+            {
+              "header": "@@ -528,13 +530,15 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "Historical row38/row40 ownership and R2 tracker fields bind the original wave. Retained source plus captured PRIMARY preserves268IDs/44owners and history; R8 owns only fresh1329/1341 accounting and does not reactivate R2 retirement intent. Hunk purpose: row38 scope and independent hold/owner accounting.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "79e8bf12f9bbc4c29f192971248c3c4b9a03265b1352745379a50d641baba316"
+            },
+            {
+              "header": "@@ -1870,6 +1874,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "Historical row38/row40 ownership and R2 tracker fields bind the original wave. Retained source plus captured PRIMARY preserves268IDs/44owners and history; R8 owns only fresh1329/1341 accounting and does not reactivate R2 retirement intent. Hunk purpose: original R2 tracker authority.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "bd1ae844cc3955bbb2056fd1b9f37a5ac0c67c451059ed0d3dfc4568e14a1087"
+            }
+          ],
+          "patch_sha256": "12cb40ccb800cfb4c8cb365c736a510730340bcd5633c5dc4e58086641fe71b3",
+          "path": "TASKS.md",
+          "reason": "Historical row38/row40 ownership and R2 tracker fields bind the original wave. Retained source plus captured PRIMARY preserves268IDs/44owners and history; R8 owns only fresh1329/1341 accounting and does not reactivate R2 retirement intent. Hunk purpose: current queue checkpoint. Historical row38/row40 ownership and R2 tracker fields bind the original wave. Retained source plus captured PRIMARY preserves268IDs/44owners and history; R8 owns only fresh1329/1341 accounting and does not reactivate R2 retirement intent. Hunk purpose: row38 scope and independent hold/owner accounting. Historical row38/row40 ownership and R2 tracker fields bind the original wave. Retained source plus captured PRIMARY preserves268IDs/44owners and history; R8 owns only fresh1329/1341 accounting and does not reactivate R2 retirement intent. Hunk purpose: original R2 tracker authority.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -98,11 +98,27 @@ lock exclusively and retains it through its normal completion gates. This",
+              "reason": "PR1333 actually carries the stale in-memory watcher adoption/release contract, exact pane/process ownership, bounded acknowledgment and no spent-claim replay. Later strict parsing/OS-absence guards strengthen that contract; PR1342 inherits it.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 145,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "82bd263e501e20cf5cf01c9536c4d94e2dd586ed6a6e75f80e2e6054ca86f0e6",
+                  "start": 90
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 230,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "b2d1743c5c51f3e1e24288892fa24d240de15a551778f4dc6fd3ec7e50a559dd",
+                  "start": 35
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "2ab4e066f8a700f2ab00acf8be704bbc6f69ac5c56aa100384f9756887606ad1"
+            },
+            {
+              "header": "@@ -274,6 +290,23 @@ require committed bytes, index and mode for the complete authority, including",
+              "reason": "The one-time R2 Mu release paragraph describes OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release, not landed current permission. Its exact old head/path/predecessor proposal is superseded by unconditional default Mu protection, explicit archive HOLD tests and current policy requiring fresh authority. Missing Mu work/PR1325 and retained sources stay owned.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 333,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+                  "start": 298
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "def30b585b05e4ee9e94e0d0dc577ee1514fff1341ba03d3395f1f206e00951f"
+            }
+          ],
+          "patch_sha256": "cd94d79272a0fb93aa4eb2aa01e3cb8c8df314e4f2257099862c318195b05f90",
+          "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+          "reason": "PR1333 actually carries the stale in-memory watcher adoption/release contract, exact pane/process ownership, bounded acknowledgment and no spent-claim replay. Later strict parsing/OS-absence guards strengthen that contract; PR1342 inherits it. The one-time R2 Mu release paragraph describes OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release, not landed current permission. Its exact old head/path/predecessor proposal is superseded by unconditional default Mu protection, explicit archive HOLD tests and current policy requiring fresh authority. Missing Mu work/PR1325 and retained sources stay owned.",
+          "references": [
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 145,
+              "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+              "sha256": "82bd263e501e20cf5cf01c9536c4d94e2dd586ed6a6e75f80e2e6054ca86f0e6",
+              "start": 90
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 230,
+              "path": "mu/tools/executors/worktree_lifecycle.py",
+              "sha256": "b2d1743c5c51f3e1e24288892fa24d240de15a551778f4dc6fd3ec7e50a559dd",
+              "start": 35
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 420,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+              "start": 351
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 523,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+              "start": 508
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 841,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+              "start": 786
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 333,
+              "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+              "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+              "start": 298
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 81,
+              "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+              "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+              "start": 29
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -25,10 +25,14 @@ from __future__ import annotations",
+              "reason": "Imports support real private tmux and exact monitor health controls; PR1333 introduces them and PR1339/1342 extend fixture ownership.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 45,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "41e98b42e5aadf86baeb666883cc04f8261361427249e49235148603848bfb87",
+                  "start": 24
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "1e6e4c8e14edc72c702033c5fffee2b6bd38df2d8adee81347045d78d1c9b52c"
+            },
+            {
+              "header": "@@ -137,6 +141,107 @@ def generated_log_watcher(tmp_path, lane, env, *, monitor_env=None):",
+              "reason": "Original private-daemon stale watcher and health control are replaced by PR1339 waitable foreground controller/reaper, with PR1342 stable PID/PPID/birth and private-server identity. Original pre-update health2, adoption, old watcher/tail absence and changed PID controls remain. Actual wait/reaping is required; tmux availability P2 remains OPEN, separately bounded under row40.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 476,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "b76b37e2915275040a9f4b474102b65a6a145712ad6096c95bf7656d71335592",
+                  "start": 275
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 216,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "0c8c681b652b56b4fbe0dcaa5f29d41f166f86320e3f107b07a5351e086732c5",
+                  "start": 205
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 516,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "6ac1bee22f1a28a6e0545d557c21d06d9c49f28d1b0e5bf68462f2c26cf60c0e",
+                  "start": 479
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "84bc319c88c2086f81841294e6b8ca45fe047fe6a602c2566d8ba62a1449d96e"
+            },
+            {
+              "header": "@@ -391,7 +496,9 @@ esac",
+              "reason": "PR1333 carries _fake_tmux_dir: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 927,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "98efd742648b2143a357abe5cdd992fbae91abab3a22bc5fc4855314a1ee714c",
+                  "start": 807
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "64e9f8d34ca855b567e6474c51cd570899db21f832b39aa0f64ac8905d67018b"
+            },
+            {
+              "header": "@@ -402,6 +509,21 @@ def _fake_tmux_dir(tmp_path: Path, *, log_path: Path) -> Path:",
+              "reason": "PR1333 carries _fake_tmux_dir: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 927,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "98efd742648b2143a357abe5cdd992fbae91abab3a22bc5fc4855314a1ee714c",
+                  "start": 807
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "bc16c7c00e9bcb87481dd4a7320e89b7906ba12b5b1e2dcb2a2d71c52e667a6d"
+            },
+            {
+              "header": "@@ -775,7 +897,7 @@ def _start_and_capture(",
+              "reason": "PR1333 carries _start_and_capture: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1260,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "fe32075cf67cddc9e0a4f81ca898da73ac5189514033154c670340481e16a8a4",
+                  "start": 1197
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "a7865d65de705e314cbb276595e071c1b40868c06f62b58f8699b7195792c039"
+            },
+            {
+              "header": "@@ -937,7 +1059,7 @@ exit 0",
+              "reason": "PR1333 carries test_orchestrator_monitor_uses_mu_codex_autoping_launcher_for_selected_bus: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1454,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "78e80675bff014be6e6032c0a493679521b647fef8b945647c660262472b347f",
+                  "start": 1386
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "e94cbc5be2b7ba366e483f2ef4c333cae937cfd7484117efe8a098287eb8b387"
+            },
+            {
+              "header": "@@ -1011,7 +1133,7 @@ while true; do sleep 30 & wait $!; done",
+              "reason": "PR1333 carries test_orchestrator_monitor_replaces_untracked_wrong_root_owner: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1520,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "f86b9353b825b73c2cf1dab789f30ff3bb07e96bb7d0e58d0234448bfe16fc37",
+                  "start": 1457
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "54703f3fe29afeea7a94d8417319f0d100d91fd5f35765deddaff63e198ba097"
+            },
+            {
+              "header": "@@ -1064,7 +1186,7 @@ def test_orchestrator_monitor_replaces_same_session_wrong_bus_owner(tmp_path):",
+              "reason": "PR1333 carries test_orchestrator_monitor_replaces_same_session_wrong_bus_owner: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1628,
+                  "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+                  "sha256": "abc8973260bde12682c3b02804c9e0267443bb7602e2a8495be113c4516ae721",
+                  "start": 1523
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "4e1e78ced8937895836e9883b6b13642121d66b499620527dffbcd555d2c4992"
+            }
+          ],
+          "patch_sha256": "718cc7115fdb2dca4c194c558f201ceb4173b0b7dd6f911610c753d67acd56bd",
+          "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+          "reason": "Imports support real private tmux and exact monitor health controls; PR1333 introduces them and PR1339/1342 extend fixture ownership. Original private-daemon stale watcher and health control are replaced by PR1339 waitable foreground controller/reaper, with PR1342 stable PID/PPID/birth and private-server identity. Original pre-update health2, adoption, old watcher/tail absence and changed PID controls remain. Actual wait/reaping is required; tmux availability P2 remains OPEN, separately bounded under row40. PR1333 carries _fake_tmux_dir: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened. PR1333 carries _start_and_capture: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened. PR1333 carries test_orchestrator_monitor_uses_mu_codex_autoping_launcher_for_selected_bus: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened. PR1333 carries test_orchestrator_monitor_replaces_untracked_wrong_root_owner: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened. PR1333 carries test_orchestrator_monitor_replaces_same_session_wrong_bus_owner: disposable recording-only tmux tests create an exclusive reader-protocol double in their own temporary repositories; explicit repo_roots keep real integration consumers on production lifecycle behavior. No assertion is weakened.",
+          "references": [
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 45,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "41e98b42e5aadf86baeb666883cc04f8261361427249e49235148603848bfb87",
+              "start": 24
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 476,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "b76b37e2915275040a9f4b474102b65a6a145712ad6096c95bf7656d71335592",
+              "start": 275
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 216,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "0c8c681b652b56b4fbe0dcaa5f29d41f166f86320e3f107b07a5351e086732c5",
+              "start": 205
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 516,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "6ac1bee22f1a28a6e0545d557c21d06d9c49f28d1b0e5bf68462f2c26cf60c0e",
+              "start": 479
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 927,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "98efd742648b2143a357abe5cdd992fbae91abab3a22bc5fc4855314a1ee714c",
+              "start": 807
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 1260,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "fe32075cf67cddc9e0a4f81ca898da73ac5189514033154c670340481e16a8a4",
+              "start": 1197
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 1454,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "78e80675bff014be6e6032c0a493679521b647fef8b945647c660262472b347f",
+              "start": 1386
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 1520,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "f86b9353b825b73c2cf1dab789f30ff3bb07e96bb7d0e58d0234448bfe16fc37",
+              "start": 1457
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 1628,
+              "path": "mu/tests/tools/test_pipeline_monitor_autofollow.py",
+              "sha256": "abc8973260bde12682c3b02804c9e0267443bb7602e2a8495be113c4516ae721",
+              "start": 1523
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -11743,12 +11743,29 @@ esac",
+              "reason": "PR1333 actual change in _fake_tmux_dir. The fake-tmux unit fixture exclusively installs a protocol double in declared disposable repo_roots; real integration consumers remain real. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 12305,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "3fc25a461b8a147197384b19cba21c49f2cfe34645030046780477881becbc9e",
+                  "start": 12201
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "0a4302897750c613b854374b08e29dc599ed72143604de97ad5f86dafec0a9e5"
+            },
+            {
+              "header": "@@ -12486,7 +12503,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_start_resolves_window_and_pane_ids_from_tmux. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 12983,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "749bdd096545c04d640d5052f8386c35523154bcf54919069caab2577e45c15f",
+                  "start": 12951
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "9b8e5fd896730bccbc84f756bae639fa325d98351e490b238e6c65cf7e4d8ffe"
+            },
+            {
+              "header": "@@ -12531,7 +12548,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_start_uses_configured_named_lane_identity. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13037,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "b81f092c0452af78314d9b27e3d0b98bfe8a971590b38c0de1440f533d11c586",
+                  "start": 12985
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "70eab649b84dfba6c4f62663e948666b12e5a0dd4030f5fc9f4b230b167d0846"
+            },
+            {
+              "header": "@@ -12574,7 +12591,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_start_does_not_pin_panes_to_launcher_worktree. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13071,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "74621983dd10c166d113bdaf6314c3eb03df7292286c0376e3a7a3a4b13971d2",
+                  "start": 13039
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "2f04db68c9d0618fb4f45320a3e20d106ee12e5552338fbce6d5cf74d531be0e"
+            },
+            {
+              "header": "@@ -12619,7 +12636,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_start_reseeds_autoping_when_thread_id_is_present. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13126,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "e35f15445e979709177f5638a6402c08480f84e1b00dea4462d53019d2887c79",
+                  "start": 13073
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "ae8ba0c05d1ff0b30a9e92b25bce46bb3549698421eab6ab568881bdd39be5f5"
+            },
+            {
+              "header": "@@ -12674,7 +12691,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_start_clears_saved_autoping_thread_when_thread_id_is_absent. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13199,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "86480b801905a8dd394c7653060b152ff79d6a414445d647d387a57e525b57da",
+                  "start": 13128
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "f0b3db1c427f6f2d3888d99ab3170a70c27a3e63aade004737a7736a67ff7898"
+            },
+            {
+              "header": "@@ -12747,7 +12764,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_owner_tick_keeps_autoping_seeded_after_start. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13276,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "1f6662865bbb7dcaa7b687336b3e2007d765fb3c275ed9df69bb3f3689a41f77",
+                  "start": 13201
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d59f893cd0b826aa4c3b95062829a89ed358d34cd00ac9a8495806750b4803b6"
+            },
+            {
+              "header": "@@ -12830,7 +12847,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_start_defaults_to_claude_autoping_without_mode_config. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13339,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "6f8e840720465ee754fa8eff829a1e5c0d96e5d846ede381c1a3b4d9d6a62cf4",
+                  "start": 13278
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "5bf07b695fc24c358d032c21185636bfb40dc9b5c1088ef084540cd5a65f862c"
+            },
+            {
+              "header": "@@ -12876,7 +12893,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_detached_start_is_idempotent_with_single_owner. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13384,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "81ad7c7857f9d1872f1b528313bf13a869dceeedb30c64bc1f9fe0ba027b5846",
+                  "start": 13341
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d3d14c7f257198c14b3b9482eeb9ac169d2ed9d9b402942dbca0547307209a6f"
+            },
+            {
+              "header": "@@ -12933,7 +12950,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_start_replaces_wrong_root_detached_owner. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13455,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "dfb89410d7f4f4b2eb2121073123e1813cb3fd42209bcf755ed0aa97670d9026",
+                  "start": 13386
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "6f2c452276d95e65beef7ea3993d2f324f0b077cd20329911d5404f5aae1a054"
+            },
+            {
+              "header": "@@ -13003,7 +13020,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_start_replaces_owner_with_stale_expected_root_metadata. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13526,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "33c411f9beeabd94caea3aa72a4dc6287b29571297f60472c72e0569e9741714",
+                  "start": 13457
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "9e28fa25ca353f9dd1b27bff8a98323260471876ace9b37c5ffaaf467be8d017"
+            },
+            {
+              "header": "@@ -13063,7 +13080,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_stop_cleans_owner_state. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13569,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "711e37a0935a37e0182e56adc6c86cd2e4d0fafb6413f092eb39ecc3cba5a6f4",
+                  "start": 13528
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "071bd3f2a0aea93bdc5fe937d85230176e8d1710c2d31efdf8185eac6e2e635c"
+            },
+            {
+              "header": "@@ -13107,7 +13124,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_start_rebuilds_missing_degraded_and_wrong_root_panes. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 13632,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "6f55d6e867cffb83d25ad9072d1fac4eb377230c8e83bc4c00faf94a24545f41",
+                  "start": 13571
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "1621b3c49cfeb90d1ab87b4404f33917d36e7ca9e6dee0bbf7ae3ef5ff678e74"
+            },
+            {
+              "header": "@@ -13588,7 +13605,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_find_newest_log_ignores_blank_bridge_stderr_and_uses_raw_reviewer. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 14074,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "743cf60053cf77ac03dcd0b3c353a5959c619be48439d24187471600118f9112",
+                  "start": 14027
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "066427bef36db6f80639bcb61a3f039fb5c75c0c52da98c67db228fb075dd203"
+            },
+            {
+              "header": "@@ -13634,7 +13651,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_find_newest_log_ignores_newer_reader_transcript. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 14120,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "0fa9f369ef4dfcd09c031898d87bf9fb3fb7819020c9d4be738088f8c12ff344",
+                  "start": 14076
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "24b8d191929c656fb79fdf12d76ac98fa4fa91307bddfed9d805280009e11520"
+            },
+            {
+              "header": "@@ -13678,7 +13695,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_prefers_newer_executor_live_log_over_older_reviewer_transcript. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 14164,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "8ef21c6c815cb5e5f4dc5b79f75d44f7f9601a6c79e28405817bc8344b8bcc31",
+                  "start": 14122
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d408e2b1dc5625cb25d65bafa1c0feabb02e0552d8805c8d0bf677bd9b95e257"
+            },
+            {
+              "header": "@@ -13722,7 +13739,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_prefers_reviewer_transcript_over_newer_bridge_stderr. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 14208,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "ce9a4119820186b213fba7af5a7ca65b17efa811693064856f887d701236dbd6",
+                  "start": 14166
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "f52aad3a9cf04e4d83c65ceb502f25247dad8b3896ad0107728cefa36958cbf6"
+            },
+            {
+              "header": "@@ -13747,6 +13764,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_restarts_same_log_tail_on_heartbeat. The heartbeat consumer explicitly selects the real production lifecycle helper for the generated watcher. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 14255,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "89231c6bbf35ab4a8d53c9b6cf1db586deb222aec7d209f6a926b030b8cfb671",
+                  "start": 14210
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "d7d9190cf1b25deed7d62bd343f68b9ce8217556fd4298c0ac85c776fd2a1f53"
+            },
+            {
+              "header": "@@ -13757,7 +13775,7 @@ esac",
+              "reason": "PR1333 actual change in test_pipeline_monitor_restarts_same_log_tail_on_heartbeat. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 14255,
+                  "path": "mu/tests/tools/test_recovery_gate.py",
+                  "sha256": "89231c6bbf35ab4a8d53c9b6cf1db586deb222aec7d209f6a926b030b8cfb671",
+                  "start": 14210
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "7cb556dfa10e74c9cc0c42182b22a2451ac4df0bde629031ab28ca99d3c7e5d1"
+            }
+          ],
+          "patch_sha256": "b9b1788f1fd713829628e550b9c22c21f3f2a942b868e914b0b3721f8658a10a",
+          "path": "mu/tests/tools/test_recovery_gate.py",
+          "reason": "PR1333 actual change in _fake_tmux_dir. The fake-tmux unit fixture exclusively installs a protocol double in declared disposable repo_roots; real integration consumers remain real. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_start_resolves_window_and_pane_ids_from_tmux. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_start_uses_configured_named_lane_identity. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_start_does_not_pin_panes_to_launcher_worktree. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_start_reseeds_autoping_when_thread_id_is_present. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_start_clears_saved_autoping_thread_when_thread_id_is_absent. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_owner_tick_keeps_autoping_seeded_after_start. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_start_defaults_to_claude_autoping_without_mode_config. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_detached_start_is_idempotent_with_single_owner. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_start_replaces_wrong_root_detached_owner. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_start_replaces_owner_with_stale_expected_root_metadata. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_stop_cleans_owner_state. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_start_rebuilds_missing_degraded_and_wrong_root_panes. This caller supplies its explicit disposable repo_roots to that fixture; expected pane/root/bus/autoping/owner behavior remains asserted. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_find_newest_log_ignores_blank_bridge_stderr_and_uses_raw_reviewer. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_find_newest_log_ignores_newer_reader_transcript. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_prefers_newer_executor_live_log_over_older_reviewer_transcript. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_prefers_reviewer_transcript_over_newer_bridge_stderr. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_restarts_same_log_tail_on_heartbeat. The heartbeat consumer explicitly selects the real production lifecycle helper for the generated watcher. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge. PR1333 actual change in test_pipeline_monitor_restarts_same_log_tail_on_heartbeat. The extracted generated watcher is sourced with --rcx-log-reader-v2 so the unit snippet does not self-exec; log selection/heartbeat assertions remain. These hunks are inherited unchanged by PR1334; no attribution of their implementation to that later merge.",
+          "references": [
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 12305,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "3fc25a461b8a147197384b19cba21c49f2cfe34645030046780477881becbc9e",
+              "start": 12201
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 12983,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "749bdd096545c04d640d5052f8386c35523154bcf54919069caab2577e45c15f",
+              "start": 12951
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13037,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "b81f092c0452af78314d9b27e3d0b98bfe8a971590b38c0de1440f533d11c586",
+              "start": 12985
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13071,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "74621983dd10c166d113bdaf6314c3eb03df7292286c0376e3a7a3a4b13971d2",
+              "start": 13039
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13126,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "e35f15445e979709177f5638a6402c08480f84e1b00dea4462d53019d2887c79",
+              "start": 13073
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13199,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "86480b801905a8dd394c7653060b152ff79d6a414445d647d387a57e525b57da",
+              "start": 13128
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13276,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "1f6662865bbb7dcaa7b687336b3e2007d765fb3c275ed9df69bb3f3689a41f77",
+              "start": 13201
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13339,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "6f8e840720465ee754fa8eff829a1e5c0d96e5d846ede381c1a3b4d9d6a62cf4",
+              "start": 13278
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13384,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "81ad7c7857f9d1872f1b528313bf13a869dceeedb30c64bc1f9fe0ba027b5846",
+              "start": 13341
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13455,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "dfb89410d7f4f4b2eb2121073123e1813cb3fd42209bcf755ed0aa97670d9026",
+              "start": 13386
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13526,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "33c411f9beeabd94caea3aa72a4dc6287b29571297f60472c72e0569e9741714",
+              "start": 13457
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13569,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "711e37a0935a37e0182e56adc6c86cd2e4d0fafb6413f092eb39ecc3cba5a6f4",
+              "start": 13528
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 13632,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "6f55d6e867cffb83d25ad9072d1fac4eb377230c8e83bc4c00faf94a24545f41",
+              "start": 13571
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 14074,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "743cf60053cf77ac03dcd0b3c353a5959c619be48439d24187471600118f9112",
+              "start": 14027
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 14120,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "0fa9f369ef4dfcd09c031898d87bf9fb3fb7819020c9d4be738088f8c12ff344",
+              "start": 14076
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 14164,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "8ef21c6c815cb5e5f4dc5b79f75d44f7f9601a6c79e28405817bc8344b8bcc31",
+              "start": 14122
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 14208,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "ce9a4119820186b213fba7af5a7ca65b17efa811693064856f887d701236dbd6",
+              "start": 14166
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 14255,
+              "path": "mu/tests/tools/test_recovery_gate.py",
+              "sha256": "89231c6bbf35ab4a8d53c9b6cf1db586deb222aec7d209f6a926b030b8cfb671",
+              "start": 14210
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -26,13 +26,82 @@ STAMP = \"2026-09-11T18:34:09+00:00\"",
+              "reason": "This mixed hunk added15 one-time-release parameter cases and the archived explicit-protection case. Removed release capability and its15cases are superseded, never claimed passing. PR1333 separately lands the archived-source protection parameter plus real completed-archive exact/parent HOLD controls with immutable receipts; default Mu protection remains unconditional.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 333,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+                  "start": 298
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "fffa8fee593e91f26c6d0563b857c6fb7d3bbfad53e7fa5eac2e24c3ee6ddbc0"
+            }
+          ],
+          "patch_sha256": "ecfef207cf531073c9440451f4111979aeadbfc9178ec356137ac106c7e3e565",
+          "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+          "reason": "This mixed hunk added15 one-time-release parameter cases and the archived explicit-protection case. Removed release capability and its15cases are superseded, never claimed passing. PR1333 separately lands the archived-source protection parameter plus real completed-archive exact/parent HOLD controls with immutable receipts; default Mu protection remains unconditional.",
+          "references": [
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 420,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+              "start": 351
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 523,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+              "start": 508
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 841,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+              "start": 786
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 333,
+              "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+              "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+              "start": 298
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 81,
+              "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+              "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+              "start": 29
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -250,6 +250,104 @@ def test_finished_generated_reader_releases_within_native_completion_budget(nati",
+              "reason": "PR1333 carries raw-tail adoption before native claim, None/writer/unknown-reader controls, one-claim success versus three-claim descriptor HOLD, preserved log and immutable/no-replay receipts. PR1339 supplies real reaping plus delayed-reaper controls; PR1342 repairs the shared controller identity. Missing-pane/changed-start now also cover changed-PPID/command with zero claims/no release. Neither fixtures nor production checks are changed in R8.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 549,
+                  "path": "mu/tests/tools/test_worktree_lifecycle.py",
+                  "sha256": "024993a325984483ec75df9a57781951cfc5b31a42c32821caf29a314f008cc4",
+                  "start": 441
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 669,
+                  "path": "mu/tests/tools/test_worktree_lifecycle.py",
+                  "sha256": "9caa22db4c9a9ec4fa55c5685a334b9d9ae64425f08b3a130f547a61c9871534",
+                  "start": 626
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "a0ee136af8f1fe527a07315981e3f1a7370c058bbbbd9effb2642488116b5f42"
+            }
+          ],
+          "patch_sha256": "2723e8c7806c871a712175c21a5c0f07728dc6e4cc563b7f07767a8055f42357",
+          "path": "mu/tests/tools/test_worktree_lifecycle.py",
+          "reason": "PR1333 carries raw-tail adoption before native claim, None/writer/unknown-reader controls, one-claim success versus three-claim descriptor HOLD, preserved log and immutable/no-replay receipts. PR1339 supplies real reaping plus delayed-reaper controls; PR1342 repairs the shared controller identity. Missing-pane/changed-start now also cover changed-PPID/command with zero claims/no release. Neither fixtures nor production checks are changed in R8.",
+          "references": [
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 549,
+              "path": "mu/tests/tools/test_worktree_lifecycle.py",
+              "sha256": "024993a325984483ec75df9a57781951cfc5b31a42c32821caf29a314f008cc4",
+              "start": 441
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 669,
+              "path": "mu/tests/tools/test_worktree_lifecycle.py",
+              "sha256": "9caa22db4c9a9ec4fa55c5685a334b9d9ae64425f08b3a130f547a61c9871534",
+              "start": 626
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -72,6 +72,16 @@ LANDED_CENSUS = \"workingrcx-fleet-census-r3-2026-09-11_census.json\"",
+              "reason": "Original one-wave identity constants for MuR1 retirement were deliberately not carried. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 333,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+                  "start": 298
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "9528cde647f61537c2849a1f2700cd93aae0c8c5163a2e41dd64152344d3a82c"
+            },
+            {
+              "header": "@@ -348,11 +358,61 @@ def readonly_review_matches(identity: dict, review: dict, predecessor: dict, roo",
+              "reason": "Original release helper and optional API capability were not carried; no unknown/drifted evidence can release default Mu protection. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 333,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+                  "start": 298
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "92b76f32a12fb8ce66ea04dcd2a1afe85734ae983b9ce8e0baf31631f4279db5"
+            },
+            {
+              "header": "@@ -412,7 +472,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,",
+              "reason": "Conditional omission of Mu protection is replaced by unconditional protection in retirement mode. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 333,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+                  "start": 298
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "1cac39eea1b76763d143056ee0750d571ad49b37776e970b3efe1b775a96fb6b"
+            },
+            {
+              "header": "@@ -508,7 +569,9 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,",
+              "reason": "Useful explicit/archive protection landed in PR1333, strengthened to preserve every exact default owner and explicit parent; old constant coupling is removed. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "bf7fe78ab2ed967fb0e7c63dd434aedbf52d0a16fe8fcdbaedaa5625d5b041f7"
+            },
+            {
+              "header": "@@ -681,6 +744,8 @@ def classify(census: dict, *, source_sha256: str, base_commit: str,",
+              "reason": "No reviewed_oldest_mu_release permission is emitted in current policy output. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 333,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+                  "start": 298
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "845f36f4f531936d2bc8fbe1ada15498c83c4e5f559385b60c45e15092c55f74"
+            },
+            {
+              "header": "@@ -785,6 +850,7 @@ def main(argv: list[str] | None = None) -> int:",
+              "reason": "The old reviewed-oldest-mu-release CLI flag is absent; no R8 retirement permission. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 333,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+                  "start": 298
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "c50715a79386f1a78292128373051df9d364679d0b1c5e41590b9479e5b72727"
+            },
+            {
+              "header": "@@ -817,6 +883,7 @@ def main(argv: list[str] | None = None) -> int:",
+              "reason": "The old reviewed_oldest_mu_release dispatch argument is absent; current CLI uses existing conservative classification. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 420,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+                  "start": 351
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 523,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+                  "start": 508
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 841,
+                  "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+                  "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+                  "start": 786
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 333,
+                  "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+                  "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+                  "start": 298
+                },
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 81,
+                  "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+                  "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+                  "start": 29
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "cc0e72afe9a5114a0d7f6b4a85964152831fdcade0e474e48252bad8a4f21e9b"
+            }
+          ],
+          "patch_sha256": "3e376a9f85fbe6001f88edff69b1d49a94b5101f66e6f92770a6f2dfb579f65c",
+          "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+          "reason": "Original one-wave identity constants for MuR1 retirement were deliberately not carried. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN. Original release helper and optional API capability were not carried; no unknown/drifted evidence can release default Mu protection. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN. Conditional omission of Mu protection is replaced by unconditional protection in retirement mode. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN. Useful explicit/archive protection landed in PR1333, strengthened to preserve every exact default owner and explicit parent; old constant coupling is removed. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN. No reviewed_oldest_mu_release permission is emitted in current policy output. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN. The old reviewed-oldest-mu-release CLI flag is absent; no R8 retirement permission. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN. The old reviewed_oldest_mu_release dispatch argument is absent; current CLI uses existing conservative classification. PR1333 and unchanged current source/guard/policy evidence establish supersession of OLDEST_MU_RELEASE/_reviewed_oldest_mu_release/API argument/policy output/--reviewed-oldest-mu-release; not a claim that removed code landed. Mu useful-work owners remain OPEN.",
+          "references": [
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 420,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "ce598c06d87044cf0b743106ffac6c75cf90903171b8ee4be92e41eb58bdaa7a",
+              "start": 351
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 523,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "0732e8a3c4b39c2507fa4ed0c029ae9821075edbc6f4c8831e088b036ddbacff",
+              "start": 508
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 841,
+              "path": "mu/tools/executors/workingrcx_fleet_classification.py",
+              "sha256": "6769d33d46753a4802534f837324cd36f1ceed9e708fd4e7865a98560d45b5eb",
+              "start": 786
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 333,
+              "path": "mu/docs/agents/WorktreeLifecycle.v0.md",
+              "sha256": "ff90ca714e7542cdde1bc2f75a8c4173adf50a582b5a7333ecf0f28733e45fa7",
+              "start": 298
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 81,
+              "path": "mu/tests/tools/test_workingrcx_fleet_classification.py",
+              "sha256": "df42e5be441e449c06ae82bbc4cd9ff9f900678ec7468450be59ac2e3198e77a",
+              "start": 29
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -34,6 +34,178 @@ MAX_ATTEMPTS = 3",
+              "reason": "PR1333 lands watcher protocol detection/adoption; literal ps argv parsing, exact terminal registration and independently observed PID absence strengthen the original shlex/ps-only proposal. Unknown identity, live/zombie PID, writer and unowned reader remain HOLD.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 230,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "b2d1743c5c51f3e1e24288892fa24d240de15a551778f4dc6fd3ec7e50a559dd",
+                  "start": 35
+                }
+              ],
+              "resolution": "superseded",
+              "sha256": "fd21c057cb480707515dfdd25828f02e6403acd16c50729fbd565127d559ea68"
+            },
+            {
+              "header": "@@ -304,6 +476,7 @@ def follow_terminal_log(repo: Path, bus_dir: str, log: Path) -> None:",
+              "reason": "PR1333 performs verified stale-reader adoption before acquiring the release fence and spending a claim.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 525,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "e7161c47add1945e0932854ad315ecec914d12fc8f9fd22dfe723170e44e40b8",
+                  "start": 506
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "c46f7e92fd67e1ba3e7dfeaf3464cb7a804c5c90813a43832ee01b82575eefeb"
+            },
+            {
+              "header": "@@ -317,6 +490,7 @@ def _released_log_readers(directory: Path, registration: dict, terminal: dict):",
+              "reason": "PR1333 persists the actual watcher adoptions with exact terminal identity/hash in reader-release evidence.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 525,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "e7161c47add1945e0932854ad315ecec914d12fc8f9fd22dfe723170e44e40b8",
+                  "start": 506
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "4eaf7131d274ec9f8f1ada26b6fb2504aafcc8ecde83074f2f34df6f9ccfd0ef"
+            },
+            {
+              "header": "@@ -778,7 +952,7 @@ def complete_pending(directory: Path, *, delay: float = 2.0) -> dict:",
+              "reason": "PR1333 catches uncertain identity/OS/subprocess errors as ESCALATED before a new claim; spent attempts remain immutable.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1028,
+                  "path": "mu/tools/executors/worktree_lifecycle.py",
+                  "sha256": "cc72bfda1b5bd4ddabb3d1de62fbdb15e03d10919e3bc2a9be4bcec7606777dd",
+                  "start": 912
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "6a5c052aa20f6f7812bf6151c48646fe0118a0ff59ab3d04faa193ed04de1189"
+            }
+          ],
+          "patch_sha256": "4fdcb289d53750e44f58d73c7f64cf5f867bfe450bf56fc05be3b345a120307c",
+          "path": "mu/tools/executors/worktree_lifecycle.py",
+          "reason": "PR1333 lands watcher protocol detection/adoption; literal ps argv parsing, exact terminal registration and independently observed PID absence strengthen the original shlex/ps-only proposal. Unknown identity, live/zombie PID, writer and unowned reader remain HOLD. PR1333 performs verified stale-reader adoption before acquiring the release fence and spending a claim. PR1333 persists the actual watcher adoptions with exact terminal identity/hash in reader-release evidence. PR1333 catches uncertain identity/OS/subprocess errors as ESCALATED before a new claim; spent attempts remain immutable.",
+          "references": [
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 230,
+              "path": "mu/tools/executors/worktree_lifecycle.py",
+              "sha256": "b2d1743c5c51f3e1e24288892fa24d240de15a551778f4dc6fd3ec7e50a559dd",
+              "start": 35
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 525,
+              "path": "mu/tools/executors/worktree_lifecycle.py",
+              "sha256": "e7161c47add1945e0932854ad315ecec914d12fc8f9fd22dfe723170e44e40b8",
+              "start": 506
+            },
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 1028,
+              "path": "mu/tools/executors/worktree_lifecycle.py",
+              "sha256": "cc72bfda1b5bd4ddabb3d1de62fbdb15e03d10919e3bc2a9be4bcec7606777dd",
+              "start": 912
+            }
+          ],
+          "resolution": "superseded"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -218,6 +218,10 @@ write_log_watcher() {",
+              "reason": "Generated watcher self-execs with v2 protocol and live acknowledgment state. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1490,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "6eaecbaeea46af7134bd786f9882837d91ddb6005da5b07ae21b35adf4c0c06d"
+            },
+            {
+              "header": "@@ -272,7 +276,7 @@ resolve_live_log() {",
+              "reason": "Optional common-directory probe tolerates absence while retirement guards remain unchanged. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1490,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "b76b8e4c59b5a6edfd99ff4a0267576f108cd58c82be3efbb83bf27d104df934"
+            },
+            {
+              "header": "@@ -535,6 +539,16 @@ while true; do",
+              "reason": "Live pane PID/birth/protocol acknowledgment is required; updated disk bytes alone prove no adoption. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1490,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "b5b86e6019884c31d2365839d448bf3fd8952f5e5e09aee811fc3697cde6edc1"
+            },
+            {
+              "header": "@@ -888,6 +902,20 @@ release_owner_lock() {",
+              "reason": "Monitor reader-protocol helper invokes lifecycle health/adoption and fails closed. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1490,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "cd6fa1f246ab31cd7c04c4a5969916571c40edce695e9f679449897a83702f70"
+            },
+            {
+              "header": "@@ -945,6 +973,10 @@ tmux_session_health_detail() {",
+              "reason": "Health distinguishes structurally healthy panes from unadopted live watcher protocol. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1490,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "8bd633de75c7f83559bbadcf033e4ba8c7e2cb7643e188e3973cbf309dafa829"
+            },
+            {
+              "header": "@@ -1034,8 +1066,18 @@ rebuild_tmux_session() {",
+              "reason": "Health2 adopts only the exact stale watcher and rechecks; it does not destroy an uncertain session. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics.",
+              "references": [
+                {
+                  "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+                  "end": 1490,
+                  "path": "mu/tools/observability/pipeline_monitor.sh",
+                  "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
+                  "start": 1
+                }
+              ],
+              "resolution": "landed",
+              "sha256": "444c5a82d184572ab42d3b65a989ca60eaca198ababa53449db7b8affd6e3961"
+            }
+          ],
+          "patch_sha256": "ee4712f0ea3f1074fa39e5f20218113ddbb6c4c4cf7919147c1146ec39d90285",
+          "path": "mu/tools/observability/pipeline_monitor.sh",
+          "reason": "Generated watcher self-execs with v2 protocol and live acknowledgment state. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics. Optional common-directory probe tolerates absence while retirement guards remain unchanged. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics. Live pane PID/birth/protocol acknowledgment is required; updated disk bytes alone prove no adoption. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics. Monitor reader-protocol helper invokes lifecycle health/adoption and fails closed. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics. Health distinguishes structurally healthy panes from unadopted live watcher protocol. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics. Health2 adopts only the exact stale watcher and rechecks; it does not destroy an uncertain session. Actual contributing source is PR1333; PR1331 separately pins the default bus. Later1334/1339/1340/1342 inherit these production semantics.",
+          "references": [
+            {
+              "commit": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+              "end": 1490,
+              "path": "mu/tools/observability/pipeline_monitor.sh",
+              "sha256": "862174e4a2e3252f393583cda76c5616555e6341d51829f4c095d82176695ec1",
+              "start": 1
+            }
+          ],
+          "resolution": "landed"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,176 @@",
+              "reason": "Original R2 locked packet and machine sections are retained evidence of scope, gates and one-time conditional retirement proposal. They grant no R8 action authority; current default Mu protection and fresh two-target native packet supersede that scope.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "40e722cd5325b86c3813a5f6134889da6e792e3a5dd36a8532df85d36e90da16"
+            }
+          ],
+          "patch_sha256": "e75d431957e33d7d472c0cda5043ee25704b9e14038954bcbafaa9643ff54211",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_2026-10-04.md",
+          "reason": "Original R2 locked packet and machine sections are retained evidence of scope, gates and one-time conditional retirement proposal. They grant no R8 action authority; current default Mu protection and fresh two-target native packet supersede that scope.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,32081 @@",
+              "reason": "Original19-source action proposal selected5 conditional sources and14 individual HOLDs with mutation_authorized=false. Keep exact original plan, operation IDs and each owner; no current filesystem safety or action permission follows. Fresh census/identity/recovery and separate native action would be required.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "e6f4e51faae50a3857469e5b9dd44884949a5013275d7726e26352b23196da4a"
+            }
+          ],
+          "patch_sha256": "0a3e7251316fc60f030959cc8a945b1d0146e701e26ce9d58c7dc03568156324",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_apply_plan.json",
+          "reason": "Original19-source action proposal selected5 conditional sources and14 individual HOLDs with mutation_authorized=false. Keep exact original plan, operation IDs and each owner; no current filesystem safety or action permission follows. Fresh census/identity/recovery and separate native action would be required.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,22889 @@",
+              "reason": "Original19 sequential source observations at2026-10-04 bind their own filesystem, Git, useful-work and recovery facts. Full records and limitations are retained; old identities and availability are not fresh action-time evidence.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "5f425b5efc8375851da986a5b1299120abfaedd194d575734823277363f0ac4e"
+            }
+          ],
+          "patch_sha256": "a174b96703c64404760cdbb4dad2aad745dbfd021f150b60ff6171f9fab88c85",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_census.json",
+          "reason": "Original19 sequential source observations at2026-10-04 bind their own filesystem, Git, useful-work and recovery facts. Full records and limitations are retained; old identities and availability are not fresh action-time evidence.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,52128 @@",
+              "reason": "Original19 rows include5 conditional candidates/14HOLDs and the removed one-time Mu release output. Keep exact classifications and all independent holds as historical proposals; current unconditional Mu/default/explicit protection supersedes that exception without closing useful work.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "d15a811d2bc07e5c3184590685947cc90b85bdf47ed229678707695780da771a"
+            }
+          ],
+          "patch_sha256": "efa4364762ba12db85cd9d61cefd97a1108fef4ae4c3d1ea4fff41d769a9ed41",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_classification.json",
+          "reason": "Original19 rows include5 conditional candidates/14HOLDs and the removed one-time Mu release output. Keep exact classifications and all independent holds as historical proposals; current unconditional Mu/default/explicit protection supersedes that exception without closing useful work.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,1035 @@",
+              "reason": "Original PR1325 manifest is separate25-path40-hunk work, not this wave target:21 missing hunks across8paths retain landing owners. R8 retains the exact manifest and source refs and makes no PR1325 equivalence, closure or retirement claim.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "86d88f72cc843fafde249d2adbfb78d79235c3f335481b7792e0c7ab16391135"
+            }
+          ],
+          "patch_sha256": "1aa52869f3fe00c54e0c2d560e019ccbea2907d33a18e178773edff416916333",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_coverage.json",
+          "reason": "Original PR1325 manifest is separate25-path40-hunk work, not this wave target:21 missing hunks across8paths retain landing owners. R8 retains the exact manifest and source refs and makes no PR1325 equivalence, closure or retirement claim.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,2910 @@",
+              "reason": "Original R2 source-bound local attempts, reconstructed fixture provenance, final evidence corrections, nine recovery-owner observations and unresolved outputs remain historical. None is fresh R8 validation or broad ancestor implementation proof.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "c26c2c35eb30fa6bfa6a2599defb10b79f71732c48481f7ed1e9117d3e9a2397"
+            }
+          ],
+          "patch_sha256": "c8701bbd10ed59cd491731cd8314fb349083fd1fb67a30c02e8bb705b5e12d1d",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_implementation_evidence.json",
+          "reason": "Original R2 source-bound local attempts, reconstructed fixture provenance, final evidence corrections, nine recovery-owner observations and unresolved outputs remain historical. None is fresh R8 validation or broad ancestor implementation proof.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,717 @@",
+              "reason": "Original bindings say fleet_complete=false/useful_work_complete=false and pending committed foreground apply/verify. Retain five identity observations,14holds, consumed prior-operation summaries and source hashes; no live action or source retirement is authorized.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "8193bff08a2f3b0a00b3b01dd5c99a236382991d64bd72055c3bea8af848f70f"
+            }
+          ],
+          "patch_sha256": "7a247f7d81ff397b942dad325e9810643b61a48b85ab0f1fc38a6f53809e5923",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_retirement_evidence.json",
+          "reason": "Original bindings say fleet_complete=false/useful_work_complete=false and pending committed foreground apply/verify. Retain five identity observations,14holds, consumed prior-operation summaries and source hashes; no live action or source retirement is authorized.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,28693 @@",
+              "reason": "Original19-source inventory explicitly retains12 landing owners and unfinished local/index/commit work. Preserve every entry, source identity, exact scope, inherited owner and recovery pointer. This original file is an ownership ledger, not a runtime implementation; no unresolved owner is marked complete by the current code coverage.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "ddd4a25281eb55a21ffa424d4e811a8c5944d900782411d4f8ab13fc0dbfdefa"
+            }
+          ],
+          "patch_sha256": "ea11c2ec23c0652248fe73fcc912c602c4d6d54f3985569db1c6deeb62cbd240",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_useful_work.json",
+          "reason": "Original19-source inventory explicitly retains12 landing owners and unfinished local/index/commit work. Preserve every entry, source identity, exact scope, inherited owner and recovery pointer. This original file is an ownership ledger, not a runtime implementation; no unresolved owner is marked complete by the current code coverage.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,31045 @@",
+              "reason": "Original schema1 useful-work ledger contains19 source entries with retained journal and landing owners and mutation_authorized=false. R8 evidence preserves each entry digest and recorded owner fields. These useful-work obligations remain independently owned; this ledger grants no landing, closure or retirement authority.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "6c2ef6b466595fc93be46d96b076127fbf3d1999899ad16239f6ca37a08dda23"
+            }
+          ],
+          "patch_sha256": "4f0520b3ff3f50939d219190ffae9addc7478a1e4071eeebf4c36db9fa7e9a8f",
+          "path": "reports/control_plane/workingrcx-fleet-residual-pr-folders-r2-2026-10-04_useful_work_coverage.json",
+          "reason": "Original schema1 useful-work ledger contains19 source entries with retained journal and landing owners and mutation_authorized=false. R8 evidence preserves each entry digest and recorded owner fields. These useful-work obligations remain independently owned; this ledger grants no landing, closure or retirement authority.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "Original native indicator binds only R2 comparison35f7c225 and2026-10-04 measurements. Preserve its timestamp and values; native R8 collector owns fresh indicators and no fullL4 or parity completion is inferred.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "791b55fe667e5fc0bba2c2e75d88fd15951302ed90ef3254c1755c606886b447"
+            }
+          ],
+          "patch_sha256": "1e3b3873090cac610725916d6050e7d38a7c48185386ad374a4fd9557e5ce9da",
+          "path": "reports/l4_wave_indicators/workingrcx-fleet-residual-pr-folders-r2-2026-10-04.json",
+          "reason": "Original native indicator binds only R2 comparison35f7c225 and2026-10-04 measurements. Preserve its timestamp and values; native R8 collector owns fresh indicators and no fullL4 or parity completion is inferred.",
+          "references": [],
+          "resolution": "evidence_only"
+        }
+      ],
+      "evidence_refs": [
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-pr1341-coverage-r8-admission/original-pr1329-inventory.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-pr1341-coverage-r8-admission/provider/pr1329.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-pr1341-coverage-r8-admission/source-recovery-record.json",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r8-2026-10-20_implementation_evidence.json",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r8-2026-10-20_row40_advisories.md"
+      ],
+      "owner": {
+        "packet": "reports/control_plane/workingrcx-fleet-pr-coverage-r8-2026-10-20_2026-10-20.md",
+        "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+        "wave_id": "workingrcx-fleet-pr-coverage-r8-2026-10-20"
+      },
+      "preservation_ref": "refs/heads/jabramsja/workingrcx-fleet-residual-pr-folders-r2-2026-10-04",
+      "replacement": {
+        "head": "68c6558502addb867ba78b3544eac427730ccd96",
+        "id": "PR_kwDOQvy8bs8AAAABJhb7mw",
+        "merge": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+        "number": 1342
+      },
+      "source_base": "35f7c225a25025aec893230c072754cf7d7c76fc",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/workingrcx-fleet-residual-pr-folders-r2-2026-10-04",
+        "headRefOid": "537fb0461e7272e063c170e6d7d1cfa4de1b52a2",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABGh1NrA",
+        "mergedAt": null,
+        "number": 1329,
+        "state": "OPEN"
+      }
+    },
+    {
+      "coverage": [
+        {
+          "hunks": [
+            {
+              "header": "@@ -6,7 +6,36 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus",
+              "reason": "R7 recorded a candidate-only PR1329 review and the actual R6 landing/CLOSED_VERIFIED dispositions. Its then-unmerged wording is history. R8 records actual R4 PR1342 landing and both new targets separately; no R7 GO or physical cleanup authority is inherited.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "25ded4dc8084336d7272e040ca2c9af4c549b5038274026c0004db2ab0d51929"
+            }
+          ],
+          "patch_sha256": "145e4b6d80f7e2ab71519d34e01028e954e4e8864f8652f919c550c7b2223db9",
+          "path": "CHANGELOG.md",
+          "reason": "R7 recorded a candidate-only PR1329 review and the actual R6 landing/CLOSED_VERIFIED dispositions. Its then-unmerged wording is history. R8 records actual R4 PR1342 landing and both new targets separately; no R7 GO or physical cleanup authority is inherited.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -189,7 +189,22 @@ the retained historical failures are recorded in",
+              "reason": "Useful stage accounting distinguishes PR1340/Main/CLOSED_VERIFIED from candidate R7 and linked-dev HOLD. Reconciled independently in R8 STATUS and standing report using captured native/provider evidence; old Phase-B-unmerged observations are retained as history. R4 completion does not complete coverage R8. Hunk purpose: Explicit R7 stage and R6 historical boundary.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "ff38a8d344d920cdf69d5ba931cd2d703d291566c5682878eec046c8cff17024"
+            },
+            {
+              "header": "@@ -206,8 +221,8 @@ linked-checkout hold or consume the preserved transaction/stash.",
+              "reason": "Useful stage accounting distinguishes PR1340/Main/CLOSED_VERIFIED from candidate R7 and linked-dev HOLD. Reconciled independently in R8 STATUS and standing report using captured native/provider evidence; old Phase-B-unmerged observations are retained as history. R4 completion does not complete coverage R8. Hunk purpose: Last-updated/current-owner pointer at the then-current parent.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "0aa6ac0ad45625d61638181db3ed71ce2942405950a4a918d56a08fdcc318dde"
+            }
+          ],
+          "patch_sha256": "489db8c861a460bedd0f5c83e6272fc8ae93a48b1735c06323244a00a15d938f",
+          "path": "STATUS.md",
+          "reason": "Useful stage accounting distinguishes PR1340/Main/CLOSED_VERIFIED from candidate R7 and linked-dev HOLD. Reconciled independently in R8 STATUS and standing report using captured native/provider evidence; old Phase-B-unmerged observations are retained as history. R4 completion does not complete coverage R8. Hunk purpose: Explicit R7 stage and R6 historical boundary. Useful stage accounting distinguishes PR1340/Main/CLOSED_VERIFIED from candidate R7 and linked-dev HOLD. Reconciled independently in R8 STATUS and standing report using captured native/provider evidence; old Phase-B-unmerged observations are retained as history. R4 completion does not complete coverage R8. Hunk purpose: Last-updated/current-owner pointer at the then-current parent.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -11,9 +11,14 @@ Founder model selection (2026-09-11): every selected local model-bearing pipelin",
+              "reason": "R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: R6 landing/current coverage checkpoint and retained ownership.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "86f87a05f77440a7e082b57b00894d9ee59e91f842b33bf71868612999d2027e"
+            },
+            {
+              "header": "@@ -379,6 +384,15 @@ Historical PRIMARY latest observation checkpoint (2026-10-12 08:57 UTC; R7 Phase",
+              "reason": "R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: Working to-do source/owner detail including held linked-dev transaction.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "89e4bda46e8f3d2cc43fc9d4965aa814142bdd82a07c4e3cb9775bf00e42557f"
+            },
+            {
+              "header": "@@ -1409,7 +1423,10 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: Existing row38 single-target R7 authorization and historical R6 header.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "3f172e8ca6e8bbfa60f508c05a34802e9e3fd47149340df7574106d18da7fdac"
+            },
+            {
+              "header": "@@ -1751,6 +1768,8 @@ LANDED: existing P0T1 terminal identity and durable QUESTION journal through PR",
+              "reason": "R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: Existing row40 standing report pointer.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "56433f5f3c09ac33428a11c8ea254429e45c67c4499ed4ad8914036c947dd827"
+            },
+            {
+              "header": "@@ -3239,6 +3258,8 @@ Items here are implemented and verified under current invariants. Changes requir",
+              "reason": "R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: Native wave-bound R7 tracker note; preserve, never replay.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "4a7a4a5d306b03137bbfcd8aa90f1651249c2137951bf611072a478b9f45a768"
+            }
+          ],
+          "patch_sha256": "f4a27b7f6026f9ad701416ebdf30d4df7074ad3975f63a4217ffac5a3b9e6a7b",
+          "path": "TASKS.md",
+          "reason": "R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: R6 landing/current coverage checkpoint and retained ownership. R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: Working to-do source/owner detail including held linked-dev transaction. R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: Existing row38 single-target R7 authorization and historical R6 header. R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: Existing row40 standing report pointer. R7 preserved canonical IDs/owners, current R6 dispositions, useful-work ownership and a single-target coverage tracker. Captured PRIMARY reconciliation in R8 preserves that history outside exact native Ra anchors. Row38 now owns exactly1329/1341; old wave-bound tracker authority is never replayed. Hunk purpose: Native wave-bound R7 tracker note; preserve, never replay.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,155 @@",
+              "reason": "Original locked R7 packet and generated machine sections describe that failed wave only. Retain exact source at167dd035 and prior19f499d6; the R8 builder-owned packet is fresh immutable authority. Independent R8 evidence carries all useful obligations without copying old approval or intent.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "5ea9966bc283a0112cb89f8c03a71f0e3609202cb81ffc8a01cde67713ce1232"
+            }
+          ],
+          "patch_sha256": "dbc91956dbe59358ef53911ef4538bf4dccbb453191e8e1883eeace43fc7828a",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_2026-10-20.md",
+          "reason": "Original locked R7 packet and generated machine sections describe that failed wave only. Retain exact source at167dd035 and prior19f499d6; the R8 builder-owned packet is fresh immutable authority. Independent R8 evidence carries all useful obligations without copying old approval or intent.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,1817 @@",
+              "reason": "R7 single-target20/62 ledger contains useful explicit Mu-exception supersession, tmux P2 and contributing-lineage accounting. R8 independently reconstructs both native inventories and checks actual1331/1333/1334/1339/1340/1342 source bytes; this original ledger is historical input, not copied semantic approval. Its original19-source useful-work owners remain open.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "f8c3e36173abc43c271b018552e1faee706084d163174108c9d2cbb23cabac99"
+            }
+          ],
+          "patch_sha256": "918bc91cdef9643b03b662f96fab897288effc814e541dc23f3f9fc597fcdf8a",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_coverage.json",
+          "reason": "R7 single-target20/62 ledger contains useful explicit Mu-exception supersession, tmux P2 and contributing-lineage accounting. R8 independently reconstructs both native inventories and checks actual1331/1333/1334/1339/1340/1342 source bytes; this original ledger is historical input, not copied semantic approval. Its original19-source useful-work owners remain open.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,1936 @@",
+              "reason": "Preserve actual R7 command/source/index timestamps, early runs, bridge repair, and the separate167dd035 final inventory correction. Native generation invalidated the purported final19f499d6 packet/indicator inventory; the corrected inventory matches those delivered blobs but does not approve earlier receipts or failed CI. R8 uses immutable per-run receipts plus a separately timed artifact inventory.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "99c6ebeb8286d8b087708c71eda1ac45ae3ea7ecde329da0b320d959839fa562"
+            }
+          ],
+          "patch_sha256": "4e3109555156f2499d9f26bf5872a26e4f28e729a8495163f23d7a1cbc03bead",
+          "path": "reports/control_plane/workingrcx-fleet-pr-coverage-r7-2026-10-20_implementation_evidence.json",
+          "reason": "Preserve actual R7 command/source/index timestamps, early runs, bridge repair, and the separate167dd035 final inventory correction. Native generation invalidated the purported final19f499d6 packet/indicator inventory; the corrected inventory matches those delivered blobs but does not approve earlier receipts or failed CI. R8 uses immutable per-run receipts plus a separately timed artifact inventory.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,14 @@",
+              "reason": "Executor-owned optional report records the unresolved tmux prerequisite finding. Carry its actual concern in the required R8 row40 standing report, which survives empty findings cleanup. Do not import this old generated report as current native findings.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "bb1ecd53be2df4161655c582e68d04db572b09d1f349fcc61eb4774c546af605"
+            }
+          ],
+          "patch_sha256": "a8b0bbfc64b0f026c7686d2fd55c0224a8e2f187ea86a83ede781bf2a53e9df6",
+          "path": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_bridge_nonblockers.md",
+          "reason": "Executor-owned optional report records the unresolved tmux prerequisite finding. Carry its actual concern in the required R8 row40 standing report, which survives empty findings cleanup. Do not import this old generated report as current native findings.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,176 @@",
+              "reason": "Useful standing obligations are independently carried in required R8 row40 report: tmux prerequisite, removed Mu exception, missing original Mu/PR1325 work, runner/R19, retention, linked-dev ownership, monitor and no-change retry prevention. Historical process failures remain distinct. No whole-report approval transfers from R4; actual indexed delivery remains outer-owned.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "fd3cab0902b10fda74c06029f708da29fe6fb98a040e6bd4e7d34a92a6aa75a5"
+            }
+          ],
+          "patch_sha256": "8ced3689e0bba35a18d12eea3341c9c94895784315c425cd3a6b1afda86bb969",
+          "path": "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r7-2026-10-20_row40_advisories.md",
+          "reason": "Useful standing obligations are independently carried in required R8 row40 report: tmux prerequisite, removed Mu exception, missing original Mu/PR1325 work, runner/R19, retention, linked-dev ownership, monitor and no-change retry prevention. Historical process failures remain distinct. No whole-report approval transfers from R4; actual indexed delivery remains outer-owned.",
+          "references": [],
+          "resolution": "evidence_only"
+        },
+        {
+          "hunks": [
+            {
+              "header": "@@ -0,0 +1,25 @@",
+              "reason": "R7 measured L4 indicators bind its own comparison5921cf35 and timestamps. Historical evidence only; R8 indicators must be generated by the native outer from current canonical tracker authority. Neither metric generation nor a zero host delta is L4 completion.",
+              "references": [],
+              "resolution": "evidence_only",
+              "sha256": "d836a08d68b907c3489a05d12fa25775c32a5270cfee1eb43198a49e4204cebd"
+            }
+          ],
+          "patch_sha256": "983638b956fc003f3de899d465d9b6fb8024ae58f64d5740a0ca3f7766b97096",
+          "path": "reports/l4_wave_indicators/workingrcx-fleet-pr-coverage-r7-2026-10-20.json",
+          "reason": "R7 measured L4 indicators bind its own comparison5921cf35 and timestamps. Historical evidence only; R8 indicators must be generated by the native outer from current canonical tracker authority. Neither metric generation nor a zero host delta is L4 completion.",
+          "references": [],
+          "resolution": "evidence_only"
+        }
+      ],
+      "evidence_refs": [
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-pr1341-coverage-r8-admission/original-pr1341-inventory.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-pr1341-coverage-r8-admission/provider/pr1341.json",
+        "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/pr1329-pr1341-coverage-r8-admission/source-recovery-record.json",
+        "reports/control_plane/workingrcx-fleet-pr-coverage-r8-2026-10-20_implementation_evidence.json",
+        "reports/deferred/non_blocking/workingrcx-fleet-pr-coverage-r8-2026-10-20_row40_advisories.md"
+      ],
+      "owner": {
+        "packet": "reports/control_plane/workingrcx-fleet-pr-coverage-r8-2026-10-20_2026-10-20.md",
+        "task_id": "[FLEET-CLEANUP-APPLY-ACTION-RECONCILIATION]",
+        "wave_id": "workingrcx-fleet-pr-coverage-r8-2026-10-20"
+      },
+      "preservation_ref": "refs/heads/jabramsja/workingrcx-fleet-pr-coverage-r7-2026-10-20",
+      "replacement": {
+        "head": "68c6558502addb867ba78b3544eac427730ccd96",
+        "id": "PR_kwDOQvy8bs8AAAABJhb7mw",
+        "merge": "9e3323108d81561e31cb5b83e72cc21b13accca2",
+        "number": 1342
+      },
+      "source_base": "5921cf352db0f52aa469655371e8977c3f1a0848",
+      "target": {
+        "baseRefName": "dev",
+        "headRefName": "jabramsja/workingrcx-fleet-pr-coverage-r7-2026-10-20",
+        "headRefOid": "167dd035b0ff56fea92fd3b5f4794ddb69c6420a",
+        "headRepository": {
+          "id": "R_kgDOQvy8bg",
+          "owner": {
+            "id": "MDQ6VXNlcjI3MjU3NDg3",
+            "login": "jabramsja"
+          }
+        },
+        "id": "PR_kwDOQvy8bs8AAAABJerJ0A",
+        "mergedAt": null,
+        "number": 1341,
+        "state": "OPEN"
+      }
+    }
+  ],
+  "wave_id": "workingrcx-fleet-pr-coverage-r8-2026-10-20"
+}

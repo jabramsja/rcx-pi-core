@@ -6,7 +6,48 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-20
 
+### PR1329 / PR1341 coverage R8 (Phase B; independent review and landing pending)
+
+- Account independently for original PR1329's 20 paths/62 hunks and failed
+  R7 PR1341's 9 paths/14 hunks, retaining exact branches and source inventories.
+  Attribute watcher adoption/protection to PR1333, the separate default-bus pin
+  to PR1331, executor recovery to PR1334 and fixture changes to PR1339/PR1342.
+  The aggregate parent alone is not evidence that each ancestor implemented them.
+- Explicitly supersede the removed one-time Mu retirement exception with
+  current default protection and guard/policy evidence. Keep tmux provisioning
+  P2 OPEN under existing row40. R4 fixes stable birth identity, actual wait/reaping
+  and query-failure cleanup; it does not establish availability or the cause of
+  R7's initial release-positive child-presence failure.
+- Preserve useful R7 tracker, owner-ledger and evidence-accounting contributions.
+  Its corrected `167dd035` final inventory binds those artifact bytes only;
+  historical `19f499d6` receipts and failed attempts are not retroactively approved.
+  Reconcile captured PRIMARY regions while preserving 268 IDs, 44 ordered owners,
+  all history and the exact outer-owned Ra restoration boundary.
+- Record the complete eight-module gate and identical sweep with immutable
+  command/environment/source/index receipts in R8 implementation evidence.
+  Keep the required row40 report distinct from optional generated findings.
+  Native indexed delivery, independent review and all publication/lifecycle
+  stages remain pending. No production, workflow or fixture source is edited.
+
+### Private tmux/process fixture R4 landed as PR1342
+
+- PR1342 merged `68c6558502addb867ba78b3544eac427730ccd96` at
+  `9e3323108d81561e31cb5b83e72cc21b13accca2` on 2026-10-20T10:11:26Z.
+  Main synchronization, native COMPLETE and fresh attempt1 CI are separately
+  recorded in the captured R4 evidence. Retain snapshot
+  `3cc9fe25150bbd614ba87436828bab372c887ca7f2675390577e0c4d45625379`.
+- PR1340/R6 had already landed at `5921cf35`; original PR1330/PR1338 remain
+  CLOSED_VERIFIED. PR1329/PR1341 and independently owned PR1325/1335/1336/1337
+  remain OPEN. Runner, retention, Mu and linked-dev ownership holds remain.
+- Main startup's docs-inventory failure is distinct from the clean worktree's
+  passing admission baseline. Existing row40 owns the inventory-boundary and
+  stage-aware executor-envelope followups. Native 3600-to-5400 recovery was a
+  temporary execution-envelope adjustment, not a durable fix or a test change.
+
 ### Private tmux/process fixture R4 (Phase B implementation; unmerged)
+
+Historical implementation snapshot recorded before PR1342 landed. The following
+unmerged/pending wording is preserved as the stage observed at that time.
 
 - Compare a real waitable controller's PID, PPID and birth time while retaining
   startup/current command diagnostics and independent private-socket server
