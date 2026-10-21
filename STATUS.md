@@ -176,7 +176,47 @@ remain pending; R9 and R8/PR1325 stay preserved under the existing production ow
 
 ## Historical Archives
 
-**Current landed-closeout R4 implementation (2026-10-20; unmerged):**
+**Current recovery coverage R10 (2026-10-21; Phase B implementation):**
+Closeout repair PR1344 merged head `108e2cf3d6b85367a41f327d3bd6b76f4b0341be`
+at `cb6ab69c68b80464db386ac626bf739e42653805` on 2026-10-21T02:38:33Z.
+Captured PRIMARY independently records seven successful current-head CI checks
+on attempt1, Main synchronization, native successor COMPLETE and launcher exit0.
+Fresh public R8 recovery subsequently reached RECOVERED/MOVED, with verified
+source/index/history restoration in WD snapshot `6815ad24`. R8's old launcher
+exit1 and sealed ESCALATED completion remain historical. The landed R4 evidence
+snapshot `ac4c8214` and source lineage `4c05a144` remain retained.
+
+PR1341 is CLOSED_VERIFIED under consumed native operation
+`1a32f9f7f8b24c399e4f79a609cbd498`, with source head `167dd035` and its branch
+retained. PR1329 remains OPEN/HOLD: PR1344 changed the lifecycle production and
+test blobs cited by old R8 coverage. Existing row38 owns the fresh
+[R10 single-target manifest](reports/control_plane/workingrcx-fleet-pr-coverage-r10-2026-10-21_coverage.json)
+for original `537fb046` against actual merged `cb6ab69c`: all 20 paths/62 hunks,
+explicit supersession of the one-time Mu exception, and preserved default Mu
+protection. Independent native semantic review, indexed authority and delivery
+remain PLANNED; local source/command bindings and actual results belong in the
+[R10 implementation evidence](reports/control_plane/workingrcx-fleet-pr-coverage-r10-2026-10-21_implementation_evidence.json).
+Separate public PR1329 disposition follows verified landing and Main sync.
+
+R9 commit `da269cfd` remains STOPPED/PRESERVED: its local 239/239 pair, review
+and staged L4 preceded a 2400-second pre-push timeout, exhausted native recovery
+and launcher exit1. It has no PR, CI, merge or COMPLETE. Snapshots `2c714f5e`
+and `7a0895c2` preserve the committed source and later staged packet demotion.
+R10's immutable runtime context `9a4d39a1` admits only initial per-invocation
+pre-push 3600 seconds, baseline 2400 and unchanged commit outer 3600; physical
+config `7ce64811` stays unchanged. This temporary control establishes no cause
+for the slow hook and leaves the durable timeout repair with row40.
+
+Existing row40 and Mu owners retain runner PR1335/1336/1337, PR1325 useful work,
+deduplicated retention producer integration, docs-inventory boundaries, timeout
+and CI pending-state automation, permanent closeout retry regression, tmux
+provisioning and linked-dev/held-transaction obligations. The existing standing
+reports below preserve those obligations; their earlier stage observations are
+historical. Main's archived-Git/Claude-learning inventory HOLD is distinct from
+the captured clean R10 lane startup. Phase 8c and all debt/runtime counts remain
+unchanged; no global cleanup or full L4 completion is claimed.
+
+**Historical landed-closeout R4 implementation (2026-10-20; before PR1344 landed):**
 The exact base is PR1343 merge `609270f0b338a3121f37b1e58e9d1448356f4048`.
 Captured PRIMARY records that coverage lane's closeout HOLD; original PR1329
 and PR1341 disposition remains separate. Existing row40 owns ten admitted
@@ -261,5 +301,5 @@ linked-checkout hold or consume the preserved transaction/stash.
 
 **Historical 2026-07-01 operational snapshot:** See `TASKS.md` PROGRAM QUEUE for the active Codex autonomous queue. Current operational merge evidence includes PR #1194 (`4734ed2a`, committed and missing-config pager fallback routes to Codex), PR #1193 (`0eb8c34c`, commit-executor draft-PR-ready hardening), PR #1192 (`f98c445c`, route/xdist hardening), PR #1191 (`c8c65c4a`, PR #1166 Codex-default preservation), PR #1190 (`5303862f`, recovery/pre-push blocker hardening), PR #1189 (`ea782dc1`, PR #1173 never-behind preservation), PR #1188 (`675f6de8`, WIP/unmerged-PR preservation), and PRs #1181-#1187 (nightly NR structural-numeral repair and verification). Original stale PRs #1173 and #1166 are closed as superseded, and GitHub reported no open PRs against `dev` during this sync. Recurring local cron/autoping/tmux was intentionally stopped after #1194 to conserve model usage; do not assume those local observer surfaces are live until explicitly restarted.
 
-**Last updated:** 2026-10-20 (landed-closeout R4 Phase B at PR1343 merge `609270f0`; implementation unmerged, native review/delivery pending).
-**Active NEXT items:** See `TASKS.md` PROGRAM QUEUE. Existing row40 owns landed-closeout R4; row38 original-PR disposition, runner, retention, Mu and retained ownership holds remain separately owned.
+**Last updated:** 2026-10-21 (R10 Phase B coverage against landed PR1344 merge `cb6ab69c`; R10 native review/delivery and separate PR1329 disposition pending).
+**Active NEXT items:** See `TASKS.md` PROGRAM QUEUE. Existing row38 owns PR1329 coverage/disposition; row40 and Mu owners retain runner, retention, Mu, regression automation and ownership holds.
