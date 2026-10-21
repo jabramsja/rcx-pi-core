@@ -10400,6 +10400,9 @@ class TestCommitContinuationAndBotFreshness:
         merge_script.parent.mkdir(parents=True, exist_ok=True)
         merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         result = {
+            # The commit driver initializes success before entering this helper;
+            # continuation removal requires that status to survive closeout.
+            "status": "success",
             "steps_completed": [
                 "validate_inputs",
                 "ensure_feature_branch",
@@ -10522,6 +10525,7 @@ class TestCommitContinuationAndBotFreshness:
         assert len(ci_watch_calls) == 6
         assert merge_attempts["count"] == 2
         assert list(head_reads) == []
+        assert post_commit["status"] == "success", post_commit
         assert post_commit["commit_sha"] == resolved_head_sha
         assert post_commit["remote_pr_merged"] is True
         assert post_commit["merge_sha"] == merge_sha
@@ -10726,7 +10730,6 @@ class TestCommitContinuationAndBotFreshness:
         handoff = _make_new_handoff()
         continuation_path = repo / ".agent_bus" / "executors" / "commit_executor_test-wave-id.json"
         continuation_path.parent.mkdir(parents=True, exist_ok=True)
-        continuation_path.write_text('{"sentinel":"clear-after-merge"}\n', encoding="utf-8")
         merge_script = repo / "mu" / "tools" / "hooks" / "merge_pr.sh"
         merge_script.parent.mkdir(parents=True, exist_ok=True)
         merge_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
@@ -10735,6 +10738,7 @@ class TestCommitContinuationAndBotFreshness:
         original_package = b'{"sentinel":"preserve-on-exact-read-failure"}\n'
         package_path.write_bytes(original_package)
         result = {
+            "status": "success",
             "steps_completed": [
                 "validate_inputs",
                 "ensure_feature_branch",
@@ -10750,6 +10754,16 @@ class TestCommitContinuationAndBotFreshness:
             "receipt_decision": "COMMIT_GO",
             "pr_number": "674",
         }
+        commit_mod.write_continuation_record(
+            continuation_path,
+            handoff_sha=result["handoff_sha"],
+            target_branch="jabramsja/test-wave-id",
+            commit_sha=head_sha,
+            receipt_decision=result["receipt_decision"],
+            steps_completed=result["steps_completed"],
+            pr_number=result["pr_number"],
+        )
+        original_continuation = continuation_path.read_bytes()
         merge_cwds = []
         fetch_cwds = []
         origin_dev_rev_parse_calls = []
@@ -10880,13 +10894,16 @@ class TestCommitContinuationAndBotFreshness:
         assert post_commit["status"] == "error"
         assert post_commit["step"] == "refresh_post_merge_package"
         assert "forced exact-object read failure" in post_commit["errors"][0]
+        assert post_commit["remote_pr_merged"] is True
         assert post_commit["merge_sha"] == fetched_sha
         assert "ensure_review_clear_and_merge" in post_commit["steps_completed"]
         assert "post_merge_cleanup" in post_commit["steps_completed"]
         assert post_commit["post_merge_cleanup"]["branch_deleted"] is False
         assert post_commit["post_merge_cleanup"]["completion_state"] == "RETAINED_PRIMARY"
         assert "TASKS.md" in post_commit["post_merge_verify_warning"]
-        assert continuation_path.exists() is False
+        # A merged PR does not authorize clearing the checkpoint when exact
+        # successor publication fails; retain its original identity and progress.
+        assert continuation_path.read_bytes() == original_continuation
         assert package_path.read_bytes() == original_package
         assert merge_cwds == [repo.parent]
         assert fetch_cwds == [dev_worktree]

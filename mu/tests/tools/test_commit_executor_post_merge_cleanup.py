@@ -6375,7 +6375,7 @@ def merged_closeout_case(tmp_path, monkeypatch):
     from mu.tools.executors import workingrcx_fleet_apply as fleet
     lsof = _cleanup_lsof(tmp_path, monkeypatch)
 
-    def build(*, executor=commit_mod, reentry=False, fault=None):
+    def build(*, executor=commit_mod, reentry=False, fault=None, wrapper="failure", landed=True):
         upstream, primary, old, env = _init_origin_and_primary(tmp_path)
         _git(["checkout", "-b", "founder"], cwd=primary)
         local_dev = tmp_path / "local-dev"
@@ -6396,7 +6396,8 @@ def merged_closeout_case(tmp_path, monkeypatch):
         _git(["commit", "-m", "reviewed carrier"], cwd=carrier, env=env)
         head = _git(["rev-parse", "HEAD"], cwd=carrier).stdout.strip()
         _git(["fetch", str(primary), branch], cwd=upstream)
-        _git(["merge", "--no-ff", "FETCH_HEAD", "-m", "remote merge"], cwd=upstream, env=env)
+        if landed:
+            _git(["merge", "--no-ff", "FETCH_HEAD", "-m", "remote merge"], cwd=upstream, env=env)
         merge = _git(["rev-parse", "HEAD"], cwd=upstream).stdout.strip()
         before = {}
         for owner in (primary, local_dev):
@@ -6414,10 +6415,14 @@ def merged_closeout_case(tmp_path, monkeypatch):
         result = dict(status="success", pr_number="1322", commit_sha=head,
                       steps_completed=["run_pre_push_script", "git_push", "ensure_pr", "wait_ci"])
         original_run = executor._run  # ANTICHEAT_OK: leave all local Git and preservation authority real.
+        # The clone's origin is this disposable upstream, independent of the
+        # executor's parser used to verify the remote response.
+        owner, name = upstream.parent.name, upstream.name
 
         def payload():
-            merged = reentry or "merge_wrapper" in events
-            data = dict(state="MERGED" if merged else "OPEN", headRefOid=head,
+            merged = landed and (reentry or "merge_wrapper" in events)
+            data = dict(number=1322, url=f"https://github.com/{owner}/{name}/pull/1322",
+                        state="MERGED" if merged else "OPEN", headRefOid=head,
                         headRefName=branch, baseRefName="dev", isDraft=False,
                         mergeCommit={"oid": merge} if merged else None,
                         reviewDecision="APPROVED", comments={"nodes": []},
@@ -6436,6 +6441,9 @@ def merged_closeout_case(tmp_path, monkeypatch):
                     "merge_before_head": ("mergeCommit", {"oid": old}),
                 }[fault]
                 data[key] = value
+            if merged and fault in {"number", "repository"}:
+                data["number" if fault == "number" else "url"] = (
+                    1323 if fault == "number" else "https://github.com/foreign/repo/pull/1322")
             return data
 
         def command(args, **kwargs):
@@ -6451,6 +6459,9 @@ def merged_closeout_case(tmp_path, monkeypatch):
                 return subprocess.CompletedProcess(args, 0, json.dumps(body), "")
             if args == ["bash", str(script), "1322", "--sweep"]:
                 events.append("merge_wrapper")
+                if wrapper == "timeout":
+                    assert kwargs["timeout"] == 120
+                    raise subprocess.TimeoutExpired(args, timeout=120, output=b"merge requested")
                 raise subprocess.CalledProcessError(1, args, stderr=(
                     "jq: parse error: Invalid numeric literal at line 1, column 10"))
             if args and args[0] == "gh":
@@ -6599,13 +6610,14 @@ def test_remote_merged_closeout_keeps_exhausted_failure_and_attempts(merged_clos
     assert outcome["remote_pr_merged"] is True
     assert outcome["primary_worktree_sync"]["all_owners_current"] is True, outcome
     assert outcome["status"] == "error"
-    assert outcome["step"] == "post_merge_cleanup"
+    assert outcome["step"] == "durable_closeout"
     assert outcome["post_merge_cleanup"]["completion_state"] == "INCOMPLETE"
     assert "durable_closeout_path" not in outcome
     assert {p: p.read_bytes() for p in before} == before
     assert len(list(directory.glob("attempt-*"))) == 3
     assert not (directory / "merged-successor.json").exists()
     assert case.carrier.exists()
+    assert case.continuation.exists()
 
 
 def test_remote_merged_closeout_publication_failure_is_not_success(merged_closeout_case):
@@ -6627,3 +6639,72 @@ def test_remote_merged_closeout_publication_failure_is_not_success(merged_closeo
     assert closeout.read_bytes() == original
     assert "durable_closeout_path" not in outcome
     assert case.carrier.exists()
+    assert case.continuation.exists()
+
+
+def test_wrapper_timeout_after_real_merge_publishes_before_continuation_removal(
+    merged_closeout_case, monkeypatch,
+):
+    from mu.tools.executors import commit_executor as native_commit, worktree_lifecycle as lifecycle
+
+    case = merged_closeout_case(executor=native_commit, wrapper="timeout")
+    original = lifecycle.publish_closeout
+    observations = []
+
+    def published(directory, **kwargs):
+        assert case.continuation.exists()
+        assert not list(directory.glob("attempt-*"))
+        path = original(directory, **kwargs)
+        observations.append(path)
+        return path
+
+    monkeypatch.setattr(lifecycle, "publish_closeout", published)
+    result = case.run()
+    assert result["status"] == "success", result
+    assert result["merge_sha"] == case.merge and result["remote_pr_merged"]
+    assert case.events.count("merge_wrapper") == 1
+    assert len(observations) == 1
+    assert result["post_merge_cleanup"]["completion_state"] == "PENDING"
+    saved = json.loads(observations[0].read_bytes())
+    assert saved["result"]["primary_worktree_sync"]["all_owners_current"]
+    assert "timed out after 120 seconds" in saved["result"]["post_merge_followup"]["merge_wrapper_error"]
+    assert not case.continuation.exists()
+    assert case.carrier.exists() and not result["post_merge_cleanup"]["worktree_removed"]
+
+
+@pytest.mark.parametrize("fault", [
+    "head", "branch", "base", "missing_merge", "merge_not_on_base", "merge_before_head",
+    "query_failed", "malformed", "graphql_errors", "number", "repository",
+])
+def test_wrapper_timeout_unknown_or_foreign_proof_never_replays(merged_closeout_case, fault):
+    case = merged_closeout_case(wrapper="timeout", fault=fault)
+    before = case.continuation.read_bytes()
+    first = case.run()
+    assert first["status"] in {"held", "error"}, first
+    assert case.continuation.exists()
+    saved = case.continuation.read_bytes()
+    assert saved != before
+    assert "merge_wrapper_timeout" in json.loads(saved)
+    assert case.carrier.exists()
+    assert case.events.count("merge_wrapper") == 1
+    second = case.run()
+    assert second["status"] in {"held", "error"}, second
+    assert case.continuation.read_bytes() == saved
+    assert case.events.count("merge_wrapper") == 1
+    assert "conflict_remediation" not in case.events and "code_remediation" not in case.events
+    assert _git(["rev-parse", "HEAD"], cwd=case.primary).stdout.strip() == case.old
+    assert "durable_closeout_path" not in first and "durable_closeout_path" not in second
+
+
+def test_wrapper_timeout_before_merge_stays_observation_only(merged_closeout_case):
+    case = merged_closeout_case(wrapper="timeout", landed=False)
+    first = case.run()
+    saved = case.continuation.read_bytes()
+    second = case.run()
+    assert first["status"] == second["status"] == "held"
+    assert case.continuation.read_bytes() == saved
+    assert case.events.count("merge_wrapper") == 1
+    assert case.events.count("pre_merge_ci") == 1
+    assert "conflict_remediation" not in case.events and "code_remediation" not in case.events
+    assert case.carrier.exists()
+    assert _git(["rev-parse", "HEAD"], cwd=case.primary).stdout.strip() == case.old

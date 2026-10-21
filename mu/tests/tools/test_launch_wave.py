@@ -42,6 +42,8 @@ import commit_executor as ce  # noqa: E402  (authoritative continuation producer
 import phase_a_executor as pa  # noqa: E402
 from tests.tools.test_phase_b_executor import (  # noqa: E402,F401
     commit_ready_resume_lane, real_pre_review_package, isolate_phase_b_pager_transport,
+    isolate_phase_b_review_material_clock,
+    pb_mod as _commit_ready_phase_b,
 )
 from meta_bridge_supervisor import check_tasks_authorization, compute_repo_state  # noqa: E402
 
@@ -52,6 +54,17 @@ import enforce_l4_execution_contract as l4_contract  # noqa: E402
 # --------------------------------------------------------------------------- #
 # Fixtures / helpers                                                           #
 # --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(autouse=True)
+def bind_commit_ready_resume_executor(request, monkeypatch):
+    """Keep the continuation consumer on the fixture's actual executor module."""
+    if "commit_ready_resume_lane" in request.fixturenames:
+        # Later test collection can reload phase_b_executor through the path
+        # loader. The imported fixture still owns the earlier module and its
+        # source-HEAD/pager patches. Bind before fixture setup and restore the
+        # prior registration at teardown; all authority checks remain real.
+        monkeypatch.setitem(sys.modules, "phase_b_executor", _commit_ready_phase_b)
 
 
 @pytest.mark.parametrize("bus_dir", [None, ".agent_bus-continuation"])
@@ -74,9 +87,16 @@ def test_phase_b_continuation_requests_json_through_dispatcher(tmp_path, bus_dir
     assert "--json" in ed.build_surface_command(args, routing_record=route, script_repo_root=tmp_path)
 
 
-@pytest.mark.parametrize("commit_ready_resume_lane", ["legacy", "future"], indirect=True)
-def test_commit_ready_resume_native_public_continuation(commit_ready_resume_lane, monkeypatch, capsys):
+@pytest.mark.parametrize("commit_ready_resume_lane", ["legacy", "future", "restored-interrupted"], indirect=True)
+def test_commit_ready_resume_native_public_continuation(
+    commit_ready_resume_lane, monkeypatch, capsys, isolate_phase_b_review_material_clock,
+):
     import phase_b_executor as phase_b
+    assert phase_b is _commit_ready_phase_b
+    # The imported producer publishes no raw bridge transcript. Its real reader
+    # must exhaust the settle deadline on virtual time during fixture setup.
+    assert isolate_phase_b_review_material_clock.now >= 2.0
+    assert phase_b.time is sys.modules["time"]
     lane = commit_ready_resume_lane
     _forbid_phase_b_resume_producers(monkeypatch)
     before = lane.state_path.read_bytes()
@@ -261,6 +281,58 @@ def test_commit_ready_resume_requires_fresh_unchanged_approval(commit_ready_resu
         lw.run_wave_setup(lane.repo, lane.config, launch=True, runner=dispatch, bus_dir=lane.bus)
     assert calls == [outcome]
     assert (meta / "phase_b_commit_ready_adoption.json").read_bytes() == adoption
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["restored-checkpoint"], indirect=True)
+def test_launch_refuses_ordinary_checkpoint_without_interrupted_review(commit_ready_resume_lane):
+    lane = commit_ready_resume_lane
+    paths = [lane.state_path, *lane.receipts, lane.repo / ".git/index",
+             lane.repo / lane.bus / "meta/phase_b_commit_ready_checkpoint.json"]
+    before = {p: p.read_bytes() for p in paths}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Ordinary producer progress is not interrupted-review authority")
+
+    with pytest.raises(lw.LaunchWaveError):
+        lw.run_wave_setup(lane.repo, lane.config, launch=True, runner=forbidden, bus_dir=lane.bus)
+    assert {p: p.read_bytes() for p in paths} == before
+    assert not (lane.repo / lane.bus / "meta/phase_b_commit_ready_adoption.json").exists()
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["restored-interrupted"], indirect=True)
+def test_restored_native_continuation_requires_exact_launch_config(commit_ready_resume_lane, monkeypatch):
+    lane = commit_ready_resume_lane
+    values = {
+        "title": "Foreign title", "task_id": "[FOREIGN]", "wave_id": "foreign-wave",
+        "wave_class": "MAINTENANCE", "date": "2026-10-04", "comparison_commit": "0" * 40,
+        "implementer_agent": "claude", "reviewer_agent": "claude", "evidence_command": "true",
+        "evidence_delta": "Unproved evidence", "progress_proof_before": "Foreign before",
+        "progress_proof_after": "Foreign after", "scope_items": ["foreign.py"],
+        "candidate_allowlist": [*lane.config.candidate_allowlist, "foreign.py"],
+        "indicator_artifact_ref": "reports/l4_wave_indicators/foreign.json",
+        "target_gate_id": "G7", "founder_override": "foreign-wave",
+    }
+    paths = [lane.state_path, *lane.receipts, lane.repo / ".git/index",
+             lane.repo / lane.bus / "meta/phase_b_commit_ready_checkpoint.json",
+             lane.repo / lane.bus / "meta/launch_wave_dispatch_terminal.json"]
+    paths += [lane.repo / p for p in lane.config.candidate_allowlist if (lane.repo / p).is_file()]
+    before = {p: p.read_bytes() for p in paths}
+    _forbid_phase_b_resume_producers(monkeypatch)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Different config cannot consume native continuation")
+
+    # These refusals must be read-only. Reuse the real producer's sealed lane
+    # instead of rebuilding its full Phase B pipeline for every config field;
+    # compare against the original bytes after EACH refusal so a mutation cannot
+    # become the baseline for the next case.
+    for field, value in values.items():
+        config = dataclasses.replace(lane.config, **{field: value})
+        with pytest.raises(lw.LaunchWaveError):
+            lw.run_wave_setup(lane.repo, config, launch=True, runner=forbidden, bus_dir=lane.bus)
+        assert {p: p.read_bytes() for p in paths} == before, field
+        assert not (lane.repo / lane.bus / "meta/phase_b_commit_ready_adoption.json").exists(), field
+
 
 _NOTE_HEADER_RE = re.compile(r"^- Tracker sync note \([^,]+,\s*([^)]+)\):", re.MULTILINE)
 _DISPATCHER_OVERRIDE_ENV_KEYS_FOR_TEST = (

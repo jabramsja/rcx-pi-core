@@ -675,7 +675,7 @@ def test_unacknowledged_owned_reader_consumes_no_claim_and_cannot_replay(native_
     program = (
         "import fcntl,sys; from pathlib import Path; "
         "from mu.tools.executors import worktree_lifecycle as w; "
-        "f=w._log_reader_lock(w.lane_identity(Path(sys.argv[1])),'.agent_bus'); "
+        "f=w.log_reader_lock(w.lane_identity(Path(sys.argv[1])),'.agent_bus'); "
         "fcntl.flock(f,fcntl.LOCK_SH); print('held',flush=True); sys.stdin.readline()")
     reader = subprocess.Popen([sys.executable, "-c", program, str(lane)], cwd=primary,
         env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
@@ -1897,6 +1897,253 @@ def test_failed_closeout_successor_rechecks_preserved_closeout_bytes(native_lane
     assert not list(successor.glob("attempt-*")) and lane.is_dir()
     with pytest.raises(fleet.Hold, match="predecessor evidence changed"):
         lifecycle.request_completion(stopped, status="success", result=dict(merge_sha=head))
+
+
+def test_atomic_commit_publication_fences_successor_claims(native_lane, monkeypatch):
+    primary, lane, git, env = native_lane
+    head = git(primary, "rev-parse", "HEAD")
+    stopped = register_from_exited_owner(lane, env, role="commit", closeout=True,
+        status="error", result=dict(status="error"))
+    assert lifecycle.complete_pending(stopped, delay=0)["state"] == "ESCALATED"
+    before = {p: p.read_bytes() for p in stopped.rglob("*") if p.is_file()}
+    original = lifecycle.publish_closeout
+    observed = []
+
+    def publish(record, **kwargs):
+        assert record != stopped
+        contender = subprocess.run([sys.executable, str(Path(lifecycle.__file__)),
+            "--record", str(record), "--complete"], cwd=primary, env=env,
+            capture_output=True, text=True, timeout=20)
+        assert contender.returncode != 0
+        assert "BlockingIOError" in contender.stderr
+        assert not list(record.glob("attempt-*"))
+        assert not (stopped / "merged-successor.json").exists()
+        observed.append(record)
+        return original(record, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "publish_closeout", publish)
+    result = dict(status="success", merge_sha=head)
+    terminal = lifecycle.request_completion(stopped, status="success", result=result,
+        closeout=dict(repo=lane, handoff={"pre_commit_receipt_path": ".agent_bus/receipt.json"}))
+    successor = Path(terminal["record"])
+    assert observed == [successor]
+    assert json.loads((successor / "closeout.json").read_bytes())["result"] == result
+    assert {p: p.read_bytes() for p in before} == before
+    completed = lifecycle.complete_pending(successor, delay=0)
+    assert completed["state"] == "COMPLETE", completed
+    assert not lane.exists()
+    assert {p: p.read_bytes() for p in before} == before
+
+
+@pytest.fixture
+def sealed_recovery_case(native_lane, tmp_path):
+    """Run the public command from independently committed disposable PRIMARY."""
+    from types import SimpleNamespace
+    primary, lane, git, env = native_lane
+    (lane / "tracked").write_text("landed implementation\n")
+    git(lane, "add", "tracked")
+    git(lane, "commit", "-m", "target implementation")
+    head = git(lane, "rev-parse", "HEAD")
+    git(primary, "merge", "--no-ff", fixture_identity(lane, "branch"), "-m", "target merge")
+    merge = git(primary, "rev-parse", "HEAD")
+    for rel in (*fleet.SYNC_RECOVERY_DEPENDENCIES, Path("mu/tools/executors/executor_config.json")):
+        path = primary / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((REPO_ROOT / rel).read_bytes())
+    git(primary, "add", ".")
+    git(primary, "commit", "-m", "landed closeout recovery authority")
+    git(primary, "push", "origin", "dev")
+    authority = git(primary, "rev-parse", "HEAD")
+    response = tmp_path / "remote.json"
+    repo_owner, repo_name = tmp_path.name, "origin"
+    response.write_text(json.dumps({"data": {"repository": {"pullRequest": dict(
+        number=1322, url=f"https://github.com/{repo_owner}/{repo_name}/pull/1322",
+        state="MERGED", headRefOid=head, headRefName=fixture_identity(lane, "branch"),
+        baseRefName="dev", mergeCommit={"oid": merge})}}}))
+    gh = tmp_path / "git-bin/gh"
+    gh.write_text("#!/bin/sh\ncat " + shlex.quote(str(response)) + "\n")
+    gh.chmod(0o700)
+    (lane / ".agent_bus/private.bin").write_bytes(b"\x00original retained config and receipt\xff")
+    original_result = dict(status="error", merge_sha=merge, pr_number="1322", step="post_merge_cleanup")
+    directory = register_from_exited_owner(lane, env, role="commit", closeout=True,
+                                           status="error", result=original_result)
+    first = lifecycle.complete_pending(directory, delay=0)
+    assert first["state"] == "ESCALATED" and first["reason"] == lifecycle.FAILED_CLOSEOUT_REASON
+
+    def command(record, *args):
+        # -I excludes runner imports; only the committed PRIMARY module path
+        # is supplied. No production authority/dependency check is mocked.
+        program = ("import sys;sys.path.insert(0,sys.argv[1]);"
+                   "import worktree_lifecycle as w;raise SystemExit(w.main(sys.argv[2:]))")
+        run = subprocess.run([sys.executable, "-I", "-B", "-c", program,
+            str(primary / "mu/tools/executors"), "--record", str(record),
+            "--authority-commit", authority, *args], cwd=primary, env=env,
+            capture_output=True, text=True, timeout=60)
+        assert run.stdout.strip(), run.stderr
+        return run, json.loads(run.stdout)
+
+    def plan(record=directory, request_id="a" * 32):
+        run, value = command(record, "--plan-closeout-recovery", "--merge-sha", merge,
+                             "--request-id", request_id)
+        if run.returncode:
+            return run, value, None
+        request = tmp_path / ("request-" + request_id + ".json")
+        request.write_text(run.stdout)
+        return run, value, request
+
+    def apply(request, record=directory):
+        return command(record, "--recover-closeout", "--request", str(request),
+                       "--request-sha256", fleet.file_hash(request))
+
+    return SimpleNamespace(primary=primary, lane=lane, git=git, env=env, head=head,
+        merge=merge, authority=authority, directory=directory, response=response,
+        command=command, plan=plan, apply=apply, original_result=original_result)
+
+
+@pytest.mark.parametrize("missing_successor", [False, True])
+def test_public_sealed_recovery_preserves_failed_records_and_consumed_budget(sealed_recovery_case, missing_successor):
+    f = sealed_recovery_case
+    record = f.directory
+    if missing_successor:
+        record = register_from_exited_owner(f.lane, f.env, role="commit", status="merged",
+            result=dict(status="error", merge_sha=f.merge, pr_number="1322"))
+        exhausted = lifecycle.complete_pending(record, delay=0)
+        assert exhausted["state"] == "ESCALATED" and exhausted["attempts_exhausted"] == 3
+        assert "not durably published" in exhausted["reason"]
+        assert sorted(p.name for p in record.glob("attempt-*")) == ["attempt-2", "attempt-3"]
+    old = {p: p.read_bytes() for root in (f.directory, record) for p in root.rglob("*") if p.is_file()}
+    source = fleet.transaction_state(f.lane)
+    run, request, path = f.plan(record)
+    assert run.returncode == 0, request
+    assert request["max_attempts"] == 1
+    assert request["observed"]["source_state"] == source
+    result, value = f.apply(path, record)
+    assert result.returncode == 0, value
+    assert value["state"] == "RECOVERED"
+    assert value["outcome"]["status"] == "MOVED"
+    assert not f.lane.exists()
+    destination = Path(value["outcome"]["destination"])
+    assert (destination / "tracked").read_text() == "landed implementation\n"
+    assert (destination / ".agent_bus/private.bin").read_bytes() == b"\x00original retained config and receipt\xff"
+    assert f.git(f.primary, "rev-parse", fixture_identity(f.lane, "branch")) == f.authority
+    assert f.git(destination, "merge-base", "--is-ancestor", f.head, "HEAD") == ""
+    assert {p: p.read_bytes() for p in old} == old
+    recovery = record / "landed-recovery"
+    preserved = value["outcome"]["preservation_sha256"]
+    assert {"history.bundle", "before.tar", "gitdir-before.tar", "index-blobs.tar"} <= set(preserved)
+    assert all(fleet.file_hash(recovery / "attempt-1" / name) == digest for name, digest in preserved.items())
+    saved = {p: p.read_bytes() for p in recovery.rglob("*.json")}
+    repeated, held = f.apply(path, record)
+    assert repeated.returncode == 3 and held["state"] == "HOLD"
+    assert "consumed" in held["reason"]
+    assert {p: p.read_bytes() for p in saved} == saved
+    assert not (recovery / "attempt-2").exists()
+
+
+@pytest.mark.parametrize("fault", [
+    "source", "index", "config", "receipt", "head", "foreign_remote", "open_remote",
+    "unfinished", "interrupted", "consumed", "live_owner", "reader", "concurrent", "unknown_process",
+    "pending_sync", "git_config",
+])
+def test_public_closeout_recovery_holds_drift_and_unowned_claims(sealed_recovery_case, fault):
+    f = sealed_recovery_case
+    run, request, path = f.plan()
+    assert run.returncode == 0, request
+    record = f.directory
+    original_claim = (record / "attempt-1/claim.json").read_bytes()
+    release = None
+    if fault == "source":
+        (f.lane / ".agent_bus/receipt.json").write_bytes(b"changed source\n")
+    elif fault == "index":
+        f.git(f.lane, "update-index", "--chmod=+x", "tracked")
+    elif fault == "config":
+        (f.primary / "mu/tools/executors/executor_config.json").write_text("{}\n")
+    elif fault == "receipt":
+        p = record / "closeout.json"
+        p.write_bytes(p.read_bytes() + b"\n")
+    elif fault == "head":
+        (f.lane / "new").write_text("unlanded")
+        f.git(f.lane, "add", "new")
+        f.git(f.lane, "commit", "-m", "unlanded drift")
+    elif fault in {"foreign_remote", "open_remote"}:
+        data = json.loads(f.response.read_bytes())
+        remote = data["data"]["repository"]["pullRequest"]
+        remote["url" if fault == "foreign_remote" else "state"] = (
+            "https://github.com/foreign/repo/pull/1322" if fault == "foreign_remote" else "OPEN")
+        f.response.write_text(json.dumps(data))
+    elif fault == "unfinished":
+        (record / "completion.json").unlink()
+    elif fault == "interrupted":
+        (record / "attempt-1/preparation.json").write_text('{"state":"OUTCOME_UNKNOWN"}')
+    elif fault == "consumed":
+        (record / "landed-recovery").mkdir()
+    elif fault == "pending_sync":
+        journal = f.primary / ".git/rcx_primary_worktree_sync_transactions" / ("d" * 32)
+        journal.mkdir(parents=True)
+        (journal / "manifest.json").write_text(json.dumps(dict(
+            state="PREPARED", worktree_identity={"path": str(f.lane)})))
+    elif fault == "git_config":
+        f.git(f.primary, "config", "rcx.testDrift", "changed")
+    elif fault == "live_owner":
+        lifecycle.register_lane(f.lane, fixture_identity(f.lane, "wave"), role="commit")
+    elif fault == "reader":
+        release = lifecycle.log_reader_lock(lifecycle.lane_identity(f.lane), ".agent_bus")
+        import fcntl
+        fcntl.flock(release, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    elif fault == "concurrent":
+        release = lifecycle.completion_lock(record)
+        release.__enter__()
+    elif fault == "unknown_process":
+        Path(f.env["RCX_TEST_LSOF_RESPONSE"]).write_text(json.dumps(dict(
+            returncode=1, stdout="", stderr="lsof: incomplete filesystem observation\n")))
+    before = fleet.transaction_state(f.lane)
+    receipts = {p: p.read_bytes() for p in record.rglob("*.json")}
+    journals = {p: p.read_bytes() for p in (f.primary / ".git/rcx_primary_worktree_sync_transactions").rglob("*")
+                if p.is_file()}
+    try:
+        run, value = f.apply(path)
+    finally:
+        if fault == "reader":
+            release.close()
+        elif fault == "concurrent":
+            release.__exit__(None, None, None)
+    assert run.returncode == 3 and value["state"] == "HOLD", value
+    assert f.lane.exists() and fleet.transaction_state(f.lane) == before
+    assert (record / "attempt-1/claim.json").read_bytes() == original_claim
+    assert {p: p.read_bytes() for p in receipts} == receipts
+    assert {p: p.read_bytes() for p in journals} == journals
+    assert not (record / "landed-recovery/claim.json").exists()
+    assert not (record / "attempt-2").exists()
+
+
+def test_public_recovery_interrupted_fresh_intent_rejects_a_new_request_id(sealed_recovery_case):
+    f = sealed_recovery_case
+    run, value, path = f.plan()
+    assert run.returncode == 0, value
+    recovery = f.directory / "landed-recovery"
+    recovery.mkdir()  # Crash at the exclusive mkdir boundary, before claim.
+    before = {p: p.read_bytes() for p in f.directory.rglob("*.json")}
+    first, first_value = f.apply(path)
+    second, second_value, new_request = f.plan(request_id="b" * 32)
+    assert first.returncode == second.returncode == 3
+    assert "consumed or interrupted" in first_value["reason"]
+    assert "consumed or interrupted" in second_value["reason"]
+    assert new_request is None and list(recovery.iterdir()) == []
+    assert {p: p.read_bytes() for p in before} == before
+    assert f.lane.exists()
+
+
+def test_public_recovery_rejects_uncovered_staged_and_unstaged_wip(sealed_recovery_case):
+    f = sealed_recovery_case
+    (f.lane / "tracked").write_text("unlanded staged implementation\n")
+    f.git(f.lane, "add", "tracked")
+    (f.lane / "tracked").write_text("private unstaged implementation\n")
+    before = fleet.transaction_state(f.lane)
+    run, value, request = f.plan()
+    assert run.returncode == 3 and value["state"] == "HOLD"
+    assert "coverage" in value["reason"]
+    assert request is None and fleet.transaction_state(f.lane) == before
+    assert not (f.directory / "landed-recovery").exists()
 
 
 def test_native_worker_is_bounded_and_keeps_output_in_surviving_root(native_lane):

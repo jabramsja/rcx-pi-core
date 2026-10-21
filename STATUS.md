@@ -176,7 +176,22 @@ remain pending; R9 and R8/PR1325 stay preserved under the existing production ow
 
 ## Historical Archives
 
-**Current recovery coverage R8 (2026-10-20):** PR1340 actually merged at
+**Current landed-closeout R4 implementation (2026-10-20; unmerged):**
+The exact base is PR1343 merge `609270f0b338a3121f37b1e58e9d1448356f4048`.
+Captured PRIMARY records that coverage lane's closeout HOLD; original PR1329
+and PR1341 disposition remains separate. Existing row40 owns ten admitted
+source files for timeout observation, completion-locked publication, fresh sealed
+closeout recovery, canonical tracker-note authority, and dispatcher continuation
+fixtures. Local results and exact source/index/config bindings belong in the
+[R4 implementation evidence](reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_implementation_evidence.json).
+R3 source preservation and old approvals are not R4 landing proof. Native
+generated authority, independent review, final gates and delivery remain pending.
+The [required standing obligations](reports/deferred/non_blocking/workingrcx-landed-closeout-r4-2026-10-20_remaining_obligations.md)
+retain original PR, runner, retention, Mu, docs namespace, execution-envelope and
+operator reconciliation work. Phase 8c, all debt counts, runtime and substrates
+are unchanged.
+
+**Historical recovery coverage R8 (2026-10-20; observed before PR1343 landed):** PR1340 actually merged at
 `5921cf352db0f52aa469655371e8977c3f1a0848`; original PR1330/PR1338 are
 CLOSED_VERIFIED with their branches retained. Fixture PR1342 actually merged
 at `9e3323108d81561e31cb5b83e72cc21b13accca2`, Main synchronized and its native
@@ -239,9 +254,12 @@ linked-checkout hold or consume the preserved transaction/stash.
 - L3/L4 architecture details: [`mu/docs/core/L3SubstrateArchitecture.v0.md`](mu/docs/core/L3SubstrateArchitecture.v0.md)
 
 **Historical update wording, before PR1340 landed:** 2026-10-20 (R6 Phase B governance; admitted HEAD and `origin/dev` equal actual PR1339 merge `ca6c3a93c176fc1da6b6bb6f0169edebf8c1a654`. Main synchronized; this coverage candidate remains unmerged. Phase 8c/L4 bounded-reduction posture and debt counts unchanged.)
-**Last updated:** 2026-10-20 (R8 Phase B governance at actual PR1342 merge `9e3323108d81561e31cb5b83e72cc21b13accca2`; R4 landed and complete, R6 originals CLOSED_VERIFIED, R8 unmerged. Phase 8c/L4 posture and debt counts unchanged.)
+**Historical last-updated wording:** 2026-10-20 (R8 Phase B governance at actual PR1342 merge `9e3323108d81561e31cb5b83e72cc21b13accca2`; R4 landed and complete, R6 originals CLOSED_VERIFIED, R8 unmerged. Phase 8c/L4 posture and debt counts unchanged.)
 **Next milestone:** First clear the ordered control-plane root-fix queue in TASKS.md if it blocks autonomous execution, then continue with **Coinduction** as the next program-structural wave. Recursive ordinals landed in PR #1160 (`b538b8d9`), W-types / inductive types landed in PR #1161 (`6a6b4217`), the nightly StructuralNumbers regression repair landed across PRs #1181-#1187, and Codex/default pager routing landed in PR #1194 (`4734ed2a`). Fixpoint follows Coinduction; Optimization remains LAST. Hemisphere Metabolization Contract remains the closed milestone baseline (E1-E5 all MET). Canonical authorization remains TASKS.md.
 **Historical active-item wording, at R6 admission:** Existing row38 owns PR1330/PR1338 R6 coverage; both originals and other independently owned PR obligations remain OPEN at admission. R19/retention/Mu/monitor work and linked dev ownership sync HOLD remain separately owned.
-**Active NEXT items:** See `TASKS.md` PROGRAM QUEUE. Existing row38 owns fresh PR1329/PR1341 R8 coverage; independent review and native landing/disposition remain pending. Existing row40 and Mu owners retain runner, retention, monitor, prerequisite-policy, docs-inventory and linked-dev ownership holds without a new all-unfinished-work prerequisite barrier.
+**Historical active-item wording at R8 admission:** See `TASKS.md` PROGRAM QUEUE. Existing row38 owns fresh PR1329/PR1341 R8 coverage; independent review and native landing/disposition remain pending. Existing row40 and Mu owners retain runner, retention, monitor, prerequisite-policy, docs-inventory and linked-dev ownership holds without a new all-unfinished-work prerequisite barrier.
 
 **Historical 2026-07-01 operational snapshot:** See `TASKS.md` PROGRAM QUEUE for the active Codex autonomous queue. Current operational merge evidence includes PR #1194 (`4734ed2a`, committed and missing-config pager fallback routes to Codex), PR #1193 (`0eb8c34c`, commit-executor draft-PR-ready hardening), PR #1192 (`f98c445c`, route/xdist hardening), PR #1191 (`c8c65c4a`, PR #1166 Codex-default preservation), PR #1190 (`5303862f`, recovery/pre-push blocker hardening), PR #1189 (`ea782dc1`, PR #1173 never-behind preservation), PR #1188 (`675f6de8`, WIP/unmerged-PR preservation), and PRs #1181-#1187 (nightly NR structural-numeral repair and verification). Original stale PRs #1173 and #1166 are closed as superseded, and GitHub reported no open PRs against `dev` during this sync. Recurring local cron/autoping/tmux was intentionally stopped after #1194 to conserve model usage; do not assume those local observer surfaces are live until explicitly restarted.
+
+**Last updated:** 2026-10-20 (landed-closeout R4 Phase B at PR1343 merge `609270f0`; implementation unmerged, native review/delivery pending).
+**Active NEXT items:** See `TASKS.md` PROGRAM QUEUE. Existing row40 owns landed-closeout R4; row38 original-PR disposition, runner, retention, Mu and retained ownership holds remain separately owned.

@@ -9266,7 +9266,7 @@ def _write_continuation_record(
     )
     if isinstance(candidate_sha, str) and re.fullmatch(r"[0-9a-f]{64}", candidate_sha):
         payload["staged_candidate_sha256"] = candidate_sha
-    if "protected_merge_intent" in existing_payload:
+    if any(key in existing_payload for key in ("protected_merge_intent", "merge_wrapper_timeout")):
         # A checkpoint cannot erase or rebind an already-spent merge request.
         for key in ("handoff_sha", "target_branch", "commit_sha", "receipt_decision", "pr_number"):
             if payload.get(key) != existing_payload.get(key):
@@ -9342,7 +9342,7 @@ def _load_post_commit_continuation(
     if payload.get("status") != CONTINUATION_ACTIVE_STATUS:
         return None
     if payload.get("handoff_sha") != handoff_sha:
-        if "protected_merge_intent" in payload:
+        if any(key in payload for key in ("protected_merge_intent", "merge_wrapper_timeout")):
             return None
         expected_wave_id = str(wave_id or "").strip()
         if not expected_wave_id or not _can_rekey_post_commit_continuation_to_handoff(
@@ -9378,7 +9378,7 @@ def _load_post_commit_continuation(
     if branch_name != target_branch:
         return None
     if head_sha != commit_sha:
-        if "protected_merge_intent" in payload:
+        if any(key in payload for key in ("protected_merge_intent", "merge_wrapper_timeout")):
             return None
         # HEAD may have moved forward from remediation commits.
         # Accept if commit_sha is an ancestor of current HEAD.
@@ -16422,6 +16422,7 @@ def _post_merge_cleanup(
     wave_id: str,
     log: Any,
     terminal_result: dict[str, Any] | None = None,
+    defer_completion: bool = False,
 ) -> dict[str, Any]:
     """Transfer cleanup to a durable, preservation-safe native owner.
 
@@ -16441,8 +16442,9 @@ def _post_merge_cleanup(
         if directory is None:
             outcome.update(completion_state="RETAINED_PRIMARY")
             return outcome
-        terminal = lifecycle.request_completion(directory, status="merged", result=terminal_result)
-        directory = Path(terminal["record"])
+        if not defer_completion:
+            terminal = lifecycle.request_completion(directory, status="merged", result=terminal_result)
+            directory = Path(terminal["record"])
         outcome["lifecycle_record"] = str(directory)
         log(f"Step 16: durable native completion pending at {directory}")
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
@@ -18148,6 +18150,37 @@ def _run_post_commit_pipeline(
                 log(f"PR lifecycle observation HOLD: {exc}")
 
 
+def _observe_timed_out_merge(
+    *, handoff: dict[str, Any], repo_root: Path, result: dict[str, Any],
+    target_branch: str, base_branch: str, continuation_path: Path, log: Any,
+) -> dict[str, Any]:
+    """A timed-out wrapper authorizes observation only, never another merge."""
+    try:
+        saved = _read_continuation_record(continuation_path) or {}
+        intent = saved.get("merge_wrapper_timeout")
+        owner, name = _parse_origin_owner_repo(repo_root)
+        head = _run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
+        expected = dict(repo_owner=owner, repo_name=name, pr_number=str(result["pr_number"]),
+                        head_sha=head, target_branch=target_branch, base_branch=base_branch)
+        if not isinstance(intent, dict) or intent.get("identity") != expected or result["commit_sha"] != head:
+            raise ValueError("Timed-out merge identity changed")
+        data = _query_pr_review_state(repo_root, repo_owner=owner, repo_name=name,
+                                      pr_number=expected["pr_number"])
+        if (type(data.get("number")) is not int or str(data["number"]) != expected["pr_number"]
+                or data.get("url") != f"https://github.com/{owner}/{name}/pull/{expected['pr_number']}"):
+            raise ValueError("Timed-out merge PR/repository identity differs")
+        merge = _verified_remote_merge_sha(data, head_sha=head, target_branch=target_branch,
+                                           base_branch=base_branch)
+        if not merge:
+            raise ValueError("Timed-out merge has no exact landed outcome")
+        return _complete_post_merge_pipeline(
+            handoff=handoff, repo_root=repo_root, result=result, target_branch=target_branch,
+            base_branch=base_branch, continuation_path=continuation_path, log=log,
+            verified_merge_sha=merge, review_state=data, merge_wrapper_error=intent["error"])
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
+        return _protected_merge_hold(result, f"Timed-out wrapper observation: {exc}")
+
+
 def _run_post_commit_pipeline_impl(
     *,
     handoff: dict[str, Any],
@@ -18164,6 +18197,10 @@ def _run_post_commit_pipeline_impl(
     saved = _read_continuation_record(continuation_path)
     if continuation_path.exists() and saved is None:
         return _protected_merge_hold(result, "Unreadable native continuation; request outcome is unknown")
+    if saved is not None and "merge_wrapper_timeout" in saved:
+        return _observe_timed_out_merge(
+            handoff=handoff, repo_root=repo_root, result=result, target_branch=target_branch,
+            base_branch=base_branch, continuation_path=continuation_path, log=log)
     local_stop = _prior_local_review_stop(
         repo_root, result, target_branch=target_branch, base_branch=base_branch,
     )
@@ -18877,6 +18914,20 @@ def _run_post_commit_pipeline_impl(
             ["bash", str(merge_script), pr_number, "--sweep"],
             cwd=repo_root.parent, timeout=120,
         )
+    except subprocess.TimeoutExpired as exc:
+        # The wrapper may have merged before its later sweep timed out. Keep
+        # the original continuation and pin this request to observation only.
+        saved = _read_continuation_record(continuation_path)
+        if saved is None:
+            return _protected_merge_hold(result, "Timeout without readable continuation; outcome unknown")
+        saved["merge_wrapper_timeout"] = dict(
+            identity=dict(repo_owner=repo_owner, repo_name=repo_name, pr_number=pr_number,
+                          head_sha=head_sha_before_merge, target_branch=target_branch,
+                          base_branch=base_branch), error=str(exc))
+        _atomic_write_fsynced_json(continuation_path, saved)
+        return _observe_timed_out_merge(
+            handoff=handoff, repo_root=repo_root, result=result, target_branch=target_branch,
+            base_branch=base_branch, continuation_path=continuation_path, log=log)
     except subprocess.CalledProcessError as exc:
         # merge_pr.sh includes post-merge thread/sweep work. Its exit status
         # alone cannot distinguish a rejected merge from a failed later sweep.
@@ -19015,7 +19066,6 @@ def _complete_post_merge_pipeline(
             queue_commit_sha = fetched_head_sha
             if "ensure_review_clear_and_merge" not in result["steps_completed"]:
                 result["steps_completed"].append("ensure_review_clear_and_merge")
-            _clear_continuation_record(continuation_path)
             if pre_verify_dirty:
                 result["post_merge_verify_warning"] = status_output
             log(f"Step 15: merge={head_sha[:8]}, fetched origin/{base_branch}={fetched_head_sha[:8]}; "
@@ -19028,7 +19078,6 @@ def _complete_post_merge_pipeline(
             queue_commit_sha = head_sha
             if "ensure_review_clear_and_merge" not in result["steps_completed"]:
                 result["steps_completed"].append("ensure_review_clear_and_merge")
-            _clear_continuation_record(continuation_path)
             if status_output:
                 # Soft-warn on dirty verify instead of fail-closing the pipeline.
                 # Step 16 cleanup is wave-scoped (worktree + branch + wave-named
@@ -19128,10 +19177,8 @@ def _complete_post_merge_pipeline(
             )
 
     # ── Step 16: post_merge_cleanup ────────────────────────────────────
-    # Best-effort cleanup of wave-local state that would otherwise
-    # accumulate: local branch ref, linked worktree, wave-scoped stashes.
-    # Failures are logged and swallowed — the merge already succeeded and
-    # this step MUST NOT regress the pipeline.
+    # Register ownership now; publish the final result under its completion
+    # lock after queue/sweep work. Until then the continuation remains durable.
     cleanup_outcome = _post_merge_cleanup(
         cleanup_root=verify_root,
         repo_root=repo_root,
@@ -19140,10 +19187,11 @@ def _complete_post_merge_pipeline(
         wave_id=str(handoff.get("wave_id") or ""),
         log=log,
         terminal_result=result,
+        defer_completion=True,
     )
     result["post_merge_cleanup"] = cleanup_outcome
     result["steps_completed"].append("post_merge_cleanup")
-    if verified_merge_sha and cleanup_outcome.get("completion_state") == "INCOMPLETE":
+    if cleanup_outcome.get("completion_state") == "INCOMPLETE":
         result.update(status="error", step="post_merge_cleanup",
                       errors=list(cleanup_outcome.get("warnings") or ["Native closeout ownership incomplete"]))
 
@@ -19217,11 +19265,17 @@ def _complete_post_merge_pipeline(
                 from . import worktree_lifecycle as lifecycle
             except ImportError:
                 import worktree_lifecycle as lifecycle
-            result["durable_closeout_path"] = str(lifecycle.publish_closeout(
-                Path(cleanup_outcome["lifecycle_record"]), repo=repo_root, handoff=handoff, result=result))
-        except (OSError, ValueError, RuntimeError) as exc:
+            terminal = lifecycle.request_completion(
+                Path(cleanup_outcome["lifecycle_record"]), status=str(result.get("status") or "error"),
+                result=result, closeout=dict(repo=repo_root, handoff=handoff))
+            cleanup_outcome["lifecycle_record"] = terminal["record"]
+            result["durable_closeout_path"] = str(Path(terminal["record"]) / "closeout.json")
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            cleanup_outcome.update(completion_state="INCOMPLETE", warnings=[str(exc)])
             result.update(status="error", step="durable_closeout", errors=[str(exc)])
 
+    if result.get("status") == "success":
+        _clear_continuation_record(continuation_path)
     return result
 
 
@@ -21350,7 +21404,7 @@ def _run_commit_pipeline_impl(
     )
     saved = _read_continuation_record(continuation_path)
     if continuation_path.exists() and continuation is None and (
-            saved is None or "protected_merge_intent" in saved):
+            saved is None or any(key in saved for key in ("protected_merge_intent", "merge_wrapper_timeout"))):
         return _protected_merge_hold(result, "Invalid protected native continuation; no inherited authority")
     if continuation:
         result["steps_completed"] = list(continuation.get("steps_completed", []))
@@ -21370,7 +21424,8 @@ def _run_commit_pipeline_impl(
         )
         # If resuming after COMMIT_GO_HOLD_PUSH, skip directly to
         # post-commit pipeline (steps 11-15).  Steps 1-10 already ran.
-        if "protected_merge_intent" in continuation or "hold_check" in result["steps_completed"]:
+        if (any(key in continuation for key in ("protected_merge_intent", "merge_wrapper_timeout"))
+                or "hold_check" in result["steps_completed"]):
             result["receipt_decision"] = continuation.get("receipt_decision", "COMMIT_GO")
             log("Resuming native post-commit continuation")
             return _run_post_commit_pipeline(
@@ -23217,10 +23272,13 @@ def run_commit_pipeline(
                 }
     if lifecycle_owner is not None:
         try:
-            terminal = lifecycle.request_completion(lifecycle_owner, status=status, result=result)
+            # A post-merge body already published its exact result atomically.
+            # Preserve those bytes; otherwise publish at this final boundary.
+            published = result.get("durable_closeout_path")
+            terminal = lifecycle.request_completion(
+                lifecycle_owner, status=status, result=result,
+                closeout=None if published else dict(repo=repo_root, handoff=handoff))
             record = Path(terminal["record"])
-            if not (record / "closeout.json").exists():
-                lifecycle.publish_closeout(record, repo=repo_root, handoff=handoff, result=result)
             result["worktree_completion"] = lifecycle.start_completion(Path(terminal["record"]))
         except (OSError, ValueError, RuntimeError) as exc:
             result["worktree_completion"] = dict(state="INCOMPLETE", reason=str(exc),
@@ -23435,7 +23493,8 @@ def main() -> int:
             path = agent_bus_path(repo_root, args.bus_dir, "executors",
                                   f"commit_executor_{handoff.get('wave_id')}.json")
             saved = _read_continuation_record(path)
-            if path.exists() and (saved is None or "protected_merge_intent" in saved):
+            if path.exists() and (saved is None or any(
+                    key in saved for key in ("protected_merge_intent", "merge_wrapper_timeout"))):
                 held_resume = _protected_merge_hold(
                     {"steps_completed": []}, "Invalid protected native continuation; no inherited authority")
             else:

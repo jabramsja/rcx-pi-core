@@ -1,0 +1,723 @@
+{
+  "branch": "jabramsja/workingrcx-landed-closeout-r4-2026-10-20",
+  "comparison_commit": "609270f0b338a3121f37b1e58e9d1448356f4048",
+  "completed_local_validation_utc": "2026-10-20T21:33:08.566846+00:00",
+  "created_utc": "2026-10-20T21:14:07.405078+00:00",
+  "donor_manifest": {
+    "path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r4-admission/donor-inputs.json",
+    "sha256": "663a293dac0ecb89ecf7e0228e87e59360ecdcef9c06a3e4c2a53228b26d2766"
+  },
+  "early_case_accounting": {
+    "config_refusal_case_count_note": "17 exact byte-retention refusal iterations inside one test; no case omitted.",
+    "config_refusals": 17,
+    "continuation_variants": 3,
+    "dispatcher_exact_refresh_failure_retention": "PASS",
+    "dispatcher_success_deletion": "PASS",
+    "pytest_cases": 6
+  },
+  "early_reproduction": {
+    "after": "02-early-six-module-after.snapshot.json",
+    "before": "02-early-six-module-before.snapshot.json",
+    "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -x --tb=short mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_worktree_lifecycle.py -k 'test_commit_ready_resume_native_public_continuation or test_restored_native_continuation_requires_exact_launch_config or test_post_commit_late_auto_resolve_retries_ci_and_merge or test_post_commit_warns_when_linked_base_worktree_is_already_dirty'",
+    "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r4-20261020",
+    "elapsed_seconds": 56.25589541695081,
+    "end_utc": "2026-10-20T21:09:14.099916+00:00",
+    "environment_pins": {
+      "HYPOTHESIS_PROFILE": "ci_fast",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "RCX_CI": "1"
+    },
+    "log": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r4-validation/02-early-six-module.log",
+    "log_sha256": "86c01e1766e7a206cbf394ff2bb02c2199b96ca543ceea2f8f6485fdd652a097",
+    "returncode": 0,
+    "stability": {
+      "changed_components": [],
+      "identical": true
+    },
+    "start_utc": "2026-10-20T21:08:17.843744+00:00"
+  },
+  "files_authored_or_changed": [
+    "CHANGELOG.md",
+    "STATUS.md",
+    "TASKS.md",
+    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+    "mu/tests/tools/test_commit_executor_receipt.py",
+    "mu/tests/tools/test_executor_dispatch.py",
+    "mu/tests/tools/test_launch_wave.py",
+    "mu/tests/tools/test_phase_b_executor.py",
+    "mu/tests/tools/test_worktree_lifecycle.py",
+    "mu/tools/executors/commit_executor.py",
+    "mu/tools/executors/launch_wave.py",
+    "mu/tools/executors/phase_b_executor.py",
+    "mu/tools/executors/worktree_lifecycle.py",
+    "reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_closeout_contract.json",
+    "reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_implementation_evidence.json",
+    "reports/deferred/non_blocking/workingrcx-landed-closeout-r4-2026-10-20_remaining_obligations.md"
+  ],
+  "handoff_artifact_inventory": {
+    "actual_index_snapshot": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r4-validation/08-before-final-evidence.snapshot.json",
+    "files": {
+      "CHANGELOG.md": {
+        "mode": 420,
+        "sha256": "95c2f563d03ae75b5523c898d6b8d1ff1d51a5da830f17bde375132818efa8bf",
+        "size": 267421,
+        "type": 32768
+      },
+      "STATUS.md": {
+        "mode": 420,
+        "sha256": "c306716b11a65c9da269161bfbfe706585408b8484d0aef105192588e9bc74c1",
+        "size": 19250,
+        "type": 32768
+      },
+      "TASKS.md": {
+        "mode": 420,
+        "sha256": "c60af981c6ada97fd684fc728a2068f21f236be8a4dc72c5fa9107543d9572aa",
+        "size": 3389026,
+        "type": 32768
+      },
+      "mu/tests/docs/test_growth_caps.py": {
+        "mode": 420,
+        "sha256": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "size": 20021,
+        "type": 32768
+      },
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": {
+        "mode": 420,
+        "sha256": "3904b6b507f7a66fd556fc2a92e75516429059596c48342a765c87f51bc881d6",
+        "size": 317927,
+        "type": 32768
+      },
+      "mu/tests/tools/test_commit_executor_receipt.py": {
+        "mode": 420,
+        "sha256": "0e6695543ca1cb40c86f0a6826c6467178e1ec2d2772570f3f76c5800418bbb6",
+        "size": 488822,
+        "type": 32768
+      },
+      "mu/tests/tools/test_executor_dispatch.py": {
+        "mode": 420,
+        "sha256": "f7120366078fe27cdfcdffe9d008e33307d6151aed1928f40a612273277567ec",
+        "size": 897566,
+        "type": 32768
+      },
+      "mu/tests/tools/test_launch_wave.py": {
+        "mode": 420,
+        "sha256": "7e563f47f910cf0fa7bee9d8a920bbf942e0a76433d7b164760693a3e4e49780",
+        "size": 260929,
+        "type": 32768
+      },
+      "mu/tests/tools/test_phase_b_executor.py": {
+        "mode": 420,
+        "sha256": "7ef8c832ca3d2c6a87336e959439782578938ab853baf449d5068ed6361b306a",
+        "size": 1103615,
+        "type": 32768
+      },
+      "mu/tests/tools/test_worktree_lifecycle.py": {
+        "mode": 420,
+        "sha256": "67c50896c522a3c6b88ce96260d6ca56c7d9e3a680add1405dd080042a0e16d8",
+        "size": 120373,
+        "type": 32768
+      },
+      "mu/tools/executors/commit_executor.py": {
+        "mode": 420,
+        "sha256": "77450bcbc994b961667b2a01054028a371cdb1d00a15aa056300e0a30bea2c09",
+        "size": 1012946,
+        "type": 32768
+      },
+      "mu/tools/executors/launch_wave.py": {
+        "mode": 420,
+        "sha256": "8a98ec41c1f6790ac76f675658fd43994cd05787e25e16cc3fc2838ead25dcc8",
+        "size": 186403,
+        "type": 32768
+      },
+      "mu/tools/executors/phase_b_executor.py": {
+        "mode": 420,
+        "sha256": "c30b9e64d53b6b69d508bb30cfc2ddeaba40b44dc255f869bda49e4a45dd7f88",
+        "size": 682029,
+        "type": 32768
+      },
+      "mu/tools/executors/worktree_lifecycle.py": {
+        "mode": 420,
+        "sha256": "5a85a45bd1086b6070d60d0d20c7020237d623f33fafd4a420cfd27fe451cfa9",
+        "size": 85366,
+        "type": 32768
+      },
+      "reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_2026-10-20.md": {
+        "mode": 420,
+        "sha256": "d604bbb3e6dcb642b46f360d4ce632520d5b1af1ba6737b6c0d544da0e71d8df",
+        "size": 14137,
+        "type": 32768
+      },
+      "reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_closeout_contract.json": {
+        "mode": 420,
+        "sha256": "640d77eeaf290266390238347ed8da4e7b51fb1d9af080291fde60b5fc603fc6",
+        "size": 15477,
+        "type": 32768
+      },
+      "reports/deferred/non_blocking/workingrcx-landed-closeout-r4-2026-10-20_bridge_nonblockers.md": {
+        "exists": false
+      },
+      "reports/deferred/non_blocking/workingrcx-landed-closeout-r4-2026-10-20_remaining_obligations.md": {
+        "mode": 420,
+        "sha256": "b0cb33ea0f060030ffe82bf4efad6e9ee5a03e7cfe21dcbae9f25babf9144519",
+        "size": 6221,
+        "type": 32768
+      },
+      "reports/l4_wave_indicators/workingrcx-landed-closeout-r4-2026-10-20.json": {
+        "exists": false
+      }
+    },
+    "index_state": "All indexed blobs, modes and flags re-read; raw index unchanged from admission, candidate edits not staged.",
+    "observed_utc": "2026-10-20T21:33:26.058507+00:00",
+    "scope": "Phase B-local pre-generation worktree bytes; not final native delivery. Evidence self-hash excluded and recorded externally after write."
+  },
+  "handoff_boundary": "Only Phase B implementation and listed local validations. No live pipeline launch, commit/push/PR/merge/closeout command invoked; disposable test subprocesses are test-owned.",
+  "historical_evidence": {
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-candidate-allowlist-hold-observation.json": {
+      "authority": "historical only; no approval transfer",
+      "sha256": "6dd9e7f7672e123c8c6300ed4396f2af3e90bb9c97925e584243f2cf817a0a1b"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-mechanical-validation-pass-observation.json": {
+      "authority": "historical only; no approval transfer",
+      "sha256": "1fe185ea9365af2a3db96dceaffada63f2b7c91e6e5143fb25f0aea42006cf1e"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-native-recovery-test-correction.diff": {
+      "authority": "historical only; no approval transfer",
+      "sha256": "c2b9be8f0578902f172693a95c15066d2bb7ee059acfaa7041fd0a69b329265a"
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/preservation.json": {
+      "authority": "historical only; no approval transfer",
+      "sha256": "a50f2b562b1c8641ea3a040752554ebb21d5c6bbaf57dbc84ddf0eb4028d58f1"
+    }
+  },
+  "immutable_incoming_packet": {
+    "authored_by_this_implementer": false,
+    "path": "reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_2026-10-20.md",
+    "sha256": "d604bbb3e6dcb642b46f360d4ce632520d5b1af1ba6737b6c0d544da0e71d8df",
+    "unchanged_since_entry": true
+  },
+  "independent_sweep_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py --tb=short",
+  "invariants": {
+    "host_authority_sites": 217,
+    "new_anticHeat_exemptions": 0,
+    "new_skips_xfails": 0,
+    "provider_runner_deadline_policy_delta": 0,
+    "runtime_substrate_delta": 0,
+    "total_inventory_sites": 312,
+    "tracked_host_debt": 5
+  },
+  "issues_encountered": [
+    "R3 omitted adjacent dispatcher caller/fixture tests from its expensive gate; scope corrected under fresh R4 authority.",
+    "Historical R3 prepush traceback/count evidence is limited; no raw count or cause beyond retained source/caller evidence is invented.",
+    "Prior publication, seals and approvals remain historical; source preservation is not merging."
+  ],
+  "native_authority_configuration": {
+    "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r4-20261020/.agent_bus-landed-closeout-r4-20261020/bridge_config.json": {
+      "mode": 420,
+      "sha256": "5cd50db421c3c92bab8d3325bc2f83152611cfd51043e20d9c14708ff02ba955",
+      "size": 1321,
+      "type": 32768
+    },
+    "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r4-20261020/.agent_bus-landed-closeout-r4-20261020/executors/phase_b_launch_tracker_restore_v1.json": {
+      "mode": 420,
+      "sha256": "9f322c810269992b3c367b6ccf814061179681fd44058751f7fcfe3135f1f679",
+      "size": 7767,
+      "type": 32768
+    },
+    "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r4-20261020/.agent_bus-landed-closeout-r4-20261020/meta/candidate_authority/workingrcx-landed-closeout-r4-2026-10-20.spec.json": {
+      "mode": 384,
+      "sha256": "cd53beb5ea9d2657a70ddefc8c0d58e58a16b52649cd7ac04b1a773a89b12105",
+      "size": 1885,
+      "type": 32768
+    },
+    "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r4-20261020/.agent_bus-landed-closeout-r4-20261020/meta/post_merge_routing.json": {
+      "mode": 420,
+      "sha256": "09951fa60727b5a99c175cd9992c19fe36b6101e402307e58a9d2e1c2dd26487",
+      "size": 19030,
+      "type": 32768
+    },
+    "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r4-20261020/.git": {
+      "mode": 420,
+      "sha256": "21d15bd095a53c58b0e4cd4d0029a734fac6a58789d065309a98f027e29bc10b",
+      "size": 119,
+      "type": 32768
+    },
+    "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r4-20261020/mu/tools/executors/executor_config.json": {
+      "mode": 420,
+      "sha256": "7ce648118c7423f9c0136eaaa4cebdd0c5e6352c9843bc13e2f146474aacd9bd",
+      "size": 2724,
+      "type": 32768
+    },
+    "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_wave_config.json": {
+      "mode": 420,
+      "sha256": "d3ffafc77b5022e4f104f7c256abefebf2ccc231604736c3c07dcd587d19f369",
+      "size": 18391,
+      "type": 32768
+    },
+    "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r4-admission/frozen-wave-config.json": {
+      "mode": 420,
+      "sha256": "d3ffafc77b5022e4f104f7c256abefebf2ccc231604736c3c07dcd587d19f369",
+      "size": 18391,
+      "type": 32768
+    }
+  },
+  "native_outputs_pending": [
+    "native tracker restoration",
+    "generated indicator",
+    "growth-cap applicability",
+    "independent review",
+    "final native integrity gate",
+    "indexed L4/Step5f/precommit_inventory",
+    "commit",
+    "prepush",
+    "current-head CI",
+    "merge",
+    "MainSync",
+    "completion/recovery snapshots"
+  ],
+  "native_packet": {
+    "checker_sha256": "8a98ec41c1f6790ac76f675658fd43994cd05787e25e16cc3fc2838ead25dcc8",
+    "config_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_wave_config.json",
+    "config_sha256": "d3ffafc77b5022e4f104f7c256abefebf2ccc231604736c3c07dcd587d19f369",
+    "matches": true,
+    "observed_utc": "2026-10-20T21:07:59.423744+00:00",
+    "packet": "reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_2026-10-20.md",
+    "packet_sha256": "d604bbb3e6dcb642b46f360d4ce632520d5b1af1ba6737b6c0d544da0e71d8df"
+  },
+  "native_packet_handoff_check": {
+    "checker_sha256": "8a98ec41c1f6790ac76f675658fd43994cd05787e25e16cc3fc2838ead25dcc8",
+    "config_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_wave_config.json",
+    "config_sha256": "d3ffafc77b5022e4f104f7c256abefebf2ccc231604736c3c07dcd587d19f369",
+    "matches": true,
+    "observed_utc": "2026-10-20T21:33:26.034502+00:00",
+    "packet": "reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_2026-10-20.md",
+    "packet_sha256": "d604bbb3e6dcb642b46f360d4ce632520d5b1af1ba6737b6c0d544da0e71d8df"
+  },
+  "post_native_final_artifact_inventory": {
+    "required_after": [
+      "native canonical tracker restoration",
+      "all packet machine/status generation",
+      "indicator collection",
+      "native growth-cap transition or exact no-op",
+      "empty-findings cleanup"
+    ],
+    "requirement": "Native Step5f alone finalizes/verifies actual indexed all-entry candidate; this implementation does not claim that result.",
+    "status": "PENDING_NATIVE_STEP5F"
+  },
+  "pre_native_artifact_inventory": {
+    "actual_index_snapshot": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r4-validation/05-before-evidence.snapshot.json",
+    "files": {
+      "CHANGELOG.md": {
+        "mode": 420,
+        "sha256": "95c2f563d03ae75b5523c898d6b8d1ff1d51a5da830f17bde375132818efa8bf",
+        "size": 267421,
+        "type": 32768
+      },
+      "STATUS.md": {
+        "mode": 420,
+        "sha256": "c306716b11a65c9da269161bfbfe706585408b8484d0aef105192588e9bc74c1",
+        "size": 19250,
+        "type": 32768
+      },
+      "TASKS.md": {
+        "mode": 420,
+        "sha256": "c60af981c6ada97fd684fc728a2068f21f236be8a4dc72c5fa9107543d9572aa",
+        "size": 3389026,
+        "type": 32768
+      },
+      "mu/tests/docs/test_growth_caps.py": {
+        "mode": 420,
+        "sha256": "6500f107ed89fc8b7cbfedffba0908faa3a42c687ad2ae0242de2cd184935e8c",
+        "size": 20021,
+        "type": 32768
+      },
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": {
+        "mode": 420,
+        "sha256": "3904b6b507f7a66fd556fc2a92e75516429059596c48342a765c87f51bc881d6",
+        "size": 317927,
+        "type": 32768
+      },
+      "mu/tests/tools/test_commit_executor_receipt.py": {
+        "mode": 420,
+        "sha256": "0e6695543ca1cb40c86f0a6826c6467178e1ec2d2772570f3f76c5800418bbb6",
+        "size": 488822,
+        "type": 32768
+      },
+      "mu/tests/tools/test_executor_dispatch.py": {
+        "mode": 420,
+        "sha256": "f7120366078fe27cdfcdffe9d008e33307d6151aed1928f40a612273277567ec",
+        "size": 897566,
+        "type": 32768
+      },
+      "mu/tests/tools/test_launch_wave.py": {
+        "mode": 420,
+        "sha256": "7e563f47f910cf0fa7bee9d8a920bbf942e0a76433d7b164760693a3e4e49780",
+        "size": 260929,
+        "type": 32768
+      },
+      "mu/tests/tools/test_phase_b_executor.py": {
+        "mode": 420,
+        "sha256": "7ef8c832ca3d2c6a87336e959439782578938ab853baf449d5068ed6361b306a",
+        "size": 1103615,
+        "type": 32768
+      },
+      "mu/tests/tools/test_worktree_lifecycle.py": {
+        "mode": 420,
+        "sha256": "67c50896c522a3c6b88ce96260d6ca56c7d9e3a680add1405dd080042a0e16d8",
+        "size": 120373,
+        "type": 32768
+      },
+      "mu/tools/executors/commit_executor.py": {
+        "mode": 420,
+        "sha256": "77450bcbc994b961667b2a01054028a371cdb1d00a15aa056300e0a30bea2c09",
+        "size": 1012946,
+        "type": 32768
+      },
+      "mu/tools/executors/launch_wave.py": {
+        "mode": 420,
+        "sha256": "8a98ec41c1f6790ac76f675658fd43994cd05787e25e16cc3fc2838ead25dcc8",
+        "size": 186403,
+        "type": 32768
+      },
+      "mu/tools/executors/phase_b_executor.py": {
+        "mode": 420,
+        "sha256": "c30b9e64d53b6b69d508bb30cfc2ddeaba40b44dc255f869bda49e4a45dd7f88",
+        "size": 682029,
+        "type": 32768
+      },
+      "mu/tools/executors/worktree_lifecycle.py": {
+        "mode": 420,
+        "sha256": "5a85a45bd1086b6070d60d0d20c7020237d623f33fafd4a420cfd27fe451cfa9",
+        "size": 85366,
+        "type": 32768
+      },
+      "reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_2026-10-20.md": {
+        "mode": 420,
+        "sha256": "d604bbb3e6dcb642b46f360d4ce632520d5b1af1ba6737b6c0d544da0e71d8df",
+        "size": 14137,
+        "type": 32768
+      },
+      "reports/control_plane/workingrcx-landed-closeout-r4-2026-10-20_closeout_contract.json": {
+        "mode": 420,
+        "sha256": "640d77eeaf290266390238347ed8da4e7b51fb1d9af080291fde60b5fc603fc6",
+        "size": 15477,
+        "type": 32768
+      },
+      "reports/deferred/non_blocking/workingrcx-landed-closeout-r4-2026-10-20_bridge_nonblockers.md": {
+        "exists": false
+      },
+      "reports/deferred/non_blocking/workingrcx-landed-closeout-r4-2026-10-20_remaining_obligations.md": {
+        "mode": 420,
+        "sha256": "b0cb33ea0f060030ffe82bf4efad6e9ee5a03e7cfe21dcbae9f25babf9144519",
+        "size": 6221,
+        "type": 32768
+      },
+      "reports/l4_wave_indicators/workingrcx-landed-closeout-r4-2026-10-20.json": {
+        "exists": false
+      }
+    },
+    "index_note": "All indexed bytes were read and hashed; edits are unstaged and do not match baseline index.",
+    "observed_utc": "2026-10-20T21:14:07.405332+00:00",
+    "scope": "Pre-generation worktree bytes, not staged/final delivered inventory; evidence self-hash omitted."
+  },
+  "private_integrity": {
+    "arguments": [
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "mu/tests/tools/test_commit_executor_receipt.py",
+      "mu/tests/tools/test_executor_dispatch.py",
+      "mu/tests/tools/test_launch_wave.py",
+      "mu/tests/tools/test_phase_b_executor.py",
+      "mu/tests/tools/test_worktree_lifecycle.py"
+    ],
+    "checker_sha256": "67e0f596aea258ca7c50a900a5f7d83ade72f95cc6967a1d0a634b15d73853fd",
+    "end_utc": "2026-10-20T21:09:14.823603+00:00",
+    "entry_point": "phase_b_executor.run_private_attr_gate",
+    "executor_sha256": "c30b9e64d53b6b69d508bb30cfc2ddeaba40b44dc255f869bda49e4a45dd7f88",
+    "result": {
+      "exit_code": 0,
+      "passed": true,
+      "skipped": false,
+      "stderr": "",
+      "stdout": "",
+      "test_files": [
+        "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+        "mu/tests/tools/test_commit_executor_receipt.py",
+        "mu/tests/tools/test_executor_dispatch.py",
+        "mu/tests/tools/test_launch_wave.py",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "mu/tests/tools/test_worktree_lifecycle.py"
+      ]
+    },
+    "stability": {
+      "changed_components": [],
+      "identical": true
+    },
+    "start_utc": "2026-10-20T21:09:13.334328+00:00",
+    "test_hashes": {
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "3904b6b507f7a66fd556fc2a92e75516429059596c48342a765c87f51bc881d6",
+      "mu/tests/tools/test_commit_executor_receipt.py": "0e6695543ca1cb40c86f0a6826c6467178e1ec2d2772570f3f76c5800418bbb6",
+      "mu/tests/tools/test_executor_dispatch.py": "f7120366078fe27cdfcdffe9d008e33307d6151aed1928f40a612273277567ec",
+      "mu/tests/tools/test_launch_wave.py": "7e563f47f910cf0fa7bee9d8a920bbf942e0a76433d7b164760693a3e4e49780",
+      "mu/tests/tools/test_phase_b_executor.py": "7ef8c832ca3d2c6a87336e959439782578938ab853baf449d5068ed6361b306a",
+      "mu/tests/tools/test_worktree_lifecycle.py": "67c50896c522a3c6b88ce96260d6ca56c7d9e3a680add1405dd080042a0e16d8"
+    }
+  },
+  "quota_observation": {
+    "admitted_observation_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r4-admission/quota.json",
+    "stop_threshold_reached": false,
+    "values": "private"
+  },
+  "recovery_volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+  "runs": {
+    "declared_gate": {
+      "after": "06-declared-twelve-module-gate-after.snapshot.json",
+      "before": "06-declared-twelve-module-gate-before.snapshot.json",
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r4-20261020",
+      "elapsed_seconds": 550.4545658340212,
+      "end_utc": "2026-10-20T21:23:20.377483+00:00",
+      "environment_pins": {
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1"
+      },
+      "log": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r4-validation/06-declared-twelve-module-gate.log",
+      "log_sha256": "b653ff637949f94aa907bb3d0d382e386fc37864000e5130d4a009c033d5966a",
+      "pytest_passed": 5486,
+      "pytest_reported_seconds": 550.12,
+      "returncode": 0,
+      "stability": {
+        "changed_components": [],
+        "identical": true
+      },
+      "start_utc": "2026-10-20T21:14:09.920871+00:00"
+    },
+    "independent_identical_sweep": {
+      "after": "07-independent-identical-sweep-after.snapshot.json",
+      "before": "07-independent-identical-sweep-before.snapshot.json",
+      "command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py --tb=short",
+      "cwd": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r4-20261020",
+      "elapsed_seconds": 558.8121736668982,
+      "end_utc": "2026-10-20T21:33:08.566846+00:00",
+      "environment_pins": {
+        "HYPOTHESIS_PROFILE": "ci_fast",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONHASHSEED": "0",
+        "RCX_CI": "1"
+      },
+      "log": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r4-validation/07-independent-identical-sweep.log",
+      "log_sha256": "3f31c5b460088667d7af40ce92d493606365f7f8e0407c2d4b46c2dca5900770",
+      "pytest_passed": 5486,
+      "pytest_reported_seconds": 558.47,
+      "returncode": 0,
+      "stability": {
+        "changed_components": [],
+        "identical": true
+      },
+      "start_utc": "2026-10-20T21:23:49.751992+00:00"
+    }
+  },
+  "schema_version": 1,
+  "source_admission": [
+    {
+      "adjudication": {
+        "change": "Persist wrapper timeout identity; observe exact remote outcome without repeating merge; retain continuation until successful completion-locked closeout.",
+        "limits": "No runner, wrapper, deadline or recovery-budget edits.",
+        "symbols": [
+          "_observe_timed_out_merge",
+          "_run_post_commit_pipeline_impl",
+          "_complete_post_merge_pipeline",
+          "write_continuation_record",
+          "_run_commit_pipeline_impl"
+        ]
+      },
+      "base_sha256": "1af382878c8732bdac56859f6318edb25957cb0bbb9fea06bcd7017356721a2e",
+      "current_sha256": "77450bcbc994b961667b2a01054028a371cdb1d00a15aa056300e0a30bea2c09",
+      "mode": 420,
+      "path": "mu/tools/executors/commit_executor.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tools/executors/commit_executor.py",
+      "sha256": "77450bcbc994b961667b2a01054028a371cdb1d00a15aa056300e0a30bea2c09"
+    },
+    {
+      "adjudication": {
+        "change": "Publish authentic closeout while holding completion lock, before exposing merged successor; add fresh one-shot sealed landed recovery with current source/index/refs/stashes/owner/receipt and remote proof.",
+        "limits": "Public locks serve production consumers; old seals/claims remain immutable. Live recovery is not invoked.",
+        "symbols": [
+          "request_completion",
+          "completion_lock",
+          "log_reader_lock",
+          "plan_closeout_recovery",
+          "recover_closeout"
+        ]
+      },
+      "base_sha256": "b4e6e08e852d0bbbafe87a7a81d054de86a566f626f4a0ab991354d6ee80ad3c",
+      "current_sha256": "5a85a45bd1086b6070d60d0d20c7020237d623f33fafd4a420cfd27fe451cfa9",
+      "mode": 420,
+      "path": "mu/tools/executors/worktree_lifecycle.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tools/executors/worktree_lifecycle.py",
+      "sha256": "5a85a45bd1086b6070d60d0d20c7020237d623f33fafd4a420cfd27fe451cfa9"
+    },
+    {
+      "adjudication": {
+        "change": "Validate restored canonical note via native config/spec/route/source and restored producer checkpoint; compare exact physical line and receipt/package/index stage.",
+        "limits": "Generic renderer and interrupted-review predicates retained.",
+        "symbols": [
+          "commit_ready_resume_authority",
+          "read_restored_launch_tracker_note"
+        ]
+      },
+      "base_sha256": "ba4f5056601f013ef926da01f56e224c14910045c0c4fb1ff79902d811de5893",
+      "current_sha256": "c30b9e64d53b6b69d508bb30cfc2ddeaba40b44dc255f869bda49e4a45dd7f88",
+      "mode": 420,
+      "path": "mu/tools/executors/phase_b_executor.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tools/executors/phase_b_executor.py",
+      "sha256": "c30b9e64d53b6b69d508bb30cfc2ddeaba40b44dc255f869bda49e4a45dd7f88"
+    },
+    {
+      "adjudication": {
+        "change": "Bind continuation and tracker consumer to current validated WaveConfig and exact restored producer note; refuse foreign config before authority consumption.",
+        "limits": "No test-only API or permissive fallback added.",
+        "symbols": [
+          "_native_commit_ready_authority",
+          "_native_phase_b_advanced_tracker_note"
+        ]
+      },
+      "base_sha256": "b93ca9cb1d270c19654aa6272ddb234443a27e9569bffa100c0c0aaccd7273e6",
+      "current_sha256": "8a98ec41c1f6790ac76f675658fd43994cd05787e25e16cc3fc2838ead25dcc8",
+      "mode": 420,
+      "path": "mu/tools/executors/launch_wave.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tools/executors/launch_wave.py",
+      "sha256": "8a98ec41c1f6790ac76f675658fd43994cd05787e25e16cc3fc2838ead25dcc8"
+    },
+    {
+      "adjudication": {
+        "change": "Real merged local Git fixtures exercise timeout-before/after merge, unknown/foreign remote proof, exact one-request observation and failed publication continuation retention."
+      },
+      "base_sha256": "12d09a3dfeee0f464d9bbba052fefe1b807ed8b7570a686fc07a827d675d849b",
+      "current_sha256": "3904b6b507f7a66fd556fc2a92e75516429059596c48342a765c87f51bc881d6",
+      "mode": 420,
+      "path": "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+      "sha256": "3904b6b507f7a66fd556fc2a92e75516429059596c48342a765c87f51bc881d6"
+    },
+    {
+      "adjudication": {
+        "change": "Public continuation writer preserves spent timeout identity and rejects head/handoff/PR/branch changes without byte mutation."
+      },
+      "base_sha256": "ce6b4820e2cc8d6342e453ad4fcc1954bfb609ce30054d355a9fd6a03166afc7",
+      "current_sha256": "0e6695543ca1cb40c86f0a6826c6467178e1ec2d2772570f3f76c5800418bbb6",
+      "mode": 420,
+      "path": "mu/tests/tools/test_commit_executor_receipt.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tests/tools/test_commit_executor_receipt.py",
+      "sha256": "0e6695543ca1cb40c86f0a6826c6467178e1ec2d2772570f3f76c5800418bbb6"
+    },
+    {
+      "adjudication": {
+        "caller": "commit_executor._run_commit_pipeline_impl initializes result status=success before _run_post_commit_pipeline.",
+        "change": "Success fixture mirrors real driver status and retains deletion; exact-refresh failure writes a real public continuation and asserts byte-for-byte retention plus original error/package/authority checks.",
+        "scope_miss": "R3 full gate omitted this adjacent caller/fixture module; R4 includes it in early collection and full pair."
+      },
+      "base_sha256": "72ab8e95e7344427363e65a6661cecc632406915e61ba2af1d7b068898b65c28",
+      "current_sha256": "f7120366078fe27cdfcdffe9d008e33307d6151aed1928f40a612273277567ec",
+      "mode": 420,
+      "path": "mu/tests/tools/test_executor_dispatch.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tests/tools/test_executor_dispatch.py",
+      "sha256": "f7120366078fe27cdfcdffe9d008e33307d6151aed1928f40a612273277567ec"
+    },
+    {
+      "adjudication": {
+        "change": "Bind imported fixture module identity before setup, import isolated review-material clock; preserve 3 continuation variants and all 17 config-refusal cases with byte comparisons after each."
+      },
+      "base_sha256": "04a83676c1d7537f9b86a668e9b1eca072d668ae71609597a96d0fc5b5867879",
+      "current_sha256": "7e563f47f910cf0fa7bee9d8a920bbf942e0a76433d7b164760693a3e4e49780",
+      "mode": 420,
+      "path": "mu/tests/tools/test_launch_wave.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tests/tools/test_launch_wave.py",
+      "sha256": "7e563f47f910cf0fa7bee9d8a920bbf942e0a76433d7b164760693a3e4e49780"
+    },
+    {
+      "adjudication": {
+        "change": "Real native restored producer reaches final receipt/package/index/hash success; 26 drift controls retain read-only authority and ordinary progress is not interrupted-review authority."
+      },
+      "base_sha256": "4a33b111f1ab9d610294ce58bea3353010d45803e0a2e8d006e9d031b3674042",
+      "current_sha256": "7ef8c832ca3d2c6a87336e959439782578938ab853baf449d5068ed6361b306a",
+      "mode": 420,
+      "path": "mu/tests/tools/test_phase_b_executor.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tests/tools/test_phase_b_executor.py",
+      "sha256": "7ef8c832ca3d2c6a87336e959439782578938ab853baf449d5068ed6361b306a"
+    },
+    {
+      "adjudication": {
+        "change": "Real subprocess publication contention, committed disposable PRIMARY recovery, exact preservation, 16 adverse authority cases, interrupted fresh intent and uncovered WIP refusal."
+      },
+      "base_sha256": "f23ed73bd503c487b2da052d792c300a757caa0a61b3c5b9748fda22e7b08d05",
+      "current_sha256": "67c50896c522a3c6b88ce96260d6ca56c7d9e3a680add1405dd080042a0e16d8",
+      "mode": 420,
+      "path": "mu/tests/tools/test_worktree_lifecycle.py",
+      "restored_source": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r3-terminal-preserved/restored/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/landed-closeout-r3-20261020/mu/tests/tools/test_worktree_lifecycle.py",
+      "sha256": "67c50896c522a3c6b88ce96260d6ca56c7d9e3a680add1405dd080042a0e16d8"
+    }
+  ],
+  "source_changes_after_validation": "No code/test changes. This evidence-only result publication follows the stable pair; original logs/snapshots/receipts remain immutable.",
+  "stage": "Phase B local implementation and exact stable full pair complete; native review/delivery pending",
+  "standing_advisory_delivery": "reports/deferred/non_blocking/workingrcx-landed-closeout-r4-2026-10-20_remaining_obligations.md",
+  "tracker_reconciliation": {
+    "after_sha256": "c60af981c6ada97fd684fc728a2068f21f236be8a4dc72c5fa9107543d9572aa",
+    "all_admitted_non_ra_history_preserved": true,
+    "before_sha256": "0dfbe9e07f36c693cb3b82fcab98d46bc2a6076eb589fb5428c68403ebeeba87",
+    "native_ra_after_sha256": "ee579ef390c016b693083fda10c0771a5c028bad2b28966754eabb5eda223fbc",
+    "native_ra_before_sha256": "ee579ef390c016b693083fda10c0771a5c028bad2b28966754eabb5eda223fbc",
+    "native_tracker_state_unchanged": true,
+    "observed_utc": "2026-10-20T21:12:58.206142+00:00",
+    "ordered_owners": 44,
+    "primary_sha256": "4ffd40a865facb75acf7328cd426c86e231cae1cab237fdc2c6a2ac67c290de1",
+    "removed_note_anchor_count": 1,
+    "restoration": "PENDING_NATIVE_OUTER; no note or journal rewritten",
+    "unique_task_ids": 268
+  },
+  "validation_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' tests/docs/test_doc_freshness.py tests/docs/test_status_tasks_consistency.py tests/docs/test_l4_current_state_truth.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_worktree_lifecycle.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_pr_disposition_executor.py mu/tests/tools/test_workingrcx_fleet_classification.py --tb=short",
+  "validation_log_directory": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/landed-closeout-r4-validation",
+  "validation_summary": {
+    "all_process_exit_codes": 0,
+    "config_refusal_cases": 17,
+    "declared_gate_passed": 5486,
+    "dispatcher_exact_refresh_failure_retention": "PASS",
+    "dispatcher_success_deletion": "PASS",
+    "early_six_module_passed": 6,
+    "full_pair_binding": {
+      "checks": [
+        {
+          "changed_components": [],
+          "identical": true
+        },
+        {
+          "changed_components": [],
+          "identical": true
+        },
+        {
+          "changed_components": [],
+          "identical": true
+        }
+      ],
+      "complete_binding_sha256": "2f171cfb7087dc345947b1329c4724a79bf3dbe4038ea0e00119888ebfb31269",
+      "complete_source_paths": 3202,
+      "identical_four_complete_snapshots": true,
+      "observed_utc": "2026-10-20T21:33:26.055305+00:00",
+      "raw_index_sha256": "a6e94706ff28cfd024aff619c2be741f7c0d5a307a325d5ca11fece643641e38",
+      "recovery_volume_uuid": "93064AFA-816D-43E3-BCC9-8A514F8F3D7D",
+      "snapshots": {
+        "06-declared-twelve-module-gate-after.snapshot.json": "95856312a6fd27dda0547c4e328bcea1363f86e21080eba97e59e8c529190136",
+        "06-declared-twelve-module-gate-before.snapshot.json": "22df7d91d9ba2ed9905aa4ecb1454dfa24dd991ae5a1d5e25ae67a86df31577a",
+        "07-independent-identical-sweep-after.snapshot.json": "f74debcf01ee5e28b9f1b9393b923bc05cb80a690733a94f5fee4fd7097f893c",
+        "07-independent-identical-sweep-before.snapshot.json": "f1c7aa604f9ff3fb0db19abd83205ac64a7a72e74f5aa67eba3a7491ac1729cf"
+      },
+      "source_mutations_during_or_between_runs": false,
+      "tracked_index_entries": 3196
+    },
+    "independent_identical_sweep_passed": 5486,
+    "public_private_integrity_exit_code": 0,
+    "public_private_integrity_test_files": 6
+  },
+  "wave_id": "workingrcx-landed-closeout-r4-2026-10-20"
+}
