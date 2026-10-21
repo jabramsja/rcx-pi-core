@@ -4,9 +4,40 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-10-21
+
+### PR1344 landed; R8 recovered; PR1341 closed; PR1329 coverage R10 in Phase B
+
+- Closeout repair PR1344 merged final head `108e2cf3d6b85367a41f327d3bd6b76f4b0341be`
+  at `cb6ab69c68b80464db386ac626bf739e42653805` on 2026-10-21T02:38:33Z.
+  Captured PRIMARY records seven current-head CI successes on attempt1,
+  MainSync, native successor COMPLETE and foreground launcher exit0.
+- Fresh public R8 recovery reached RECOVERED/MOVED. Verified WD snapshot
+  `6815ad24` retains its original source, raw index and history; old R8
+  launcher exit1 and ESCALATED completion stay historical. PR1341 separately
+  reached CLOSED_VERIFIED under operation `1a32f9f7f8b24c399e4f79a609cbd498`,
+  retaining head `167dd035` and its branch. The old R8 manifest is unchanged.
+- R9 `da269cfd` stopped after its 2400-second native pre-push timeout and three
+  exhausted recovery attempts. Its local 239/239 pair, GO and staged L4 are
+  historical; it has no PR, CI, merge or COMPLETE. Verified snapshots `2c714f5e`
+  and `7a0895c2` retain committed bytes and the later staged packet demotion.
+- R10 independently accounts for original PR1329's 20 paths/62 hunks at
+  `537fb046`, against actual landed `cb6ab69c`. Current lifecycle production
+  and tests are reviewed after PR1344; the removed one-time Mu exception stays
+  superseded and default protection remains. The schema2 manifest targets only
+  PR1329. Local results and source bindings belong in its implementation
+  evidence; independent native review, generated/indexed authority and delivery
+  remain pending, followed by separate public disposition after landing.
+- Reconcile captured PRIMARY while preserving all 268 IDs, 44 ordered owners,
+  history and native tracker-restoration anchors. The declared initial runtime
+  context `9a4d39a1` admits pre-push 3600/baseline2400/outer3600 per invocation;
+  physical config `7ce64811` is unchanged. Runner, retention, Mu, docs inventory,
+  timeout/CI automation, permanent retry regression, tmux provisioning and
+  linked-dev holds remain with their existing owners.
+
 ## 2026-10-20
 
-### Landed closeout R4 (Phase B implementation; unmerged)
+### Landed closeout R4 (historical Phase B observation, before PR1344 landed)
 
 - Fold exactly ten hash/mode-verified R3 code/test files against PR1343 merge
   `609270f0`. Observe exact remote PR/head/base/merge after wrapper timeout;
@@ -29,7 +60,7 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
   generated/indexed authority, final gates and landing remain pending.
   Runner policy, deadlines, retention integration and runtime are unchanged.
 
-### PR1329 / PR1341 coverage R8 (Phase B; independent review and landing pending)
+### PR1329 / PR1341 coverage R8 (historical Phase B observation, before PR1343 landed)
 
 - Account independently for original PR1329's 20 paths/62 hunks and failed
   R7 PR1341's 9 paths/14 hunks, retaining exact branches and source inventories.
