@@ -626,6 +626,25 @@ def request_completion(directory: Path, *, status: str, result: dict | None = No
             # durable. Recursive successors publish before exposing their link.
             if isinstance((result or {}).get("post_merge_cleanup"), dict):
                 result["post_merge_cleanup"]["lifecycle_record"] = str(directory)
+            closeout_path = directory / "closeout.json"
+            if os.path.lexists(closeout_path):
+                saved = json.loads(fleet.read_plain(closeout_path))
+                saved_result = saved.get("result", {})
+                if saved_result.get("status") == "success" and (result or {}).get("status") == "success":
+                    if (saved.get("owner") != OWNER
+                            or saved.get("wave_id") != terminal["wave_id"]
+                            or saved.get("source") != terminal["identity"]["path"]
+                            or saved.get("source") != str(closeout["repo"])
+                            or saved.get("authority") != "historical_closeout_not_replay_authority"
+                            or saved.get("handoff") != closeout["handoff"]
+                            or saved_result.get("merge_sha") != terminal.get("merge_sha")
+                            or any(saved_result.get(key) != result.get(key)
+                                   for key in ("merge_sha", "commit_sha", "pr_number"))):
+                        raise fleet.Hold("Successful closeout retry identity differs")
+                    # A crash can leave the continuation after publication.
+                    # Keep the original evidence: sync outcomes and captured
+                    # artifacts may legitimately differ on a successful retry.
+                    return terminal
             publish_closeout(directory, repo=closeout["repo"], handoff=closeout["handoff"],
                              result=result or {})
         return terminal
