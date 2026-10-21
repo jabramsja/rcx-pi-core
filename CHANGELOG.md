@@ -6,6 +6,29 @@ merge ledger. For live recent wave chronology, use `TASKS.md` plus
 
 ## 2026-10-20
 
+### Landed closeout R4 (Phase B implementation; unmerged)
+
+- Fold exactly ten hash/mode-verified R3 code/test files against PR1343 merge
+  `609270f0`. Observe exact remote PR/head/base/merge after wrapper timeout;
+  never repeat an uncertain request. Retain continuation until successful
+  closeout publication under the lifecycle completion lock.
+- Bind restored canonical tracker notes to config/spec/route and the actual
+  producer stage. Preserve the full receipt/package/index success path and
+  adversarial drift refusals. Retain fixture module/clock isolation and all
+  17 config refusals.
+- Include dispatcher caller fixtures explicitly: initialize the real success
+  status, keep successful continuation deletion, and use the public writer to
+  prove byte-exact continuation retention after exact package-refresh failure.
+  Record the earlier caller-test scope miss as a standing obligation.
+- Expose fresh sealed landed recovery with one new request and exact current
+  source/index/ref/stash/owner/receipt authority. Historical seals and interrupted
+  or spent intents remain immutable; no live historical recovery is performed.
+- Reconcile captured PRIMARY outside byte-exact native Ra/restoration anchors,
+  preserving 268 IDs, 44 ordered owners and all history. Local validation and
+  source/index bindings are in the R4 implementation evidence. Native review,
+  generated/indexed authority, final gates and landing remain pending.
+  Runner policy, deadlines, retention integration and runtime are unchanged.
+
 ### PR1329 / PR1341 coverage R8 (Phase B; independent review and landing pending)
 
 - Account independently for original PR1329's 20 paths/62 hunks and failed

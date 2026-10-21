@@ -14,6 +14,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import signal
 import subprocess
@@ -438,8 +439,12 @@ def terminal_log_record(repo: Path, bus_dir: str = ".agent_bus", *, record: Path
         return released
 
 
-def _log_reader_lock(identity: dict, bus_dir: str):
-    """One rendezvous for this physical checkout and exact bus, across HEADs."""
+def log_reader_lock(identity: dict, bus_dir: str):
+    """Open the shared reader/completion rendezvous for an exact checkout/bus.
+
+    The caller owns the returned stream and selects a shared or exclusive
+    flock. Holding this lock grants no retirement or recovery authority.
+    """
     bus = Path(bus_dir)
     if not bus.is_absolute():
         bus = Path(identity["path"]) / bus
@@ -474,7 +479,7 @@ def follow_terminal_log(repo: Path, bus_dir: str, log: Path) -> None:
     with ExitStack() as stack:
         lock = None
         if (repo / ".git").is_file():
-            lock = stack.enter_context(_log_reader_lock(lane_identity(repo), bus_dir))
+            lock = stack.enter_context(log_reader_lock(lane_identity(repo), bus_dir))
             try:
                 fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -507,7 +512,7 @@ def follow_terminal_log(repo: Path, bus_dir: str, log: Path) -> None:
 def _released_log_readers(directory: Path, registration: dict, terminal: dict):
     """Bounded acknowledgment before a new claim; never bypass process gates."""
     adoptions = _adopt_terminal_log_readers(directory, registration, terminal)
-    with _log_reader_lock(terminal["identity"], registration["bus_dir"]) as lock:
+    with log_reader_lock(terminal["identity"], registration["bus_dir"]) as lock:
         deadline = time.monotonic() + READER_RELEASE_SECONDS
         while True:
             try:
@@ -611,10 +616,19 @@ def register_lane(repo: Path, wave_id: str, *, bus_dir: str | Path | None = None
     return directory
 
 
-def request_completion(directory: Path, *, status: str, result: dict | None = None) -> dict:
+def request_completion(directory: Path, *, status: str, result: dict | None = None,
+                       closeout: dict | None = None) -> dict:
     """Publish terminal responsibility without claiming successful cleanup."""
-    with _completion_lock(directory):
-        return _request_completion(directory, status=status, result=result or {})
+    with completion_lock(directory):
+        terminal = _request_completion(directory, status=status, result=result or {}, closeout=closeout)
+        if closeout is not None and terminal["record"] == str(directory):
+            # Completion cannot claim this record until its authentic result is
+            # durable. Recursive successors publish before exposing their link.
+            if isinstance((result or {}).get("post_merge_cleanup"), dict):
+                result["post_merge_cleanup"]["lifecycle_record"] = str(directory)
+            publish_closeout(directory, repo=closeout["repo"], handoff=closeout["handoff"],
+                             result=result or {})
+        return terminal
 
 
 def publish_closeout(directory: Path, *, repo: Path, handoff: dict, result: dict) -> Path:
@@ -738,7 +752,8 @@ def _verify_merge_authority(registration: dict, identity: dict, merge_sha: str) 
                 raise fleet.Hold("Same-HEAD completion merge authority is not landed")
 
 
-def _request_completion(directory: Path, *, status: str, result: dict) -> dict:
+def _request_completion(directory: Path, *, status: str, result: dict,
+                        closeout: dict | None = None) -> dict:
     registration = json.loads(fleet.read_plain(directory / "registration.json"))
     source = Path(registration["identity"]["path"])
     request = directory / "terminal.json"
@@ -752,7 +767,7 @@ def _request_completion(directory: Path, *, status: str, result: dict) -> dict:
                 raise fleet.Hold("Same-HEAD successor predecessor evidence changed")
             for owner in directory.glob("owner-*.json"):
                 fleet.write_new(successor / owner.name, fleet.read_plain(owner), verify_existing=True)
-            return request_completion(successor, status=status, result=result)
+            return request_completion(successor, status=status, result=result, closeout=closeout)
         if not source.exists():
             return previous
         current = lane_identity(source)
@@ -765,8 +780,8 @@ def _request_completion(directory: Path, *, status: str, result: dict) -> dict:
                     if json.loads(fleet.read_plain(final)).get("reason") != FAILED_CLOSEOUT_REASON:
                         return previous
                 else:
-                    closeout = directory / "closeout.json"
-                    if (not closeout.exists() or json.loads(fleet.read_plain(closeout)).get(
+                    closeout_path = directory / "closeout.json"
+                    if (not closeout_path.exists() or json.loads(fleet.read_plain(closeout_path)).get(
                             "result", {}).get("status") in {None, "", "success"}):
                         return previous
                 if previous["merge_sha"] != result["merge_sha"]:
@@ -781,7 +796,7 @@ def _request_completion(directory: Path, *, status: str, result: dict) -> dict:
             fleet.write_new(successor / "predecessor.json", fleet.encoded(predecessor), verify_existing=True)
             for owner in directory.glob("owner-*.json"):
                 fleet.write_new(successor / owner.name, fleet.read_plain(owner), verify_existing=True)
-            value = request_completion(successor, status=status, result=result)
+            value = request_completion(successor, status=status, result=result, closeout=closeout)
             fleet.write_new(merged_link, fleet.encoded(dict(record=str(successor), identity=current,
                 merge_sha=result["merge_sha"])), verify_existing=True)
             return value
@@ -798,7 +813,7 @@ def _request_completion(directory: Path, *, status: str, result: dict) -> dict:
             fleet.write_new(successor / owner.name, fleet.read_plain(owner), verify_existing=True)
         fleet.write_new(directory / ("successor-" + successor.name[-16:] + ".json"),
                         fleet.encoded(dict(record=str(successor), identity=current)), verify_existing=True)
-        return request_completion(successor, status=status, result=result)
+        return request_completion(successor, status=status, result=result, closeout=closeout)
     ident = lane_identity(source)
     for key in ("path", "git_dir", "common_dir", "filesystem_identity"):
         if ident[key] != registration["identity"][key]:
@@ -825,7 +840,8 @@ def _surviving_root(terminal: dict) -> Path:
 
 
 @contextmanager
-def _completion_lock(directory: Path):
+def completion_lock(directory: Path):
+    """Exclusively fence a lifecycle record without granting mutation authority."""
     fd = os.open(directory / "completion.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "rb") as stream:
         fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -925,7 +941,7 @@ def complete_pending(directory: Path, *, delay: float = 2.0) -> dict:
                 "required_resolution": value.get("next_action", "Reconcile the recorded owner before fresh authority."),
                 "next_action": inspection}
 
-    with _completion_lock(directory), ExitStack() as readers:
+    with completion_lock(directory), ExitStack() as readers:
         final = directory / "completion.json"
         if final.exists():
             value = json.loads(fleet.read_plain(final))
@@ -1077,14 +1093,327 @@ def recover_pending_sync(manifest_path: Path, *, authority_commit: str) -> dict:
         return value
 
 
+def _sealed_closeout_records(directory: Path, identity: dict) -> dict:
+    """Hash every original owner and reject any possibly started mutation."""
+    records = {}
+    for path in sorted(directory.parent.glob("*/registration.json")):
+        registration = json.loads(fleet.read_plain(path))
+        if registration.get("identity", {}).get("path") != identity["path"]:
+            continue
+        record = path.parent
+        fleet.plain_directory(record)
+        terminal = json.loads(fleet.read_plain(record / "terminal.json"))
+        final = json.loads(fleet.read_plain(record / "completion.json"))
+        if (registration.get("owner") != OWNER or registration.get("max_attempts") != MAX_ATTEMPTS
+                or registration.get("base_branch") != "dev" or terminal.get("identity") != identity
+                or terminal.get("record") != str(record) or terminal.get("owner") != OWNER
+                or terminal.get("wave_id") != registration.get("wave_id")
+                or final.get("state") != "ESCALATED" or final.get("outcome") is not None):
+            raise fleet.Hold("Recovery requires sealed pre-mutation ownership of this exact lane")
+        for key in ("path", "git_dir", "common_dir", "filesystem_identity"):
+            if registration["identity"].get(key) != identity[key]:
+                raise fleet.Hold("Recovery registration identity differs")
+        bus = Path(registration["bus_dir"])
+        if bus.parent != Path(identity["path"]) or not bus.name.startswith(".agent_bus") or bus.is_symlink():
+            raise fleet.Hold("Recovery bus identity differs")
+        _surviving_root(terminal)
+        owners = sorted(record.glob("owner-*.json"))
+        if not owners:
+            raise fleet.Hold("Recovery lacks native owner provenance")
+        for owner in owners:
+            value = json.loads(fleet.read_plain(owner))
+            if value.get("wave_id") != registration["wave_id"] or not fleet._absent_pid(value.get("pid")):
+                raise fleet.Hold("Recovery owner is foreign, live or uncertain")
+        predecessor = record / "predecessor.json"
+        used = 0
+        if predecessor.exists():
+            value = json.loads(fleet.read_plain(predecessor))
+            parent = Path(value["record"])
+            if parent.parent != directory.parent or value != _pre_merge_evidence(parent):
+                raise fleet.Hold("Recovery predecessor receipt drift")
+            used = value["attempts_used"]
+        attempts = sorted(record.glob("attempt-*"))
+        if ([p.name for p in attempts] != [f"attempt-{n}" for n in range(used + 1, used + len(attempts) + 1)]
+                or used + len(attempts) > MAX_ATTEMPTS):
+            raise fleet.Hold("Recovery original attempt budget differs")
+        for number, attempt in enumerate(attempts, used + 1):
+            names = {p.name for p in attempt.iterdir()}
+            if (not {"claim.json", "result.json"} <= names
+                    or names - {"claim.json", "result.json", "primary-sync.json", "useful-work.json"}):
+                raise fleet.Hold("Interrupted or mutated original attempt; no recovery replay")
+            claim = json.loads(fleet.read_plain(attempt / "claim.json"))
+            outcome = json.loads(fleet.read_plain(attempt / "result.json"))
+            if (claim != dict(number=number, terminal_sha256=fleet.digest(fleet.encoded(terminal)))
+                    or outcome.get("state") not in {"PENDING", "ESCALATED"}
+                    or outcome.get("outcome") is not None):
+                raise fleet.Hold("Recovery original claim/outcome differs")
+        # Include all historical receipts, including failed closeouts and any
+        # absent-publication successor. The new recovery lives in its own dir.
+        paths = sorted([*record.glob("*.json"), *record.glob("attempt-*/*.json")])
+        records[str(record)] = {str(p.relative_to(record)): fleet.file_hash(p) for p in paths}
+    if str(directory) not in records:
+        raise fleet.Hold("Recovery record is not a registered owner")
+    return records
+
+
+@contextmanager
+def _closeout_recovery_locks(directory: Path, registration: dict):
+    """Fence every same-checkout producer and reader through the new claim."""
+    identity = registration["identity"]
+    with ExitStack() as locks:
+        records = []
+        for path in sorted(directory.parent.glob("*/registration.json")):
+            other = json.loads(fleet.read_plain(path))
+            if other.get("identity", {}).get("path") == identity["path"]:
+                records.append(path.parent)
+                locks.enter_context(completion_lock(path.parent))
+        if directory not in records:
+            raise fleet.Hold("Recovery record is not registered")
+        if any(os.path.lexists(p / "landed-recovery") for p in records):
+            raise fleet.Hold("Existing recovery intent is consumed or interrupted; no replay or new budget")
+        buses = {json.loads(fleet.read_plain(p / "registration.json"))["bus_dir"] for p in records}
+        for bus in sorted(buses):
+            reader = locks.enter_context(log_reader_lock(identity, bus))
+            fcntl.flock(reader, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if _legacy_log_readers(identity):
+            raise fleet.Hold("Recovery requires acknowledged native log reader release")
+        yield
+
+
+def _closeout_recovery_authority(directory: Path, authority_commit: str):
+    """The public command must execute the landed dependencies in PRIMARY."""
+    registration = json.loads(fleet.read_plain(directory / "registration.json"))
+    primary = Path(registration["identity"]["common_dir"]).parent
+    if (directory.parent != primary / ".git" / REGISTRY
+            or Path(__file__).resolve() != primary / "mu/tools/executors/worktree_lifecycle.py"):
+        raise fleet.Hold("Closeout recovery requires the exact landed tool in surviving PRIMARY")
+    landed = fleet.require_sync_recovery_authority(primary, authority_commit)
+    config = Path("mu/tools/executors/executor_config.json")
+    entry = fleet.git_entries(primary, authority_commit).get(str(config))
+    if (entry is None or fleet.git_entries(primary).get(str(config)) != entry
+            or fleet.read_plain(primary / config) != fleet.git(primary, "show", f"{authority_commit}:{config}")
+            or bool((primary / config).stat().st_mode & 0o111) != (entry[0] == "100755")
+            or fleet.git(primary, "ls-files", "-v", "-z", "--", str(config)) != b"H " + os.fsencode(config) + b"\0"):
+        raise fleet.Hold("Recovery executor configuration differs from landed authority")
+    if __package__:
+        from . import commit_executor as boundary
+    else:
+        import commit_executor as boundary
+    if Path(boundary.__file__).resolve() != primary / "mu/tools/executors/commit_executor.py":
+        raise fleet.Hold("Recovery imported a foreign mutation boundary")
+    return registration, primary, landed, boundary
+
+
+def _closeout_git_config(identity: dict) -> dict:
+    common, admin = Path(identity["common_dir"]), Path(identity["git_dir"])
+    paths = {common / "config", common / "config.worktree", admin / "config.worktree"}
+    return {str(p): dict(sha256=fleet.file_hash(p), mode=p.stat().st_mode)
+            if os.path.lexists(p) else None for p in sorted(paths)}
+
+
+def _closeout_sync_journals(identity: dict, boundary) -> dict:
+    """Do not let the existing sync API resume an interrupted historical job."""
+    common, target = Path(identity["common_dir"]), Path(identity["path"])
+    root = common / "rcx_primary_worktree_sync_transactions"
+    manifests = []
+    if root.exists():
+        fleet.plain_directory(root)
+        for directory in sorted(root.iterdir()):
+            fleet.plain_directory(directory)
+            path = directory / "manifest.json"
+            value = json.loads(fleet.read_plain(path))
+            owner = value.get("worktree_identity")
+            if not isinstance(owner, dict) or not isinstance(owner.get("path"), str):
+                raise fleet.Hold("Recovery native sync journal owner is uncertain")
+            if owner["path"] != str(target):
+                continue
+            if value.get("state") not in {"HELD", "RECOVERED"}:
+                raise fleet.Hold("Interrupted original sync mutation; no closeout recovery replay")
+            error = boundary._validate_primary_sync_transaction(path, value, common_dir=common, primary=target)
+            if error:
+                raise fleet.Hold("Original sync preservation is invalid: " + error)
+            for rel in value.get("held_untracked_paths", []):
+                fleet.read_plain(directory / "backup" / rel)
+            if value.get("held_tracked_paths"):
+                oid = value.get("stash_oid")
+                if not isinstance(oid, str) or re.fullmatch(r"[0-9a-f]{40}", oid) is None:
+                    raise fleet.Hold("Original held tracked work lacks stash preservation")
+                fleet.git(target, "cat-file", "-e", oid + "^{commit}")
+            manifests.append(path)
+    return fleet.sync_recovery_retained_state(target, manifests)["journals"]
+
+
+def _closeout_recovery_observation(directory: Path, registration: dict, primary: Path,
+                                    landed: str, boundary, merge_sha: str) -> dict:
+    terminal = json.loads(fleet.read_plain(directory / "terminal.json"))
+    identity = terminal["identity"]
+    target = Path(identity["path"])
+    if lane_identity(target) != identity or not identity["branch"]:
+        raise fleet.Hold("Recovery source/filesystem/gitdir/HEAD changed")
+    records = _sealed_closeout_records(directory, identity)
+    _verify_merge_authority(registration, identity, merge_sha)
+    number = terminal.get("pr_number")
+    if not str(number or "").isdigit() or int(number) <= 0:
+        raise fleet.Hold("Recovery requires the original exact PR number")
+    owner, name = boundary._parse_origin_owner_repo(target)
+    remote = boundary._query_pr_review_state(target, repo_owner=owner, repo_name=name, pr_number=str(number))
+    if (type(remote.get("number")) is not int or remote["number"] != int(number)
+            or remote.get("url") != f"https://github.com/{owner}/{name}/pull/{number}"
+            or boundary._verified_remote_merge_sha(remote, head_sha=identity["HEAD"],
+                target_branch=identity["branch"].removeprefix("refs/heads/"), base_branch="dev") != merge_sha):
+        raise fleet.Hold("Recovery lacks exact remote PR/head/base/merge proof")
+    if terminal.get("merge_sha") not in (None, merge_sha):
+        raise fleet.Hold("Recovery cannot change recorded merge authority")
+    fleet.process_idle(identity)
+    fleet.native_idle(target, fleet.tree_manifest(target), reconcile_r1=True)
+    coverage = useful_work(str(target), landed)
+    if coverage.get("status") != "COVERED":
+        raise fleet.Hold("Recovery source/index/WIP lacks exact landed coverage")
+    state = fleet.transaction_state(target)
+    admin = Path(identity["git_dir"])
+    return dict(identity=identity, records=records, source_state=state,
+        git_config=_closeout_git_config(identity), journals=_closeout_sync_journals(identity, boundary),
+        gitdir_identity=dict(path=str(admin), device=admin.stat().st_dev, inode=admin.stat().st_ino),
+        primary_state=fleet.transaction_state(primary), coverage=coverage,
+        refs=fleet.git(primary, "show-ref").hex(),
+        stashes=fleet.git(primary, "stash", "list", "--format=%H%x00%gs").hex(),
+        remote=dict(number=int(number), url=remote["url"], head=identity["HEAD"],
+                    branch=identity["branch"], base="dev", merge_sha=merge_sha))
+
+
+def plan_closeout_recovery(directory: Path, *, authority_commit: str,
+                          merge_sha: str, request_id: str) -> dict:
+    """Prepare a reviewable request; planning never consumes an old attempt."""
+    if re.fullmatch(r"[0-9a-f]{32}", request_id or "") is None:
+        raise fleet.Hold("Recovery request requires a fresh 32-hex request ID")
+    with fleet.safe_git_environment(network=True):
+        registration, primary, landed, boundary = _closeout_recovery_authority(directory, authority_commit)
+        with _closeout_recovery_locks(directory, registration), fleet.preparation_lock(primary / ".git"):
+            observed = _closeout_recovery_observation(directory, registration, primary, landed, boundary, merge_sha)
+            return dict(schema_version=1, owner=OWNER, operation="landed_closeout_recovery",
+                record=str(directory), request_id=request_id, max_attempts=1,
+                authority_commit=authority_commit, landed=landed, merge_sha=merge_sha, observed=observed)
+
+
+class _CloseoutRecoveryBoundary:
+    """Use the existing mutation API with request checks at its locked callback."""
+
+    def __init__(self, boundary, directory: Path, request: dict):
+        self.boundary, self.directory, self.request = boundary, directory, request
+
+    def bind_terminal_target_identity(self, *args, **kwargs):
+        return self.boundary.bind_terminal_target_identity(*args, **kwargs)
+
+    def _receipts(self):
+        observed = self.request["observed"]
+        if _sealed_closeout_records(self.directory, observed["identity"]) != observed["records"]:
+            raise fleet.Hold("Recovery prior receipts/owners changed before mutation")
+        if _closeout_git_config(observed["identity"]) != observed["git_config"]:
+            raise fleet.Hold("Recovery Git configuration changed before mutation")
+        journals = _closeout_sync_journals(observed["identity"], self.boundary)
+        if any(journals.get(path) != value for path, value in observed["journals"].items()):
+            raise fleet.Hold("Recovery original sync preservation changed")
+        return journals
+
+    def sync_primary_worktree_to_base(self, *args, checkpoint, **kwargs):
+        def guarded(stage, manifest):
+            if stage == "before_recovery":
+                if self._receipts() != self.request["observed"]["journals"]:
+                    raise fleet.Hold("Recovery sync journal set changed before preparation")
+                fleet.require_transaction_state(Path(self.request["observed"]["identity"]["path"]),
+                                                self.request["observed"]["source_state"], "recovery-request")
+                if fleet.line(fleet.git(args[0], "rev-parse", "origin/dev")) != self.request["landed"]:
+                    raise fleet.Hold("Recovery landed base changed")
+            checkpoint(stage, manifest)
+        return self.boundary.sync_primary_worktree_to_base(*args, checkpoint=guarded, **kwargs)
+
+    def execute_terminal_mutation_once(self, *args, terminal_action, **kwargs):
+        def guarded():
+            self._receipts()
+            if fleet.line(fleet.git(args[0], "rev-parse", "origin/dev")) != self.request["landed"]:
+                raise fleet.Hold("Recovery landed base changed before terminal mutation")
+            return terminal_action()
+        return self.boundary.execute_terminal_mutation_once(*args, terminal_action=guarded, **kwargs)
+
+
+def recover_closeout(directory: Path, *, request_path: Path, request_sha256: str,
+                     authority_commit: str) -> dict:
+    """Consume one fresh request; never unseal or spend any predecessor claim."""
+    raw = fleet.read_plain(request_path)
+    if fleet.digest(raw) != request_sha256:
+        raise fleet.Hold("Recovery request hash differs")
+    request = json.loads(raw)
+    if (request.get("schema_version") != 1 or request.get("owner") != OWNER
+            or request.get("operation") != "landed_closeout_recovery"
+            or request.get("record") != str(directory) or request.get("max_attempts") != 1
+            or request.get("authority_commit") != authority_commit
+            or re.fullmatch(r"[0-9a-f]{32}", request.get("request_id", "")) is None):
+        raise fleet.Hold("Recovery request authority or bound differs")
+    with fleet.safe_git_environment(network=True):
+        registration, primary, landed, boundary = _closeout_recovery_authority(directory, authority_commit)
+        with _closeout_recovery_locks(directory, registration):
+            with fleet.preparation_lock(primary / ".git"):
+                current = _closeout_recovery_observation(
+                    directory, registration, primary, landed, boundary, request["merge_sha"])
+                if fleet.encoded(current) != fleet.encoded(request["observed"]) or landed != request["landed"]:
+                    raise fleet.Hold("Recovery source/index/config/receipts/base drift since request")
+                recovery = directory / "landed-recovery"
+                # mkdir is the single fresh intent boundary. A crash immediately
+                # afterward is consumed, including before claim publication.
+                fleet.new_directory(recovery)
+                fleet.write_new(recovery / "request.json", raw)
+                fleet.write_new(recovery / "claim.json", fleet.encoded(dict(
+                    owner=OWNER, request_sha256=request_sha256, authority_commit=authority_commit,
+                    number=1, original_records=current["records"])))
+                attempt = recovery / "attempt-1"
+                fleet.new_directory(attempt)
+            entry = dict(source_index=0, path=current["identity"]["path"],
+                source_identity=current["identity"], destination=str(attempt / "worktree"),
+                action="PRESERVE_WORKTREE", owner=OWNER, comparison_commit=landed,
+                useful_work=current["coverage"])
+            outcome = fleet.apply_target(primary, entry, attempt,
+                _CloseoutRecoveryBoundary(boundary, directory, request), residual=True)
+            value = dict(state="RECOVERED" if outcome["status"] == "MOVED" else "INCOMPLETE",
+                owner=OWNER, request_sha256=request_sha256, claim_sha256=fleet.file_hash(recovery / "claim.json"),
+                outcome=outcome, original_records=current["records"], merge_sha=request["merge_sha"],
+                closeout_scope="New landed preservation result; prior failed closeouts remain immutable",
+                next_action="Inspect the retained request and preservation receipts; this intent cannot be replayed.")
+            fleet.write_new(recovery / "result.json", fleet.encoded(value))
+            return value
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--record", required=True, type=Path)
     parser.add_argument("--complete", action="store_true")
     parser.add_argument("--recover-sync", action="store_true")
     parser.add_argument("--authority-commit")
+    parser.add_argument("--plan-closeout-recovery", action="store_true")
+    parser.add_argument("--recover-closeout", action="store_true")
+    parser.add_argument("--merge-sha")
+    parser.add_argument("--request-id")
+    parser.add_argument("--request", type=Path)
+    parser.add_argument("--request-sha256")
     args = parser.parse_args(argv)
-    if args.recover_sync:
+    if args.plan_closeout_recovery or args.recover_closeout:
+        if (args.complete or args.recover_sync or not args.authority_commit
+                or args.plan_closeout_recovery == args.recover_closeout):
+            parser.error("Select one closeout recovery operation with --authority-commit")
+        try:
+            if args.plan_closeout_recovery:
+                if not args.merge_sha or not args.request_id:
+                    parser.error("--plan-closeout-recovery requires --merge-sha and --request-id")
+                value = plan_closeout_recovery(args.record, authority_commit=args.authority_commit,
+                                               merge_sha=args.merge_sha, request_id=args.request_id)
+                print(json.dumps(value, sort_keys=True))
+                return 0
+            if not args.request or not args.request_sha256:
+                parser.error("--recover-closeout requires --request and --request-sha256")
+            value = recover_closeout(args.record, request_path=args.request,
+                request_sha256=args.request_sha256, authority_commit=args.authority_commit)
+        except (fleet.Hold, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
+            value = dict(state="HOLD", owner=OWNER, reason=str(exc), record=str(args.record))
+    elif args.recover_sync:
         if args.complete or not args.authority_commit:
             parser.error("--recover-sync requires --authority-commit and excludes --complete")
         value = recover_pending_sync(args.record, authority_commit=args.authority_commit)

@@ -10699,6 +10699,25 @@ def test_remote_merged_closeout_unmerged_findings_keep_premerge_owner(merged_clo
     assert "durable_closeout_path" not in outcome
 
 
+def test_timeout_continuation_checkpoint_preserves_consumed_request_identity(tmp_path):
+    path = tmp_path / "continuation.json"
+    args = dict(handoff_sha="a" * 64, target_branch="wave/exact", commit_sha="b" * 40,
+                receipt_decision="COMMIT_GO", steps_completed=["git_commit", "git_push"], pr_number="1322")
+    commit_mod.write_continuation_record(path, **args)
+    payload = json.loads(path.read_bytes())
+    marker = {"identity": {"head_sha": args["commit_sha"]}, "error": "timeout"}
+    payload["merge_wrapper_timeout"] = marker
+    path.write_text(json.dumps(payload))
+    commit_mod.write_continuation_record(path, **args, bot_review_request_sha=args["commit_sha"])
+    assert json.loads(path.read_bytes())["merge_wrapper_timeout"] == marker
+    before = path.read_bytes()
+    for key, value in (("commit_sha", "c" * 40), ("handoff_sha", "d" * 64),
+                       ("pr_number", "1323"), ("target_branch", "other")):
+        with pytest.raises(ValueError, match="cannot change"):
+            commit_mod.write_continuation_record(path, **{**args, key: value})
+        assert path.read_bytes() == before
+
+
 class TestCIPollFallbackTimeout:
     """Regression: fallback CI polling uses the configured commit CI budget.
 

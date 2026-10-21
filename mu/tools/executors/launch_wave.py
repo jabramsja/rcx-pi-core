@@ -2133,7 +2133,7 @@ def _native_phase_b_packet_sources_match(
     return _native_phase_b_packet_matches_config(packet_text, config, commit_ready=commit_ready)
 
 
-def _native_commit_ready_authority(repo_root: Path, *, bus_dir) -> dict[str, Any] | None:
+def _native_commit_ready_authority(repo_root: Path, config: WaveConfig, *, bus_dir) -> dict[str, Any] | None:
     try:
         from . import phase_b_executor as phase_b
     except ImportError:
@@ -2143,13 +2143,21 @@ def _native_commit_ready_authority(repo_root: Path, *, bus_dir) -> dict[str, Any
         if _path_lexists(adoption):
             return None
         authority = phase_b.commit_ready_resume_authority(repo_root, bus_dir=bus_dir)
+        plan = phase_b.load_plan_packet(repo_root, config.tracked_packet)
+        plan["content"] = _project_post_lock_recovery_status(plan["content"])
+        restored = phase_b.read_restored_launch_tracker_note(
+            repo_root, plan=plan, plan_path=config.tracked_packet, wave_id=config.wave_id,
+            routing_record=_native_stub_packet_contract_routing_record(config), bus_dir=bus_dir,
+        )
+        if restored is not None and restored != _tsn.render_tracker_sync_note(build_tracker_fields(config)) + "\n":
+            return None
         checkpoint = _ec.agent_bus_path(repo_root, bus_dir, "meta", "phase_b_commit_ready_checkpoint.json")
         if _path_lexists(checkpoint) and json.loads(_read_regular_file_bytes(
                 checkpoint, label="commit-ready producer checkpoint")) != authority:
             return None
         return {"progress": authority, "interruption": phase_b.commit_ready_interruption_authority(
             repo_root, authority, bus_dir=bus_dir)}
-    except (phase_b.PhaseBExecutorError, LaunchWaveError, OSError, ValueError,
+    except (phase_b.PhaseBExecutorError, _tsn.TrackerSyncError, LaunchWaveError, OSError, ValueError,
             TypeError, KeyError, IndexError, sqlite3.Error):
         return None
 
@@ -2234,8 +2242,18 @@ def _native_phase_b_advanced_tracker_note(repo_root: Path, config: WaveConfig, *
             packet_evidence_command=config.evidence_command, tracker_date=tracker_date,
             routing_record=_native_stub_packet_contract_routing_record(config),
         )
-        initial = _tsn.render_tracker_sync_note(build_tracker_fields(config))
-        return note if note in {rendered, initial} else None
+        restored = phase_b.read_restored_launch_tracker_note(
+            repo_root, plan=phase_b.load_plan_packet(repo_root, config.tracked_packet),
+            plan_path=config.tracked_packet, wave_id=config.wave_id,
+            routing_record=_native_stub_packet_contract_routing_record(config),
+            bus_dir=bus_dir,
+        )
+        if restored is not None:
+            # setup_tracker writes exactly one LF after the config renderer.
+            # Only this producer's physical-line projection is accepted.
+            initial = _tsn.render_tracker_sync_note(build_tracker_fields(config))
+            return initial if note == restored == initial + "\n" else None
+        return rendered if note == rendered else None
     except (OSError, UnicodeError, ValueError, TypeError, KeyError, IndexError,
             phase_b.PhaseBExecutorError):
         return None
@@ -4093,7 +4111,7 @@ def _native_phase_b_resume_authority(
             repo_root / config.tracked_packet).read_text().splitlines()
     except (OSError, UnicodeError):
         return None
-    commit_ready_authority = _native_commit_ready_authority(repo_root, bus_dir=bus_dir) if is_commit_ready else None
+    commit_ready_authority = _native_commit_ready_authority(repo_root, config, bus_dir=bus_dir) if is_commit_ready else None
     if is_commit_ready and commit_ready_authority is None:
         return None
     if not _native_phase_b_packet_sources_match(repo_root, config, commit_ready=is_commit_ready):
@@ -4487,7 +4505,7 @@ def _run_wave_setup_impl(
                     "remains fail-closed"
                 )
             if phase_b_authority["commit_ready_authority"] is not None and (
-                _native_commit_ready_authority(repo_root, bus_dir=bus_dir)
+                _native_commit_ready_authority(repo_root, config, bus_dir=bus_dir)
                 != phase_b_authority["commit_ready_authority"]
             ):
                 raise LaunchWaveError("Commit-ready evidence changed during claim; claim remains spent")

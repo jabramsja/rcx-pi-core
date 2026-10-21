@@ -8392,16 +8392,32 @@ def commit_ready_resume_authority(
                                                 "total_rounds": state["private_attr_review_round"]}):
         raise PhaseBExecutorError("Supervisor package scope or completed review accounting changed")
     note = package["tracker_note_text"]
-    note_date = note.split("- Tracker sync note (", 1)[1].split(",", 1)[0]
-    expected_note = build_phase_b_tracker_note(
-        wave_id=wave, task_id=identity["task_id"], wave_class=package["wave_class"],
-        target_gate_id="G8", plan_path=plan_path, plan_content=old_packet,
-        changed_files=current["staged_files"], test_files=state["private_attr_gate_test_files"],
-        receipt_path=".scratch/phase_b_supervisor_package.json",
-        bridge_rounds=state["private_attr_review_round"], reentry=False,
-        founder_override=wave, pre_supervisor=True, tracker_date=note_date,
-        packet_evidence_command=package["evidence_command"], routing_record=route,
+    spec_identity = route["candidate_authority"]["spec_identity"]
+    phase_a = _load_phase_a_executor_for_launch_tracker_restore()
+    try:
+        native_contract = phase_a.native_stub_packet_contract_from_routing(route)
+    except phase_a.PhaseAExecutorError as exc:
+        raise PhaseBExecutorError(f"Commit-ready native launch authority is invalid: {exc}") from exc
+    if (package.get("wave_class") != spec_identity["wave_class"]
+            or (native_contract is not None
+                and package.get("evidence_command") != native_contract["evidence_command"])):
+        raise PhaseBExecutorError("Supervisor package class or evidence differs from launch authority")
+    expected_note = read_restored_launch_tracker_note(
+        repo_root, plan={**load_plan_packet(repo_root, plan_path), "content": old_packet},
+        plan_path=plan_path, wave_id=wave, routing_record=route,
     )
+    restored_note = expected_note is not None
+    if not restored_note:
+        note_date = note.split("- Tracker sync note (", 1)[1].split(",", 1)[0]
+        expected_note = build_phase_b_tracker_note(
+            wave_id=wave, task_id=identity["task_id"], wave_class=spec_identity["wave_class"],
+            target_gate_id="G8", plan_path=plan_path, plan_content=old_packet,
+            changed_files=current["staged_files"], test_files=state["private_attr_gate_test_files"],
+            receipt_path=".scratch/phase_b_supervisor_package.json",
+            bridge_rounds=state["private_attr_review_round"], reentry=False,
+            founder_override=wave, pre_supervisor=True, tracker_date=note_date,
+            packet_evidence_command=package["evidence_command"], routing_record=route,
+        )
     if note != expected_note:
         raise PhaseBExecutorError("Tracker note is not the native pre-supervisor rendering")
     old_tasks = git("cat-file", "blob", old_blobs["TASKS.md"]["oid"])
@@ -8409,7 +8425,10 @@ def commit_ready_resume_authority(
     old_notes = _same_wave_tracker_note_indices(old_tasks, wave)
     new_notes = _same_wave_tracker_note_indices(tasks, wave)
     old_lines, new_lines = old_tasks.splitlines(keepends=True), tasks.splitlines(keepends=True)
-    if len(old_notes) != 1 or len(new_notes) != 1 or new_lines[new_notes[0]] != (note + "\n").encode():
+    # Restoration publishes the captured physical line, including its terminator.
+    # The generic renderer publishes text and its writer appends one newline.
+    expected_line = expected_note.encode() if restored_note else (expected_note + "\n").encode()
+    if len(old_notes) != 1 or len(new_notes) != 1 or new_lines[new_notes[0]] != expected_line:
         raise PhaseBExecutorError("Missing exact producer tracker note")
     old_lines.pop(old_notes[0])
     new_lines.pop(new_notes[0])
@@ -9987,6 +10006,46 @@ def _restored_launch_tracker_note_text(
             "restored launch-tracker note must be exactly one non-empty physical line",
         )
     return decoded_note
+
+
+def read_restored_launch_tracker_note(
+    repo_root: Path, *, plan: dict[str, Any], plan_path: str, wave_id: str,
+    routing_record: dict[str, Any], bus_dir: str | Path | None = None,
+) -> str | None:
+    """Read the exact launch producer's note, without capturing or restoring it.
+
+    The opt-in, native contract, candidate spec, base/source/branch and sealed
+    capture select this producer. Package text is never an authority source.
+    A restored checkpoint is required before invoking the existing readback,
+    whose restored-state path cannot write the tracker or checkpoint.
+    """
+    if bus_dir is not None:
+        token = _ACTIVE_BUS_DIR.set(agent_bus_relpath(bus_dir))
+        try:
+            return read_restored_launch_tracker_note(
+                repo_root, plan=plan, plan_path=plan_path, wave_id=wave_id,
+                routing_record=routing_record,
+            )
+        finally:
+            _ACTIVE_BUS_DIR.reset(token)
+    if not _launch_tracker_restore_marker_required(str(plan.get("content") or "")):
+        return None
+    authority, launch_route, spec, contract = _resolve_launch_tracker_restore_authority(
+        repo_root, plan=plan, plan_path=plan_path, wave_id=wave_id,
+        routing_record=routing_record,
+    )
+    state_path = _launch_tracker_restore_state_file_path(repo_root)
+    if state_path.is_symlink() or not state_path.is_file():
+        raise PhaseBExecutorError("Missing regular restored launch-tracker authority")
+    state = _load_launch_tracker_restore_state(
+        repo_root, authority=authority, authority_spec=spec,
+        native_contract=contract, launch_route=launch_route,
+    )
+    if state is None or state["status"] != "restored":
+        raise PhaseBExecutorError("Pre-supervisor note requires restored launch authority")
+    return _restored_launch_tracker_note_text(
+        repo_root, {"state": state, "authority": authority}, wave_id=wave_id,
+    )
 
 
 def _launch_tracker_restore_error_result(

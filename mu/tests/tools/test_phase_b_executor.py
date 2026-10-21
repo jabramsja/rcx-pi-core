@@ -9206,8 +9206,10 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
     from meta_bridge_supervisor import MetaBridgeResponse, write_pre_commit_receipt, build_meta_reviewer_prompt
     from executor_common import emit_pipeline_agent_event
 
-    native_status = getattr(request, "param", "future") in {"status-refresh", "post-reentry"}
-    post_reentry = getattr(request, "param", "future") == "post-reentry"
+    scenario = getattr(request, "param", "future")
+    native_status = scenario in {"status-refresh", "post-reentry", "restored-status-refresh"}
+    post_reentry = scenario == "post-reentry"
+    restored = scenario.startswith("restored-")
     repo = tmp_path / "commit-ready"
     repo.mkdir()
     wave = "commit-ready-resume-fixture"
@@ -9223,6 +9225,16 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
     subprocess.run(["git", "add", str(collector)], cwd=repo, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "fixture measured collector"], cwd=repo, check=True, capture_output=True)
     (repo / "mu/tools/executors").mkdir(parents=True, exist_ok=True)
+    if restored:
+        # Preserve the actual executor bytes in the disposable exact-base
+        # source checkout used by the source-HEAD authority check.
+        (repo / "mu/tools/executors/phase_b_executor.py").write_bytes(
+            Path(pb_mod.__file__).read_bytes())
+        subprocess.run(["git", "add", "mu/tools/executors/phase_b_executor.py"],
+                       cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "fixture executor source"],
+                       cwd=repo, check=True, capture_output=True)
+        monkeypatch.setattr(pb_mod, "_launch_tracker_restore_source_repo_root", lambda: repo)
     monkeypatch.setattr(launcher, "SCRIPT_DIR", repo / "mu/tools/executors")
     exclude = repo / ".git/info/exclude"
     exclude.write_text(exclude.read_text() + "\n.scratch/\n.agent_bus*/\n")
@@ -9239,6 +9251,8 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
         comparison_commit=_git_stdout(repo, "rev-parse", "HEAD"),
         pre_review_authority=True, implementer_agent="codex", reviewer_agent="codex",
         pager_route="notify-only",
+        work_items=(["Exercise the native checkpoint", pb_mod.LAUNCH_TRACKER_RESTORE_MARKER]
+                    if restored else ["Exercise the native checkpoint"]),
     )
     lane = SimpleNamespace(repo=repo, config=config, bus=bus, plan_path=config.tracked_packet,
                            test_path=test_path, indicator_path=indicator, reviews=[], gates=0,
@@ -9282,7 +9296,16 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
             return dict(exit_code=0, receipt_path="", parsed=dict(
                 decision="NEEDS_PHASE_B", status="success", findings=[], summary="Latest native status refresh finding"))
         if not lane.receipts:
+            lane.first_package = package_path.read_bytes()
             return approve(repo_root, package_path, **kwargs)
+        if restored and not native_status:
+            lane.progress = pb_mod.commit_ready_resume_authority(repo, bus_dir=bus)
+            lane.checkpoint = (repo / bus / "meta/phase_b_commit_ready_checkpoint.json").read_bytes()
+            assert json.loads(lane.checkpoint) == lane.progress
+            if scenario == "restored-checkpoint":
+                raise PrivateReviewCrash("before final supervisor")
+            if scenario == "restored-success":
+                return approve(repo_root, package_path, **kwargs)
         if native_status:
             # NEEDS_PHASE_B is a terminal response, never a commit receipt.
             return dict(exit_code=0, receipt_path="", parsed=dict(
@@ -9308,7 +9331,7 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
         lane.route = json.loads((repo / bus / "meta/post_merge_routing.json").read_bytes())
         lane.result = pb_mod.run_phase_b(repo, lane.plan_path, bus_dir=bus,
             routing_record_override={**lane.route, "decision": "ROUTE_PHASE_B"})
-        if getattr(request, "param", "future") == "legacy":
+        if scenario == "legacy":
             # The old producer had no supplemental checkpoint. Let the real
             # terminal producer issue its original receipt shape in that case.
             (repo / bus / "meta/phase_b_commit_ready_checkpoint.json").unlink(missing_ok=True)
@@ -9322,8 +9345,17 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
         stack.enter_context(patch.object(pb_mod, "run_private_attr_gate", side_effect=gate))
         stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", return_value={"passed": True, "exit_code": 0}))
         stack.enter_context(patch.object(pb_mod, "run_pre_commit_supervisor", side_effect=supervisor))
-        with pytest.raises(launcher.LaunchWaveError, match="dispatcher launch failed"):
-            launcher.run_wave_setup(repo, config, launch=True, runner=dispatched, bus_dir=bus)
+        if scenario == "restored-checkpoint":
+            with pytest.raises(PrivateReviewCrash, match="before final supervisor"):
+                launcher.run_wave_setup(repo, config, launch=True, runner=dispatched, bus_dir=bus)
+        else:
+            with pytest.raises(launcher.LaunchWaveError, match="dispatcher launch failed"):
+                launcher.run_wave_setup(repo, config, launch=True, runner=dispatched, bus_dir=bus)
+    if scenario in {"restored-success", "restored-checkpoint"}:
+        if scenario == "restored-success":
+            assert lane.result["status"] == "commit_ready", lane.result
+        lane.approve, lane.impl = approve, impl
+        return lane
     if native_status:
         assert lane.result["status"] == "continue_phase_b", lane.result
         lane.approve, lane.impl, lane.bridge, lane.gate = approve, impl, bridge, gate
@@ -9335,11 +9367,138 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
     prepared = json.loads(lane.prepared)
     delta = {blob["path"] for blob in prepared["private_attr_prepared_authority"]["index"]["blobs"]
              if hashlib.sha256((repo / blob["path"]).read_bytes()).hexdigest() != blob["sha256"]}
-    assert delta == {"TASKS.md", lane.plan_path, indicator}
+    if restored:
+        assert delta == {lane.plan_path, indicator}
+        assert json.loads(lane.first_package)["tracker_note_text"].encode() in (repo / "TASKS.md").read_bytes()
+    else:
+        assert delta == {"TASKS.md", lane.plan_path, indicator}
     assert lane.state_path.read_bytes() == lane.prepared
     lane.approve = approve
     lane.impl = impl
     return lane
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["restored-success"], indirect=True)
+def test_native_restored_note_reaches_full_commit_ready_checkpoint(commit_ready_resume_lane):
+    from launch_wave import build_tracker_fields
+    from tracker_sync_note import render_tracker_sync_note
+    from meta_bridge_supervisor import compute_staged_sha, verify_pre_commit_receipt
+
+    lane = commit_ready_resume_lane
+    expected = render_tracker_sync_note(build_tracker_fields(lane.config)) + "\n"
+    package = json.loads(lane.first_package)
+    assert package["tracker_note_text"] == expected
+    assert len(lane.reviews) == 2 and "private-attr" in lane.reviews[-1]
+    assert len(lane.receipts) == 2
+    assert lane.progress["initial_receipt_sha256"] == hashlib.sha256(lane.receipts[0].read_bytes()).hexdigest()
+    assert lane.progress["package_sha256"] == hashlib.sha256(lane.first_package).hexdigest()
+    assert json.loads(lane.receipts[0].read_bytes())["staged_sha"] == lane.progress["approved_staged_sha"]
+    assert json.loads(lane.receipts[1].read_bytes())["staged_sha"] == compute_staged_sha(lane.repo)
+    valid, detail = verify_pre_commit_receipt(lane.repo, receipt_path=lane.receipts[1], bus_dir=lane.bus)
+    assert valid, detail
+    assert not lane.state_path.exists()
+    handoff = json.loads((lane.repo / lane.bus / "executors/phase_b_handoff.json").read_bytes())
+    assert handoff["tracker_note_text"] == expected
+    assert handoff["pre_commit_receipt_path"] == str(lane.receipts[1].relative_to(lane.repo))
+    events = (lane.repo / lane.bus / "observability/pipeline_agent_events.jsonl").read_text()
+    assert "commit_ready_status_refresh_COMMIT_GO" in events
+    assert "ERROR_INTERNAL" not in events
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["restored-checkpoint"], indirect=True)
+@pytest.mark.parametrize("fault", [
+    "note", "newline", "date", "progress", "evidence", "scope", "class", "task", "wave",
+    "round", "packet", "indicator", "source", "index", "branch", "base", "role",
+    "config", "receipt", "receipt_package", "receipt_index", "restore", "restore_missing",
+    "route", "spec", "unrelated_index",
+])
+def test_native_restored_checkpoint_holds_changed_authority(commit_ready_resume_lane, fault):
+    lane = commit_ready_resume_lane
+    repo = lane.repo
+    package_path = repo / ".scratch/phase_b_supervisor_package.json"
+    package = json.loads(package_path.read_bytes())
+    route_path = repo / lane.bus / "meta/post_merge_routing.json"
+    if fault in {"note", "newline", "date", "progress", "evidence", "scope", "class", "task", "wave", "round"}:
+        if fault == "note":
+            package["tracker_note_text"] = package["tracker_note_text"].replace(lane.config.title, "Wrong title")
+        elif fault == "newline":
+            package["tracker_note_text"] += "\n"
+        elif fault == "date":
+            package["tracker_note_text"] = package["tracker_note_text"].replace(lane.config.date, "2026-10-04", 1)
+        elif fault == "progress":
+            package["tracker_note_text"] = package["tracker_note_text"].replace("builder exists", "unproved progress")
+        elif fault == "evidence":
+            package["evidence_command"] = "true"
+        elif fault == "scope":
+            package["changed_files"] = package["changed_files"][:-1]
+        elif fault == "class":
+            package["wave_class"] = "MAINTENANCE"
+        elif fault == "task":
+            package["task_id"] = "[FOREIGN]"
+        elif fault == "wave":
+            package["wave_name"] = "foreign"
+        else:
+            package["bridge_status"]["total_rounds"] += 1
+        package_path.write_text(json.dumps(package))
+    elif fault in {"packet", "indicator", "source", "index", "unrelated_index"}:
+        path = {"packet": lane.plan_path, "indicator": lane.indicator_path,
+                "unrelated_index": "reports/control_plane/plan.md"}.get(fault, "f.py")
+        if fault == "indicator":
+            data = json.loads((repo / path).read_bytes())
+            data["wave_id"] = "foreign"
+            (repo / path).write_text(json.dumps(data))
+        else:
+            (repo / path).write_bytes((repo / path).read_bytes() + b"\n# unrelated\n")
+        if fault != "source":
+            subprocess.run(["git", "add", path], cwd=repo, check=True, capture_output=True)
+    elif fault == "branch":
+        subprocess.run(["git", "checkout", "-b", "foreign"], cwd=repo, check=True, capture_output=True)
+    elif fault == "base":
+        subprocess.run(["git", "commit", "--allow-empty", "-m", "foreign base"],
+                       cwd=repo, check=True, capture_output=True)
+    elif fault in {"role", "route"}:
+        route = json.loads(route_path.read_bytes())
+        if fault == "role":
+            route["candidate_authority"]["spec_identity"]["reviewer_agent"] = "claude"
+        else:
+            route["native_stub_packet_contract"]["digest"] = "0" * 64
+        route_path.write_text(json.dumps(route))
+    elif fault == "config":
+        config = repo / lane.bus / "bridge_config.json"
+        config.write_bytes(config.read_bytes() + b" ")
+    elif fault in {"receipt", "receipt_package", "receipt_index"}:
+        receipt = json.loads(lane.receipts[0].read_bytes())
+        key = {"receipt": "decision", "receipt_package": "package_digest",
+               "receipt_index": "staged_sha"}[fault]
+        receipt[key] = "NEEDS_PHASE_B" if fault == "receipt" else "0" * 64
+        lane.receipts[0].write_text(json.dumps(receipt))
+    elif fault in {"restore", "restore_missing"}:
+        path = repo / lane.bus / "executors" / pb_mod.LAUNCH_TRACKER_RESTORE_STATE_FILE_NAME
+        if fault == "restore_missing":
+            path.unlink()
+        else:
+            saved = json.loads(path.read_bytes())
+            saved["status"] = "removed"
+            path.write_text(json.dumps(saved))
+    elif fault == "spec":
+        path = Path(lane.route["candidate_authority"]["spec_path"])
+        saved = json.loads(path.read_bytes())
+        saved["wave_class"] = "MAINTENANCE"
+        path.write_text(json.dumps(saved))
+    paths = [lane.state_path, lane.receipts[0], package_path, repo / ".git/index", route_path]
+    paths += list((repo / lane.bus / "meta/candidate_authority").glob("*.json"))
+    before = {p: p.read_bytes() for p in paths}
+    with pytest.raises(pb_mod.PhaseBExecutorError):
+        pb_mod.commit_ready_resume_authority(repo, bus_dir=lane.bus)
+    assert {p: p.read_bytes() for p in paths} == before
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["restored-checkpoint"], indirect=True)
+def test_ordinary_native_checkpoint_is_not_interrupted_review_authority(commit_ready_resume_lane):
+    lane = commit_ready_resume_lane
+    progress = pb_mod.commit_ready_resume_authority(lane.repo, bus_dir=lane.bus)
+    with pytest.raises(pb_mod.PhaseBExecutorError, match="interrupted-review sequence"):
+        pb_mod.commit_ready_interruption_authority(lane.repo, progress, bus_dir=lane.bus)
 
 
 @pytest.mark.parametrize("commit_ready_resume_lane", ["status-refresh", "post-reentry"], indirect=True)
