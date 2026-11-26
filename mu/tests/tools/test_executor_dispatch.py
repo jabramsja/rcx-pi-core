@@ -13179,7 +13179,9 @@ class TestBridgeR6Finding1NeedsPhaseBreentryPackage:
             "bridge_status", "evidence_handles", "blocker_report_paths",
             "current_judgment",
         }
-        assert captured_reader_agents == ["codex"]
+        assert captured_reader_agents == [json.loads(
+            (REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json").read_text()
+        )["role_agents"]["implementer"]]
         missing = required_fields - set(captured_package.keys())
         assert not missing, f"Supervisor package missing fields: {sorted(missing)}"
 

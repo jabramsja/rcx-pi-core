@@ -55,8 +55,8 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
     },
     "bridge_agent_defaults": {
         "claude": {
-            "display_name": "Claude Opus 4.8 max",
-            "model": "claude-opus-4-8",
+            "display_name": "Claude Opus 5.5 max",
+            "model": "claude-opus-5-5",
             "effort": "max",
         },
         "codex": {

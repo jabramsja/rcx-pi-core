@@ -3971,18 +3971,18 @@ def test_requested_targets_both_expands_to_codex_and_claude():
     assert pager_mod._requested_targets("claude") == ["claude"]  # ANTICHEAT_OK: route fan-out contract test
 
 
-def test_executor_config_committed_codex_role_and_pager_defaults():
-    """The committed role, backend, reviewer, and pager selections are all Codex."""
+def test_executor_config_committed_role_and_pager_defaults():
+    """Pin the founder's 2026-11-26 roles and unchanged Codex pager selection."""
     repo_root = Path(__file__).resolve().parents[3]
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    assert config["role_agents"] == {"implementer": "codex", "reviewer": "codex"}
+    assert config["role_agents"] == {"implementer": "claude", "reviewer": "codex"}
     assert config["backends"] == {
         "post_merge_supervisor": "codex",
         "dialectic_executor": "codex",
-        "phase_a_executor": "codex",
-        "phase_b_executor": "codex",
-        "bot_remediation": "codex",
+        "phase_a_executor": "claude",
+        "phase_b_executor": "claude",
+        "bot_remediation": "claude",
         "commit_executor": None,
     }
     assert config["bridge_reviewers"] == {"phase_a": "codex", "phase_b": "codex"}
