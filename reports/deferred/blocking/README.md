@@ -27,3 +27,7 @@ Archived source snapshots for extracted blocker residue live in:
 
 - `reports/archive/deferred/`
 - `reports/codex/Archive/blockers/`
+
+Historical closures:
+
+- [tmux pane wrapper-shell identity (2026-11-26)](../../archive/deferred/tmux-pane-wrapper-shell-identity-2026-11-26_closed-by-workingrcx-tmux-pane-exec-identity-r4-2026-11-26.md) — structural exec fix in `workingrcx-tmux-pane-exec-identity-r4-2026-11-26`; local validation and delivery status are recorded in the archived packet.

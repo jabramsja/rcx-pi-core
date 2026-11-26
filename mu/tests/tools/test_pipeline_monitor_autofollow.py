@@ -371,7 +371,7 @@ while true; do sleep 0.1; done
         # Keep the selected source in the environment, as the live autofollow
         # resolver does. tmux may retain its initial argv: embedding the source
         # there would correctly make the server itself a retirement hold.
-        launch = ("cd " + shlex.quote(str(primary)) + " && RCX_AGENT_BUS_DIR=.agent_bus bash "
+        launch = ("cd " + shlex.quote(str(primary)) + " && exec env RCX_AGENT_BUS_DIR=.agent_bus bash "
                   + shlex.quote(str(script)))
         run("new-session", "-d", "-s", "reader-test", launch)
         pane = run("display-message", "-p", "-t", "reader-test", "#{pane_id}")
@@ -1262,6 +1262,78 @@ def _start_and_capture(
 
 def _pane_command_lines(log_lines: list[str], pane_script: str) -> list[str]:
     return [line for line in log_lines if pane_script in line]
+
+
+@pytest.mark.parametrize("autofollow", [False, True], ids=["pinned", "default"])
+def test_monitor_pane_pids_are_scripts_under_non_exec_bash(tmp_path, monkeypatch, autofollow):
+    from mu.tests.tools.test_worktree_lifecycle import make_native_lane, observed_process_identity
+    primary, lane, _, env = make_native_lane(tmp_path, monkeypatch)
+    bash = shutil.which("bash")
+    assert bash, "The pane identity regression requires Bash"
+    # An EXIT trap disables Bash's last-command exec optimization, including
+    # on newer Bash versions that otherwise conceal the macOS 3.2 defect.
+    startup = tmp_path / "non-exec-bash.env"
+    startup.write_text("trap ':' EXIT\n")
+    obs = primary / "mu/tools/observability"
+    obs.mkdir(parents=True)
+    watcher = obs / "rcx_log_watcher.sh"
+    scripts = [watcher, *(obs / name for name in (
+        "_pane_findings.sh", "_pane_processes.sh", "_pane_timeline.sh"))]
+    control = obs / "unexeced-control.sh"
+    for script in [control, *scripts]:
+        # Independently record the script PID, then block in a Bash builtin
+        # until teardown sends Enter. No descendant process needs orphan cleanup.
+        script.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$$\" > \"$0.pid\"\nread -r done\n")
+
+    # Evaluate the actual production command constructions, preserving all
+    # quoting, unsets and env assignments without starting a live monitor owner.
+    source = (OBSERVABILITY_DIR / "pipeline_monitor.sh").read_text()
+    start = source.index('  local OBS_DIR="$repo_root/mu/tools/observability"\n')
+    construction = source[start:source.index("\n  # Create session", start)]
+    build = ('build() {\n  local repo_root="$1" watcher="$2"\n'
+             '  local BUS_DIR="$3" IDENTITY_LANE=reader-test AUTOFOLLOW_BUS_SIGNAL="$4"\n'
+             + construction
+             + '\n  printf "%s\\n" "$pane1_cmd" "$pane2_cmd" "$pane3_cmd" "$pane4_cmd"\n}\nbuild "$@"')
+    result = subprocess.run([bash, "-c", build, "pane-identity", str(primary), str(watcher),
+                             ".agent_bus" if autofollow else ".agent_bus-alpha", str(int(autofollow))],
+                            env=env, capture_output=True, text=True, check=True, timeout=_TIMEOUT_S)
+    commands = result.stdout.splitlines()
+    assert len(commands) == len(scripts)
+
+    with stale_live_watcher(tmp_path, primary, lane, env, monkeypatch) as (run, _, _, _, _):
+        run("set-option", "-g", "default-shell", bash)
+        run("set-environment", "-t", "reader-test", "BASH_ENV", str(startup))
+        assert run("show-options", "-gv", "default-shell") == bash
+        panes = []
+
+        def launch(command, script):
+            pane = run("new-window", "-d", "-t", "reader-test:", "-P", "-F", "#{pane_id}", command)
+            panes.append(pane)
+            marker = Path(str(script) + ".pid")
+            script_pid = int(_wait_for(lambda: marker.read_text().strip() if marker.exists() else ""))
+            pane_pid = int(run("display-message", "-p", "-t", pane, "#{pane_pid}"))
+            return pane_pid, script_pid
+
+        try:
+            # Prove this shell actually retains an un-exec'd compound command;
+            # the regression must not pass merely because a shell optimized it.
+            pane_pid, script_pid = launch(
+                "cd " + shlex.quote(str(primary)) + " && bash " + shlex.quote(str(control)), control)
+            assert pane_pid != script_pid
+            assert observed_process_identity(script_pid)["ppid"] == pane_pid
+            for command, script in zip(commands, scripts):
+                pane_pid, script_pid = launch(command, script)
+                identity = observed_process_identity(pane_pid)
+                assert pane_pid == script_pid, dict(script=str(script), script_pid=script_pid, pane=identity)
+                argv = shlex.split(identity["command"])
+                assert Path(argv[0]).name == "bash" and argv[1:] == [str(script)], identity
+        finally:
+            live = set(run("list-panes", "-a", "-F", "#{pane_id}").splitlines())
+            for pane in panes:
+                if pane in live:
+                    run("send-keys", "-t", pane, "Enter")
+            _wait_for(lambda: not set(panes).intersection(
+                run("list-panes", "-a", "-F", "#{pane_id}").splitlines()))
 
 
 @pytest.mark.parametrize("owner_only", [True, False], ids=["owner", "start"])
