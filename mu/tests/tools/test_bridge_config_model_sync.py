@@ -469,3 +469,66 @@ def test_sync_updates_existing_adapter_max_turns_from_example(tmp_path):
     assert cmd[cmd.index("--max-turns") + 1] == "100", (
         "existing adapter --max-turns not synced from the example seed"
     )
+
+
+_COMMITTED_SEED = REPO_ROOT / "mu" / "tools" / "agents" / "bridge_config.example.json"
+_COMMITTED_EXECUTOR_CONFIG = REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json"
+
+
+def test_committed_seed_claude_and_fable_max_turns_is_400():
+    """The committed seed gives the claude and fable implementer adapters a 400-turn
+    budget (2026-11-26: throughput R8, the first heavy wave on the Claude implementer,
+    stopped on error_max_turns at the previously seeded 100). Codex carries no turn flag.
+    """
+    seed = json.loads(_COMMITTED_SEED.read_text(encoding="utf-8"))["agents"]
+    for agent in ("claude", "fable"):
+        cmd = seed[agent]["cmd"]
+        assert cmd.count("--max-turns") == 1, (agent, cmd)
+        assert cmd[cmd.index("--max-turns") + 1] == "400", (
+            f"committed seed {agent} --max-turns is not 400"
+        )
+    assert "--max-turns" not in seed["codex"]["cmd"]
+
+
+def test_sync_propagates_committed_seed_max_turns_into_existing_lane_bus(tmp_path):
+    """sync_bridge_config_agents_from_defaults lifts a PRE-EXISTING lane bus adapter
+    still on the old --max-turns 100 to the committed seed's 400 for claude and fable,
+    and leaves an already-converged codex command byte-for-byte unchanged.
+    """
+    defaults = json.loads(_COMMITTED_EXECUTOR_CONFIG.read_text(encoding="utf-8"))[
+        "bridge_agent_defaults"
+    ]
+    _seed_executor_config(tmp_path, defaults=defaults)
+    _seed_bridge_example(
+        tmp_path, json.loads(_COMMITTED_SEED.read_text(encoding="utf-8"))["agents"]
+    )
+    codex_cmd = _codex_cmd(
+        model=defaults["codex"]["model"], effort=defaults["codex"]["reasoning_effort"]
+    )
+    bus_dir = ".agent_bus-turn-budget"
+    lane = executor_common.bridge_config_path(tmp_path, bus_dir)
+    lane.parent.mkdir(parents=True)
+    lane.write_text(
+        json.dumps(
+            {
+                "agents": {
+                    "claude": {"mode": "live", "cmd": _cmd_max_turns(defaults["claude"]["model"], 100)},
+                    "fable": {"mode": "live", "cmd": _cmd_max_turns(defaults["fable"]["model"], 100)},
+                    "codex": {"mode": "live", "cmd": list(codex_cmd)},
+                }
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    assert sync_bridge_config_agents_from_defaults(tmp_path, bus_dir=bus_dir) == lane
+
+    synced = json.loads(lane.read_text())["agents"]
+    for agent in ("claude", "fable"):
+        cmd = synced[agent]["cmd"]
+        assert cmd.count("--max-turns") == 1, (agent, cmd)
+        assert cmd[cmd.index("--max-turns") + 1] == "400", (
+            f"lane bus {agent} --max-turns not synced from the committed seed"
+        )
+    assert synced["codex"]["cmd"] == codex_cmd
