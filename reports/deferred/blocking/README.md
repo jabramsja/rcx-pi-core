@@ -6,8 +6,19 @@ promotion narratives.
 
 Active blockers:
 
-- No active blocking deferred packets remain in this folder after PR #912
-  remediated the founder-ordered `/mu` structural blocking finding.
+- No unresolved implementation blocker is recorded in this folder. The tmux
+  identity fix below is locally validated; native publication gates remain pending.
+
+Historical closures:
+
+- [tmux pane wrapper-shell identity](tmux-pane-wrapper-shell-identity-2026-11-26.md)
+  was resolved locally in Phase B by
+  `workingrcx-tmux-pane-exec-identity-r3-2026-11-26`: the bash reproduction had
+  17 failures and 188 passes; after the structural exec fix, both bash and zsh
+  passed all 207 targeted tests. Exact reader/pane adoption authority is unchanged.
+  The closed packet remains at its allowlisted path. Staged L4, independent
+  review, pre-push, CI and publication remain outer-executor obligations.
+- PR #912 remediated the founder-ordered `/mu` structural blocking finding.
 - The former repo-code blocking source packet moved to
   `reports/archive/deferred/founder_ordered_redteam_repo_code_audit_2026-05-05_blocking_closed-by-founder-ordered-redteam-mu-structural-blocking-remediation-2026-05-06_PR912.md`.
 - The docs-audit blocking-lane packet recorded no blocking findings and was
