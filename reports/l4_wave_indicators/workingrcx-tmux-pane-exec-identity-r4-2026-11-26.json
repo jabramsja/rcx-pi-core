@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-tmux-pane-exec-identity-r4-2026-11-26",
+  "repeat_run_speedup_ratio": 0.983724,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.263703,
+  "repeat_run_raw_seconds": [
+    0.259411,
+    0.263703
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.259411
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.523114
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-11-26T12:07:36Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "fbe43a5e71fd59de07f9454b8cb9189dab346d7c"
+}
