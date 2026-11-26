@@ -1,12 +1,12 @@
 {
   "role_agents": {
-    "implementer": "codex",
+    "implementer": "claude",
     "reviewer": "codex"
   },
   "bridge_agent_defaults": {
     "claude": {
-      "display_name": "Claude Opus 4.8 max",
-      "model": "claude-opus-4-8",
+      "display_name": "Claude Opus 5.5 max",
+      "model": "claude-opus-5-5",
       "effort": "max"
     },
     "codex": {
@@ -15,17 +15,17 @@
       "reasoning_effort": "max"
     },
     "fable": {
-      "display_name": "Claude Fable 5 max",
-      "model": "claude-fable-5",
-      "effort": "max"
+      "display_name": "Claude Fable 5.2 high",
+      "model": "claude-fable-5-2",
+      "effort": "high"
     }
   },
   "backends": {
     "post_merge_supervisor": "codex",
     "dialectic_executor": "codex",
-    "phase_a_executor": "codex",
-    "phase_b_executor": "codex",
-    "bot_remediation": "codex",
+    "phase_a_executor": "claude",
+    "phase_b_executor": "claude",
+    "bot_remediation": "claude",
     "commit_executor": null
   },
   "bridge_reviewers": {

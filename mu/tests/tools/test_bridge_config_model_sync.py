@@ -127,17 +127,57 @@ def test_committed_codex_menu_and_fallback_metadata_are_gpt_6_astra_max():
         == expected_codex
     )
 
-    assert committed["role_agents"] == {"implementer": "codex", "reviewer": "codex"}
+    assert committed["role_agents"] == {"implementer": "claude", "reviewer": "codex"}
     assert committed["backends"] == {
         "post_merge_supervisor": "codex",
         "dialectic_executor": "codex",
-        "phase_a_executor": "codex",
-        "phase_b_executor": "codex",
-        "bot_remediation": "codex",
+        "phase_a_executor": "claude",
+        "phase_b_executor": "claude",
+        "bot_remediation": "claude",
         "commit_executor": None,
     }
     assert committed["bridge_reviewers"] == {"phase_a": "codex", "phase_b": "codex"}
     assert committed["pipeline_agent_pager"] == {"enabled": True, "route": "codex"}
+
+
+@pytest.mark.parametrize(
+    ("agent", "expected"),
+    [
+        ("claude", {
+            "display_name": "Claude Opus 5.5 max",
+            "model": "claude-opus-5-5",
+            "effort": "max",
+        }),
+        ("fable", {
+            "display_name": "Claude Fable 5.2 high",
+            "model": "claude-fable-5-2",
+            "effort": "high",
+        }),
+    ],
+)
+def test_committed_claude_menu_metadata_and_synced_command(tmp_path, agent, expected):
+    committed = json.loads(
+        (REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json").read_text()
+    )
+    defaults = committed["bridge_agent_defaults"]
+    assert defaults[agent] == expected
+    fallback = executor_common.DEFAULT_EXECUTOR_CONFIG["bridge_agent_defaults"]
+    if agent == "claude":
+        assert fallback[agent] == expected
+    else:
+        assert agent not in fallback  # Fable remains a committed-only opt-in entry.
+
+    _seed_executor_config(tmp_path, defaults=defaults)
+    bridge = _seed_bridge_config(
+        tmp_path, {agent: {"mode": "live", "display_name": "stale", "cmd": _claude_cmd()}}
+    )
+    assert sync_bridge_config_agents_from_defaults(tmp_path) == bridge
+
+    synced = json.loads(bridge.read_text())["agents"][agent]
+    cmd = synced["cmd"]
+    assert cmd[cmd.index("--model") + 1] == expected["model"]
+    assert cmd[cmd.index("--effort") + 1] == expected["effort"]
+    assert synced["display_name"] == expected["display_name"]
 
 
 def test_sync_corrects_model_drift(tmp_path):
