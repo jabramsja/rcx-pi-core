@@ -50,6 +50,10 @@ candidate_authority_mod = load_module(
 )
 
 _PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
+# Fixture reviewer: the committed registry, never a literal model or effort.
+_COMMITTED_CODEX = json.loads(
+    (REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json").read_text()
+)["bridge_agent_defaults"]["codex"]
 
 
 @pytest.fixture
@@ -2264,8 +2268,8 @@ def _commit_inventory_fixture(tmp_path, *, generated=True, authority_required=Tr
     bus_root.mkdir(exist_ok=True)
     (bus_root / "bridge_config.json").write_text(json.dumps({
         "agents": {"codex": {"display_name": "Codex", "cmd": [
-            "codex", "exec", "-", "--json", "-m", "gpt-6-astra",
-            "-c", 'model_reasoning_effort="max"',
+            "codex", "exec", "-", "--json", "-m", _COMMITTED_CODEX["model"],
+            "-c", f'model_reasoning_effort="{_COMMITTED_CODEX["reasoning_effort"]}"',
         ]}},
     }))
     spec_path = candidate_authority_mod.write_authority_spec(repo, spec, bus_dir=bus)
@@ -2831,6 +2835,9 @@ class TestFinalReceiptAfterMechanicalGates:
         assert _inventory_git(case.repo, "rev-parse", "HEAD") == case.base
 
 
+# End-to-end controls here admit real Step 8b children. Two live ``ps`` queries can
+# disagree under machine churn, so admission observes one coherent real OS snapshot.
+@pytest.mark.usefixtures("coherent_native_validation")
 class TestReceiptChainEndToEnd:
     """Behavioral regression: the step 6 → step 7 receipt chain
     must work end-to-end with the corrected authority model.
@@ -3297,6 +3304,54 @@ class TestReceiptChainEndToEnd:
         assert packet_text.count("## Commit-Time Generated Governance Authorization") == 1
         assert packet_text.count(f"`{growth_path}`") >= 1
         assert cap_file.read_text(encoding="utf-8").count(f"FOUNDER_OVERRIDE:{wave_id}") == 1
+
+    def test_native_gate_admission_ignores_two_query_process_churn(self, tmp_path):
+        """Regression: pre-push-fast held the growth-cap retry test above.
+
+        Under xdist load a live process sat in one live ``ps`` query but not the
+        other in every bounded resample ("live process missing from process
+        observation"). This class reaches that observer only through the native
+        pytest gate (Step 8b), so inject exactly that census into the host reader
+        and drive the gate: the class boundary never consults the raw graph query,
+        and a real child still passes. test_executor_common pins the raw HOLD.
+        """
+        repo = _setup_repo(tmp_path)
+        test_path = "mu/tests/generated/test_receipt_chain_process_churn.py"
+        (repo / test_path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / test_path).write_text("def test_process_churn_case():\n    assert True\n", encoding="utf-8")
+        graph_command = ["ps", "-axo", "pid=,ppid="]
+        identity_command = ["ps", "axeww", "-o", "pid=,ppid=,lstart=,stat=,command="]
+        real_run = subprocess.run
+        raw_graph_queries = []
+        live = subprocess.Popen([sys.executable, "-B", "-c", "import time; time.sleep(300)"])
+
+        def churned_host_census(args, *a, **kw):
+            completed = real_run(args, *a, **kw)
+            if args == graph_command:
+                raw_graph_queries.append(args)
+                completed.stdout = "".join(row for row in completed.stdout.splitlines(keepends=True)
+                                           if row.split()[:1] != [str(live.pid)])
+            return completed
+
+        def pids(text):
+            return {row.split()[0] for row in text.splitlines() if row.split()}
+
+        try:
+            with patch.object(subprocess, "run", side_effect=churned_host_census):
+                graph = subprocess.run(graph_command, capture_output=True, text=True, check=True, timeout=5)
+                census = subprocess.run(identity_command, capture_output=True, text=True, check=True,
+                                        timeout=5, env={**os.environ, "LC_ALL": "C"})
+                # The injected census is the held one: a live process absent from one query.
+                assert str(live.pid) in pids(census.stdout) - pids(graph.stdout)
+                raw_graph_queries.clear()
+                gate = commit_mod.run_pytest_gate(repo, [test_path])
+            assert live.poll() is None
+        finally:
+            live.kill()
+            live.wait(timeout=5)
+        assert gate["passed"] is True and gate["exit_code"] == 0, gate
+        assert not gate.get("validation_budget_hold"), gate
+        assert raw_graph_queries == []
 
     @pytest.mark.parametrize(
         "retry_target",

@@ -619,6 +619,10 @@ def local_review_terminal_payload(result: dict[str, Any]) -> dict[str, Any] | No
             or parts[1:4] != ("meta", "local_pr_reviews", job)
             or parts[4] != ("attempt.json" if receipt["status"] == "STARTED" else "receipt.json")):
         return None
+    # The reviewer is the one this digest-bound receipt recorded: the native
+    # producer launched it only after matching the registry committed then. The
+    # current registry governs launch and approval (commit_executor), never this
+    # stop, so a moved, missing or unreadable registry cannot make it retryable.
     if (any(not isinstance(identity.get(k), str) or re.fullmatch(r"[0-9a-f]{40}", identity[k]) is None
             for k in ("head_sha", "base_sha", "merge_base_sha"))
             or not digest(identity.get("diff_sha256"))
@@ -629,8 +633,10 @@ def local_review_terminal_payload(result: dict[str, Any]) -> dict[str, Any] | No
                    for k in ("repository", "repo_root", "head_branch", "base_branch", "url"))
             or type(request.get("databaseId")) is not int or request["databaseId"] <= 0
             or not isinstance(request.get("author"), dict) or request["author"].get("__typename") != "User"
-            or reviewer.get("selected_agent") != "codex" or reviewer.get("model") != "gpt-6-astra"
-            or reviewer.get("effort") != "max" or reviewer.get("sandbox") != "read-only"
+            or reviewer.get("selected_agent") != "codex"
+            or not all(isinstance(reviewer.get(k), str) and reviewer[k] and reviewer[k] == reviewer[k].strip()
+                       for k in ("model", "effort"))
+            or reviewer.get("sandbox") != "read-only"
             or any(not digest(reviewer.get(k)) for k in
                    ("command_sha256", "bridge_config_sha256", "executor_config_sha256"))):
         return None

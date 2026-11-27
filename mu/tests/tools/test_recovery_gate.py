@@ -12,11 +12,17 @@ from contextlib import contextmanager, redirect_stdout, redirect_stderr
 import pytest
 
 from mu.tests.tools.module_loader import load_module
-from mu.tests.tools.test_commit_executor_local_review import carrier, carrier_repository, local_terminal_attempt
+from mu.tests.tools.test_commit_executor_local_review import (
+    OTHER_EFFORT, carrier, carrier_repository, historical_codex_registry, local_terminal_attempt,
+    write_codex_reviewer,
+)
 
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
 _OBSERVABILITY_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "observability"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+# Fixture reviewer: the committed registry, never a literal model or effort.
+_COMMITTED_CODEX = json.loads(
+    (_REPO_ROOT / "mu/tools/executors/executor_config.json").read_text())["bridge_agent_defaults"]["codex"]
 _OBSERVABILITY_ONESHOT_TIMEOUT_S = int(os.environ.get("RCX_TEST_OBSERVABILITY_ONESHOT_TIMEOUT_S", "30"))
 rg_mod = load_module("recovery_gate", _EXECUTORS_DIR / "recovery_gate.py")
 dispatch_mod = load_module(
@@ -217,6 +223,222 @@ def test_native_local_review_precedes_all_recovery_effects(local_terminal_attemp
         assert outcome["recovered"] is False and outcome["tier"] == 4
         assert outcome["failure_class"] == "local_review_terminal"
     assert {p: p.read_bytes() for p in lane.bus.rglob("*") if p.is_file()} == before
+    assert forbidden == []
+    lane.assert_stopped({"status": "error"}, reviews=1)
+
+
+# Outside a bound native terminal, each diagnostic selects a recoverable tier.
+_RECOVERABLE_DIAGNOSTICS = (
+    "mergeStateStatus=DIRTY",
+    "failed to lookup address information",
+    "fatal: Unable to create '/repo/.git/index.lock': File exists.",
+    "You've hit your usage limit. Try again at 10:00 AM.",
+    "codex exec timed out",
+)
+_REVIEWER_REGISTRY_STATES = (
+    "committed", "moved-model", "moved-effort", "missing-entry", "missing-file",
+    "malformed", "non-object", "unreadable",
+)
+
+
+def _selected_reviewer_terminal(carrier, local_terminal_attempt, kind, selection, historical=None):
+    """A native terminal whose clean candidate committed ``selection`` as its reviewer.
+
+    ``f36-registry`` is ``historical``, the registry committed with the f36
+    native-v1 writer: the earlier selection that genuine earlier receipts record.
+    """
+    codex = dict(historical if selection == "f36-registry" else _COMMITTED_CODEX)
+    if selection == "earlier-model":
+        codex["model"] += "-earlier"
+    elif selection == "earlier-effort":
+        codex["reasoning_effort"] = OTHER_EFFORT
+    elif selection == "f36-registry":
+        assert (codex["model"], codex["reasoning_effort"]) != (
+            _COMMITTED_CODEX["model"], _COMMITTED_CODEX["reasoning_effort"])
+    if selection != "committed":
+        write_codex_reviewer(carrier, codex, (codex["model"], codex["reasoning_effort"]))
+        for args in (["add", "mu/tools/executors/executor_config.json"],
+                     ["commit", "-q", "-m", "earlier reviewer selection"]):
+            subprocess.run(["git", *args], cwd=carrier.root, check=True, capture_output=True)
+        carrier.head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=carrier.root, check=True,
+                                      capture_output=True, text=True).stdout.strip()
+        carrier.result["commit_sha"] = carrier.pr["headRefOid"] = carrier.head
+    lane, completed = local_terminal_attempt(kind)
+    produced = dispatch_mod._extract_structured_stdout_payload(completed.stdout)  # ANTICHEAT_OK: actual native CLI producer
+    reviewer = produced["local_pr_review"]["receipt"]["reviewer"]
+    assert (reviewer["model"], reviewer["effort"]) == (codex["model"], codex["reasoning_effort"])
+    return lane, completed, produced
+
+
+def _reviewer_registry_checkout(root, state):
+    """Executors directory of a checkout whose codex reviewer registry is ``state``."""
+    executors = root / state / "mu" / "tools" / "executors"
+    executors.mkdir(parents=True)
+    path = executors / "executor_config.json"
+    config = json.loads((_EXECUTORS_DIR / "executor_config.json").read_text())
+    codex = config["bridge_agent_defaults"]["codex"]
+    if state == "moved-model":
+        codex["model"] += "-next"
+    elif state == "moved-effort":
+        codex["reasoning_effort"] = OTHER_EFFORT
+    elif state == "missing-entry":
+        del config["bridge_agent_defaults"]["codex"]
+    if state == "malformed":
+        path.write_text("{not json")
+    elif state == "non-object":
+        path.write_text(json.dumps([config]))
+    elif state == "unreadable":
+        path.mkdir()  # every read of the registry path fails
+    elif state != "missing-file":
+        path.write_text(json.dumps(config))
+    return executors
+
+
+def _with_recoverable_diagnostics(produced):
+    """The same terminal with recoverable keywords in its hash-bound receipt and CLI output."""
+    import hashlib
+    payload = copy.deepcopy(produced)
+    proof = payload["local_pr_review"]
+    receipt = proof["receipt"]
+    raw_stderr = (receipt.get("raw_stderr") or "") + "".join(d + "\n" for d in _RECOVERABLE_DIAGNOSTICS)
+    receipt["raw_stderr"] = raw_stderr
+    receipt["raw_stderr_sha256"] = hashlib.sha256(raw_stderr.encode()).hexdigest()
+    if receipt.get("provider_refusal") is not None:
+        receipt["provider_refusal"]["raw_stderr"] = raw_stderr
+    proof["receipt_sha256"] = hashlib.sha256(
+        (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
+    noise = "".join(f"[diagnostic] {d}\n" for d in _RECOVERABLE_DIAGNOSTICS)
+    wrapped = {"executor": "commit_executor", "status": "failed", "exit_code": 1,
+               "stdout": noise + json.dumps(payload, indent=2) + "\n", "stderr": noise}
+    return payload, wrapped
+
+
+@pytest.mark.parametrize("kind", ["refusal", "capacity", "findings"])
+@pytest.mark.parametrize("selection", ["committed", "earlier-model", "earlier-effort", "f36-registry"])
+def test_local_review_terminal_is_never_recoverable_under_any_reviewer_registry(
+    carrier, local_terminal_attempt, historical_codex_registry, monkeypatch, tmp_path_factory,
+    selection, kind,
+):
+    """The recorded reviewer, never the current registry, binds a native terminal stop.
+
+    The native producer records the reviewer it launched after matching its
+    committed registry. A terminal recorded under an earlier selection, consumed
+    by a checkout whose registry is moved, missing, malformed or unreadable, is
+    still the tier-4 local-review terminal: no learning, remediation, backoff,
+    budget or dispatcher retry, though its diagnostics carry keywords that
+    select a recoverable tier once the terminal fence is absent.
+    """
+    lane, _, produced = _selected_reviewer_terminal(carrier, local_terminal_attempt, kind, selection,
+                                                    historical=historical_codex_registry)
+    payload, wrapped = _with_recoverable_diagnostics(produced)
+    chained = {**wrapped, "chained_from": "phase_a_executor → phase_b_executor"}
+    unfenced = {key: value for key, value in payload.items() if key != "failure_class"}
+    control = {**wrapped, "stdout": json.dumps(unfenced)}
+    assert rg_mod.local_review_terminal_payload(control) is None
+    assert rg_mod.tier_for(rg_mod.classify_failure(control)) < 4
+    for diagnostic in _RECOVERABLE_DIAGNOSTICS:
+        alone = {"executor": "commit_executor", "status": "failed", "exit_code": 1, "stdout": "", "stderr": diagnostic}
+        assert rg_mod.tier_for(rg_mod.classify_failure(alone)) < 4, diagnostic
+    forbidden = []
+
+    def no_effect(*args, **kwargs):
+        forbidden.append((args, kwargs))
+        raise AssertionError("native local terminal entered learning, remediation or backoff")
+
+    for name in ("check_learned_patterns", "_load_session_fixed_entries", "run_recovery_loop",
+                 "_rate_limit_sleep", "observe_outcome", "_begin_recovery_status"):
+        monkeypatch.setattr(rg_mod, name, no_effect)
+    assert dispatch_mod.local_review_terminal_payload is rg_mod.local_review_terminal_payload
+    registries = tmp_path_factory.mktemp("reviewer-registry")
+    before = {p: p.read_bytes() for p in lane.bus.rglob("*") if p.is_file()}
+    for state in _REVIEWER_REGISTRY_STATES:
+        monkeypatch.setattr(rg_mod, "SCRIPT_DIR", _reviewer_registry_checkout(registries, state))
+        for form in (produced, payload, wrapped, chained):
+            assert rg_mod.local_review_terminal_payload(form) is not None, state
+            assert rg_mod.classify_failure(form) == FailureClass.LOCAL_REVIEW_TERMINAL, state
+            outcome = rg_mod.attempt_recovery(lane.root, form, "quota", bus_dir=lane.bus.name)
+            assert (outcome["recovered"], outcome["tier"], outcome["failure_class"], outcome["action"],
+                    outcome["exhausted"]) == (False, 4, "local_review_terminal",
+                                              "local_review_requires_correction", False), (state, outcome)
+        assert dispatch_mod._is_terminal_executor_outcome(wrapped), state  # ANTICHEAT_OK: exact dispatcher terminal admission
+        assert not dispatch_mod._is_chained_commit_failure(chained), state  # ANTICHEAT_OK: exact chained retry admission
+    assert forbidden == []
+    assert {p: p.read_bytes() for p in lane.bus.rglob("*") if p.is_file()} == before
+    lane.assert_stopped({"status": "error"}, reviews=1)
+
+
+@pytest.mark.parametrize("state", ["moved-model", "missing-file", "unreadable"])
+@pytest.mark.parametrize("entry", ["direct", "surface", "chained", "surface-chained"])
+def test_earlier_reviewer_terminal_stops_every_dispatch_loop(
+    carrier, local_terminal_attempt, monkeypatch, tmp_path_factory, entry, state,
+):
+    """No dispatcher loop retries or recovers an earlier-selection local terminal.
+
+    The child commit executor returns that native terminal, with recoverable
+    keywords in its receipt and output, while this checkout's registry is moved,
+    missing or unreadable; ``--retries 3`` still runs the commit executor once.
+    """
+    from mu.tools.observability import pipeline_agent_pager as pager
+
+    def unavailable(_repo_root, _event, _context, *, timeout_s):
+        return {"acknowledged": False, "error": "Recovery gate test pager transport unavailable"}
+
+    monkeypatch.setattr(pager, "_dispatch_codex", unavailable)
+    monkeypatch.setattr(pager, "_dispatch_claude", unavailable)
+    monkeypatch.setitem(sys.modules, "pipeline_agent_pager", pager)
+    lane, completed, produced = _selected_reviewer_terminal(carrier, local_terminal_attempt, "capacity", "earlier-model")
+    _, wrapped = _with_recoverable_diagnostics(produced)
+    monkeypatch.setattr(rg_mod, "SCRIPT_DIR",
+                        _reviewer_registry_checkout(tmp_path_factory.mktemp("reviewer-registry"), state))
+    assert dispatch_mod.local_review_terminal_payload is rg_mod.local_review_terminal_payload
+    bus = lane.bus.name
+    chained = "chained" in entry
+    route = {"decision": "ROUTE_PHASE_B" if chained else "COMMIT_GO", "wave_id": "quota", "task_id": "[TEST]"}
+    handoff = lane.bus / "executors/phase_b_handoff.json"
+    handoff.write_text(json.dumps(lane.handoff))
+    packet = lane.root / "reports/control_plane/quota.md"
+    packet.parent.mkdir(parents=True)
+    packet.write_text("# Quota\nWave ID: quota\nPhase-A-Lock: LOCKED\n")
+    if chained:
+        route["tracked_packet"] = str(packet.relative_to(lane.root))
+        route["next_candidates"] = [{"candidate": "quota", "bounded": True,
+                                      "tracked_packet": route["tracked_packet"]}]
+        handoff.write_text(json.dumps({**lane.handoff, "tracked_packet": route["tracked_packet"]}))
+    path = lane.bus / "route.json"
+    path.write_text(json.dumps(route))
+    calls, forbidden = [], []
+
+    def no_recovery(*args, **kwargs):
+        forbidden.append((args, kwargs))
+        raise AssertionError(f"terminal local review entered recovery/retry/remediation: {args!r}")
+
+    def child(command, **kwargs):
+        calls.append(command)
+        if any(str(arg).endswith("phase_b_executor.py") for arg in command):
+            return subprocess.CompletedProcess(command, 0, json.dumps({
+                "status": "commit_ready", "wave_id": "quota", "handoff_path": str(handoff),
+            }, indent=2), "")
+        assert any(str(arg).endswith("commit_executor.py") for arg in command)
+        return subprocess.CompletedProcess(command, completed.returncode, wrapped["stdout"], wrapped["stderr"])
+
+    monkeypatch.setattr(dispatch_mod, "_run_executor_in_group", child)
+    monkeypatch.setattr(dispatch_mod, "attempt_recovery", no_recovery)
+    monkeypatch.setattr(dispatch_mod, "_retry_commit_only", no_recovery)
+    monkeypatch.setattr(dispatch_mod, "_apply_recovery_overrides", no_recovery)
+    monkeypatch.setattr(dispatch_mod, "_emit_executor_hard_fail_event", lambda *a, **k: None)
+    monkeypatch.setattr(dispatch_mod, "resolve_repo_root_for_dispatch", lambda **k: lane.root)
+    monkeypatch.setattr(dispatch_mod, "load_config", lambda *a, **k: {})
+    monkeypatch.setattr(dispatch_mod, "_LaneMonitor", lambda *a, **k: SimpleNamespace(
+        is_lane=False, spawn=lambda: None, cleanup=lambda: None))
+    monkeypatch.chdir(lane.root)
+    if entry.startswith("surface"):
+        argv = (["phase-b", "--plan", route["tracked_packet"], "--routing-record-json", json.dumps(route)]
+                if chained else ["commit", "--handoff", str(handoff)])
+    else:
+        argv = ["--routing-record", str(path), "--skip-freshness", "--retries", "3"]
+    argv += ["--json", "--bus-dir", bus]
+    assert dispatch_mod.main(argv) == 1
+    assert len(calls) == (2 if chained else 1)
     assert forbidden == []
     lane.assert_stopped({"status": "error"}, reviews=1)
 
@@ -16625,10 +16847,10 @@ def post_reentry_authority(tmp_path, monkeypatch, request):
     (repo / bus).mkdir()
     (repo / bus / "bridge_config.json").write_text(json.dumps({
         "agents": {"codex": {
-            "display_name": "Codex gpt-6-astra max",
+            "display_name": _COMMITTED_CODEX["display_name"],
             "cmd": [
-                "codex", "exec", "-", "--json", "-m", "gpt-6-astra",
-                "-c", 'model_reasoning_effort="max"',
+                "codex", "exec", "-", "--json", "-m", _COMMITTED_CODEX["model"],
+                "-c", f'model_reasoning_effort="{_COMMITTED_CODEX["reasoning_effort"]}"',
             ],
         }},
     }))

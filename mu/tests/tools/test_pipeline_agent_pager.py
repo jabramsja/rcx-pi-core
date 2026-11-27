@@ -3972,7 +3972,11 @@ def test_requested_targets_both_expands_to_codex_and_claude():
 
 
 def test_executor_config_committed_role_and_pager_defaults():
-    """Pin the founder's 2026-11-26 roles and unchanged Codex pager selection."""
+    """Pin the founder's 2026-11-26 roles and the committed Claude pager route.
+
+    The pager route follows the Claude orchestrator mode in force since
+    2026-11-26, so transition pages reach the Claude orchestrator session.
+    """
     repo_root = Path(__file__).resolve().parents[3]
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -3986,7 +3990,7 @@ def test_executor_config_committed_role_and_pager_defaults():
         "commit_executor": None,
     }
     assert config["bridge_reviewers"] == {"phase_a": "codex", "phase_b": "codex"}
-    assert config["pipeline_agent_pager"] == {"enabled": True, "route": "codex"}
+    assert config["pipeline_agent_pager"] == {"enabled": True, "route": "claude"}
 
 
 def test_session_start_hook_writes_claude_monitor_session_id_when_flag_set(tmp_path):

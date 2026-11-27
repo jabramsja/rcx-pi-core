@@ -71,8 +71,8 @@ DEFAULT_EXECUTOR_CONFIG: dict[str, Any] = {
             "effort": "max",
         },
         "codex": {
-            "display_name": "Codex GPT-6 Astra max",
-            "model": "gpt-6-astra",
+            "display_name": "Codex GPT-6.2 Astra max",
+            "model": "gpt-6.2-astra",
             "reasoning_effort": "max",
         },
     },
@@ -2185,6 +2185,11 @@ def observe_executor_processes(
                     os.kill(pid, 0)
                 except ProcessLookupError:
                     continue
+                except PermissionError:
+                    # EPERM proves a live PID owned by another user, not an
+                    # exit: the row stays unresolved and resamples like a
+                    # successful probe; it never completes on its own.
+                    pass
                 except (OSError, OverflowError):
                     return uncertain("process observation gap absence is uncertain")
                 unresolved = True

@@ -10,8 +10,8 @@
       "effort": "max"
     },
     "codex": {
-      "display_name": "Codex GPT-6 Astra max",
-      "model": "gpt-6-astra",
+      "display_name": "Codex GPT-6.2 Astra max",
+      "model": "gpt-6.2-astra",
       "reasoning_effort": "max"
     },
     "fable": {
@@ -42,7 +42,7 @@
   "hybrid_recovery_enabled": true,
   "pipeline_agent_pager": {
     "enabled": true,
-    "route": "codex"
+    "route": "claude"
   },
   "pipeline_monitor": {
     "lanes": {

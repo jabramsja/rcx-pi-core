@@ -36,6 +36,13 @@ SERVICE_QUOTA = (
     "in your [settings](https://chatgpt.com/codex/cloud/settings/code-review)."
 )
 BOT = "chatgpt-codex-connector[bot]"
+# Fixture reviewer: the committed registry, never a literal model or effort.
+COMMITTED_DEFAULTS = json.loads(
+    (REPO_ROOT / "mu/tools/executors/executor_config.json").read_text())["bridge_agent_defaults"]
+COMMITTED_CODEX = COMMITTED_DEFAULTS["codex"]
+# A valid Codex effort that is deliberately not the committed one.
+OTHER_EFFORT = next(effort for effort in ("low", "medium", "high", "xhigh", "max")
+                    if effort != COMMITTED_CODEX["reasoning_effort"])
 
 # PR1332 service payload, saved 2026-10-07. Keep raw bytes (including blank lines).
 SERVICE_ACTIVITY_RUNNING = (
@@ -210,19 +217,20 @@ class Carrier:
         self.bus.mkdir()
         self.config_path = root / "mu/tools/executors/executor_config.json"
         self.config_path.parent.mkdir(parents=True)
+        model, effort = COMMITTED_CODEX["model"], COMMITTED_CODEX["reasoning_effort"]
         self.config = {
             "github_review_quota_fallback": {"enabled": True},
             # External pager delivery can outlive a held continuation and race
             # immutable-evidence assertions. This fixture models no pager I/O.
             "pipeline_agent_pager": {"enabled": False},
             "role_agents": {"implementer": "codex", "reviewer": "codex"},
-            "bridge_agent_defaults": {"codex": {"model": "gpt-6-astra", "reasoning_effort": "max"}},
+            "bridge_agent_defaults": {"codex": {"model": model, "reasoning_effort": effort}},
             "bridge_turn_timeouts": {"phase_b": 900},
         }
         self.config_path.write_text(json.dumps(self.config))
         self.bridge = {"agents": {"codex": {
-            "cmd": ["codex", "exec", "-", "--json", "-m", "gpt-6-astra", "-c",
-                    'model_reasoning_effort="max"', "--sandbox", "danger-full-access"],
+            "cmd": ["codex", "exec", "-", "--json", "-m", model, "-c",
+                    f'model_reasoning_effort="{effort}"', "--sandbox", "danger-full-access"],
             "timeout_s": 1200, "prompt_via_stdin": True, "env": {}, "mode": "live",
         }}}
         self.bridge_path = self.bus / "bridge_config.json"
@@ -1837,10 +1845,12 @@ def test_enabled_local_review_full_pr_diff_and_native_ci_merge(carrier):
     assert outcome["status"] == "success", outcome
     assert len(carrier.reviews) == len(carrier.landed) == 1
     spec, invocation = carrier.reviews[0]
+    registry = carrier.config["bridge_agent_defaults"]["codex"]
     assert spec.name == "codex" and spec.timeout_s == 900
     assert spec.cmd[spec.cmd.index("--sandbox") + 1] == "read-only"
-    assert spec.cmd[spec.cmd.index("-m") + 1] == "gpt-6-astra"
-    assert 'model_reasoning_effort="max"' in spec.cmd and 'approval_policy="never"' in spec.cmd
+    assert spec.cmd[spec.cmd.index("-m") + 1] == registry["model"]
+    assert f'model_reasoning_effort="{registry["reasoning_effort"]}"' in spec.cmd
+    assert 'approval_policy="never"' in spec.cmd
     assert not invocation.get("stop_after_envelope") and not invocation.get("post_result_exit_timeout_s")
     receipt = carrier.receipts()[0]
     assert receipt["status"] == "APPROVED" and receipt["process_exit_code"] == 0
@@ -1850,7 +1860,9 @@ def test_enabled_local_review_full_pr_diff_and_native_ci_merge(carrier):
     assert "earlier.py" in diff and "latest.py" in diff
     assert "+value = 1" in diff and "+value = 2" in diff
     assert receipt["identity"]["diff_sha256"] == hashlib.sha256(diff.encode()).hexdigest()
-    assert receipt["envelope"]["decision"] == "GO" and receipt["reviewer"]["effort"] == "max"
+    assert receipt["envelope"]["decision"] == "GO"
+    assert receipt["reviewer"]["model"] == registry["model"]
+    assert receipt["reviewer"]["effort"] == registry["reasoning_effort"]
     assert receipt["quota_comment"]["databaseId"] == 2
     assert carrier.pr["comments"] == quota_before
     _assert_preserved_authority(carrier, {carrier.continuation: continuation_before})
@@ -2733,6 +2745,169 @@ def test_reviewer_policy_mismatch_never_substitutes_or_repairs(carrier, monkeypa
     before = carrier.bridge_path.read_bytes()
     carrier.assert_stopped(carrier.execute(), reviews=0)
     assert carrier.bridge_path.read_bytes() == before
+
+
+def write_codex_reviewer(carrier, registry, command):
+    """Set the carrier's committed codex registry entry and launched command."""
+    if registry is None:
+        carrier.config["bridge_agent_defaults"].pop("codex")
+    else:
+        carrier.config["bridge_agent_defaults"]["codex"] = registry
+    cmd = carrier.bridge["agents"]["codex"]["cmd"]
+    cmd[cmd.index("-m") + 1] = command[0]
+    cmd[cmd.index("-c") + 1] = f'model_reasoning_effort="{command[1]}"'
+    carrier.config_path.write_text(json.dumps(carrier.config))
+    carrier.bridge_path.write_text(json.dumps(carrier.bridge))
+
+
+def test_local_quota_review_adapter_derives_model_and_effort_from_committed_registry(carrier):
+    """A matching registry entry and launched command admit that registry selection.
+
+    The probe selection is deliberately not the committed founder choice, so
+    a literal model or effort check in the adapter would refuse it.
+    """
+    probe = {"model": COMMITTED_CODEX["model"] + "-registry-probe", "reasoning_effort": OTHER_EFFORT}
+    write_codex_reviewer(carrier, probe, (probe["model"], OTHER_EFFORT))
+    spec, provenance = commit._local_quota_review_adapter(carrier.root)  # ANTICHEAT_OK: native adapter admission boundary
+    assert spec.name == "codex" and spec.env == {} and spec.prompt_via_stdin is True
+    assert spec.cmd == ["codex", "exec", "-", "--json", "-m", probe["model"], "-c",
+                        f'model_reasoning_effort="{OTHER_EFFORT}"', "--sandbox", "read-only",
+                        "-c", 'approval_policy="never"']
+    assert (provenance["selected_agent"], provenance["model"], provenance["effort"]) == (
+        "codex", probe["model"], OTHER_EFFORT)
+    assert provenance["executed_command"] == spec.cmd and provenance["sandbox"] == "read-only"
+    assert provenance["executor_config_sha256"] == hashlib.sha256(carrier.config_path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("kind", [
+    "command-model", "command-effort", "registry-model", "registry-effort",
+    "missing-entry", "missing-registry", "empty-model", "padded-effort", "non-string-model",
+])
+def test_local_quota_review_adapter_fails_closed_without_exact_registry_match(carrier, kind):
+    """No launched command, merged default or environment stands in for the registry.
+
+    The missing cases keep the launched command equal to the committed
+    selection, which the DEFAULT fallback also names; only a healing adapter
+    would accept them.
+    """
+    registry = dict(COMMITTED_CODEX)
+    command = [registry["model"], registry["reasoning_effort"]]
+    if kind == "command-model":
+        command[0] += "-other"
+    elif kind == "command-effort":
+        command[1] = OTHER_EFFORT
+    elif kind == "registry-model":
+        registry["model"] += "-other"
+    elif kind == "registry-effort":
+        registry["reasoning_effort"] = OTHER_EFFORT
+    elif kind == "empty-model":
+        registry["model"] = ""
+    elif kind == "padded-effort":
+        registry["reasoning_effort"] = f" {registry['reasoning_effort']} "
+    elif kind == "non-string-model":
+        registry["model"] = [registry["model"]]
+    write_codex_reviewer(carrier, None if kind.startswith("missing") else registry, command)
+    if kind == "missing-registry":
+        carrier.config.pop("bridge_agent_defaults")
+        carrier.config_path.write_text(json.dumps(carrier.config))
+    before = (carrier.config_path.read_bytes(), carrier.bridge_path.read_bytes())
+    with pytest.raises(ValueError, match="committed Codex registry"):
+        commit._local_quota_review_adapter(carrier.root)  # ANTICHEAT_OK: native adapter admission boundary
+    assert (carrier.config_path.read_bytes(), carrier.bridge_path.read_bytes()) == before
+
+
+@pytest.mark.parametrize("kind", ["committed", "effective"])
+def test_local_quota_review_adapter_fails_closed_for_non_codex_reviewer(carrier, monkeypatch, kind):
+    """A matching codex registry entry and command never admit a non-codex reviewer."""
+    other = next(agent for agent in COMMITTED_DEFAULTS if agent != "codex")
+    if kind == "committed":
+        carrier.config["role_agents"]["reviewer"] = other
+        carrier.config_path.write_text(json.dumps(carrier.config))
+    else:
+        monkeypatch.setenv("RCX_ROLE_AGENT_OVERRIDE_REPO_ROOT", str(carrier.root))
+        monkeypatch.setenv("RCX_REVIEWER_AGENT_OVERRIDE", other)
+    before = (carrier.config_path.read_bytes(), carrier.bridge_path.read_bytes())
+    with pytest.raises(ValueError, match="selected Codex reviewer"):
+        commit._local_quota_review_adapter(carrier.root)  # ANTICHEAT_OK: native adapter admission boundary
+    assert (carrier.config_path.read_bytes(), carrier.bridge_path.read_bytes()) == before
+
+
+@pytest.mark.parametrize("kind", ["findings", "capacity"])
+def test_registry_move_keeps_earlier_terminal_and_strict_corrected_approval(carrier, local_terminal_attempt, monkeypatch, kind):
+    """A later registry selection neither releases nor holds an earlier native terminal.
+
+    The candidate commits an earlier selection, so its clean native producer
+    launches and records that reviewer. This checkout's committed registry, the
+    terminal's consumer, names another selection; the terminal still stops its
+    head as local_review_terminal, with no new review. Only a material correction
+    that also moves the candidate registry is reviewed again, launched strictly
+    under the moved registry: a stale launched command is refused before review.
+    """
+    earlier = {"model": COMMITTED_CODEX["model"] + "-earlier", "reasoning_effort": OTHER_EFFORT}
+    current = (COMMITTED_CODEX["model"], COMMITTED_CODEX["reasoning_effort"])
+    assert (earlier["model"], earlier["reasoning_effort"]) != current
+    write_codex_reviewer(carrier, dict(earlier), (earlier["model"], earlier["reasoning_effort"]))
+    git(carrier.root, "add", "mu/tools/executors/executor_config.json")
+    git(carrier.root, "commit", "-m", "earlier reviewer selection")
+    carrier.head = git(carrier.root, "rev-parse", "HEAD")
+    carrier.result["commit_sha"] = carrier.pr["headRefOid"] = carrier.head
+    lane, _ = local_terminal_attempt(kind)
+    old_receipt = next(lane.bus.glob("meta/local_pr_reviews/*/receipt.json"))
+    recorded = json.loads(old_receipt.read_text())["reviewer"]
+    assert (recorded["model"], recorded["effort"]) == (earlier["model"], earlier["reasoning_effort"])
+    before = {p: p.read_bytes() for p in old_receipt.parent.iterdir() if p.is_file()}
+    for _ in range(2):
+        again = _resume_native(lane, bus_dir=lane.bus.name)
+        assert again["failure_class"] == "local_review_terminal", again
+        assert again["retry_allowed"] is False
+        lane.assert_stopped(again, reviews=1)
+    old_head = lane.head
+    # Correct the candidate and move its committed registry; the launched command is stale.
+    write_codex_reviewer(lane, dict(COMMITTED_CODEX), (earlier["model"], earlier["reasoning_effort"]))
+    (lane.root / "earlier.py").write_text("value = 3  # governed candidate correction\n")
+    git(lane.root, "add", "earlier.py", "mu/tools/executors/executor_config.json")
+    git(lane.root, "commit", "-m", "correct candidate and move reviewer registry")
+    lane.head = git(lane.root, "rev-parse", "HEAD")
+    lane.pr["headRefOid"] = lane.head
+    lane.pr["comments"]["nodes"] += [
+        {"databaseId": 3, "author": {"login": "founder", "__typename": "User"},
+         "body": "@codex review", "createdAt": "2026-10-04T14:08:00Z"},
+        {"databaseId": 4, "author": {"login": BOT, "__typename": "Bot"},
+         "body": QUOTA, "createdAt": "2026-10-04T14:08:19Z"},
+    ]
+    commit.write_continuation_record(
+        lane.continuation, handoff_sha=commit.handoff_sha(lane.handoff), target_branch="fixture/quota",
+        commit_sha=lane.head, receipt_decision="COMMIT_GO", pr_number="1331",
+        steps_completed=lane.result["steps_completed"], staged_candidate_sha256="f" * 64,
+    )
+    original_command = lane.run_command
+
+    def remote(args, **kwargs):
+        if args[:3] == ["gh", "pr", "comment"]:
+            lane.commands.append(args)
+            return subprocess.CompletedProcess(args, 0, "https://github.com/fixture/repo/pull/1331#issuecomment-3\n", "")
+        return original_command(args, **kwargs)
+
+    monkeypatch.setattr(commit, "_run", remote)
+    lane.verdict_change = None
+    adapters = commit._bridge_adapters  # ANTICHEAT_OK: provider process boundary; the next review completes GO
+    monkeypatch.setattr(adapters, "run_adapter", lane.run_reviewer)
+    blocked = _resume_native(lane, bus_dir=lane.bus.name)
+    assert blocked["status"] == "error", blocked
+    assert "does not match the committed Codex registry" in " ".join(blocked["errors"]), blocked
+    lane.assert_stopped(blocked, reviews=1)
+    write_codex_reviewer(lane, dict(COMMITTED_CODEX), current)  # sync only the bus launch command
+    assert git(lane.root, "status", "--porcelain") == ""
+    outcome = _resume_native(lane, bus_dir=lane.bus.name)
+    assert outcome["status"] == "success", outcome
+    assert len(lane.reviews) == 2 and len(lane.landed) == 1
+    spec, _ = lane.reviews[-1]
+    assert spec.cmd[spec.cmd.index("-m") + 1] == current[0]
+    assert f'model_reasoning_effort="{current[1]}"' in spec.cmd
+    fresh = next(r for r in lane.receipts() if r["identity"]["head_sha"] != old_head)
+    assert fresh["status"] == "APPROVED" and (fresh["reviewer"]["model"], fresh["reviewer"]["effort"]) == current
+    assert {p: p.read_bytes() for p in before} == before
+    assert lane.forbidden_local_calls == []
 
 
 @pytest.mark.parametrize("kind", ["request", "request_id", "author", "type", "id", "generic_quota", "pagination", "thread_pagination"])
@@ -4178,11 +4353,29 @@ def test_local_review_resume_retains_original_base_authority(carrier, monkeypatc
     assert sum(a[:3] == ["gh", "pr", "merge"] for a in carrier.commands) == 1
 
 
+# The f36 native-v1 writer and the reviewer registry committed with it.
+HISTORICAL_PRODUCER_COMMIT = "f36b982b8b45774cf68fc621acf0d9727d72e6d5"
+
+
+@pytest.fixture(scope="module")
+def historical_codex_registry():
+    """The codex registry committed with the f36 writer: an earlier founder selection.
+
+    Read from Git, never a literal, so genuine earlier records are reproduced
+    with exactly the reviewer identity that selection recorded.
+    """
+    config = subprocess.run(
+        ["git", "show", f"{HISTORICAL_PRODUCER_COMMIT}:mu/tools/executors/executor_config.json"],
+        cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+    ).stdout
+    return json.loads(config)["bridge_agent_defaults"]["codex"]
+
+
 @pytest.fixture(scope="module")
 def historical_local_review_producer():
     """Execute the actual f36 native-v1 writer, not a modeled receipt schema."""
     source = subprocess.run(
-        ["git", "show", "f36b982b8b45774cf68fc621acf0d9727d72e6d5:mu/tools/executors/commit_executor.py"],
+        ["git", "show", f"{HISTORICAL_PRODUCER_COMMIT}:mu/tools/executors/commit_executor.py"],
         cwd=REPO_ROOT, check=True, capture_output=True, text=True,
     ).stdout
     function = next(node for node in ast.parse(source).body
