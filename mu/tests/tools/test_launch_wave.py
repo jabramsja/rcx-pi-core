@@ -56,6 +56,32 @@ import enforce_l4_execution_contract as l4_contract  # noqa: E402
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.parametrize("bus_dir", [None, ".agent_bus-validation-control"])
+def test_validation_schedule_is_frozen_in_launch_authority(tmp_path, monkeypatch, bus_dir):
+    allocations = ec.validation_schedule_requirements(tmp_path, 7200)
+    request = {"validation_seconds": 7200, **{key: sum(value for _, value in rows) for key, rows in allocations.items()}}
+    config = dataclasses.replace(make_config(), validation_schedule=request)
+    authority = lw.build_launch_wave_override_authority(config)
+    assert ec.copy_launch_wave_override_authority({"launch_wave_override_authority": authority})["launch_wave_override_authority"] == authority
+    env = lw.dispatcher_child_environment(tmp_path, config, bus_dir=bus_dir)
+    monkeypatch.setenv(ec.VALIDATION_SCHEDULE_ENV, env[ec.VALIDATION_SCHEDULE_ENV])
+    monkeypatch.setenv("RCX_AGENT_BUS_DIR", env["RCX_AGENT_BUS_DIR"])
+    decoded = ec.read_validation_schedule_transport(tmp_path)
+    assert decoded["request"] == request and decoded["evidence_command"] == config.evidence_command
+    repeated = lw.dispatcher_child_environment(tmp_path, config, bus_dir=bus_dir)
+    assert repeated[ec.VALIDATION_SCHEDULE_ENV] == env[ec.VALIDATION_SCHEDULE_ENV]
+    request["commit_executor"] += 1
+    with pytest.raises(ec.ValidationBudgetError, match="accounted|replaced"):
+        lw.dispatcher_child_environment(tmp_path, dataclasses.replace(config, validation_schedule=request), bus_dir=bus_dir)
+
+
+def test_launch_cannot_inherit_another_validation_invocation(tmp_path, monkeypatch):
+    monkeypatch.setenv(ec.NATIVE_STAGE_BUDGET_ENV, "stale")
+    monkeypatch.setenv(ec.VALIDATION_SCHEDULE_ENV, "stale")
+    env = lw.dispatcher_child_environment(tmp_path, make_config())
+    assert ec.NATIVE_STAGE_BUDGET_ENV not in env and ec.VALIDATION_SCHEDULE_ENV not in env
+
+
 @pytest.fixture(autouse=True)
 def bind_commit_ready_resume_executor(request, monkeypatch):
     """Keep the continuation consumer on the fixture's actual executor module."""

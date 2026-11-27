@@ -35,6 +35,7 @@ import pytest
 
 from mu.tests.tools.module_loader import load_module
 from mu.tests.tools.test_executor_common import complete_process_observation, fixture_orphan_reaper
+from mu.tests.tools.test_commit_executor_receipt import native_held_supervisor
 
 # Load modules
 _EXECUTORS_DIR = Path(__file__).resolve().parent.parent.parent / "tools" / "executors"
@@ -49,6 +50,376 @@ common_mod = load_module("executor_common_for_phase_b_tests", _EXECUTORS_DIR / "
 # Default valid routing record for tests that call run_phase_b.
 # Tests that specifically test routing validation should NOT use this.
 _VALID_ROUTING_RECORD = {"decision": "ROUTE_PHASE_B", "summary": "test dispatch"}
+
+
+@pytest.fixture
+def declared_review_lane(tmp_path, monkeypatch, real_pre_review_package):
+    """Native preparation, scope guards and correction flow in an isolated repo."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    wave = "declared-review-artifacts"
+    bridge_script = repo / "tools/agents/bridge_supervisor.py"
+    bridge_script.parent.mkdir(parents=True)
+    bridge_script.write_text(
+        "import json,os,sys,time\nfrom pathlib import Path\n"
+        "task=Path(sys.argv[sys.argv.index('--task-file')+1]).read_text()\n"
+        "Path('.agent_bus/captured-review-task.txt').write_text(task)\n"
+        "print('BEGIN_AGENT_ENVELOPE',flush=True)\n"
+        "print(json.dumps({'decision':'REQUEST_CHANGES','findings':[{'severity':'high','title':'fix candidate'}]}),flush=True)\n"
+        "print('END_AGENT_ENVELOPE',flush=True)\n"
+        "time.sleep(0.02)\n"
+        "report=Path(os.environ['FIXTURE_REVIEW_REPORT'])\n"
+        "report.parent.mkdir(parents=True,exist_ok=True)\n"
+        "report.write_text('Blocking recheck after envelope\\n')\n"
+        "print('REQUEST_CHANGES',flush=True)\nsys.exit(1)\n"
+    )
+    plan, test, indicator = _write_bridge_receipt_fixture_repo(repo, wave)
+    # Native supervisor packages are ignored operational artifacts in real repos.
+    with (repo / ".git/info/exclude").open("a") as handle:
+        handle.write("\n.scratch/\n")
+    reports = {
+        "blocking": f"reports/deferred/blocking/{wave}_bridge_blockers.md",
+        "non_blocking": f"reports/deferred/non_blocking/{wave}_bridge_nonblockers.md",
+    }
+    with (repo / plan).open("a") as handle:
+        for path in reports.values():
+            handle.write(f"- `{path}`\n")
+    spec = candidate_authority_mod.CandidateAuthoritySpec.from_mapping({
+        "wave_id": wave, "comparison_commit": _git_stdout(repo, "rev-parse", "HEAD"),
+        "candidate_allowlist": ["TASKS.md", "f.py", test, plan, indicator, *reports.values()],
+        "plan_path": plan, "phase": "phase_b", "review_round": "bridge_pre_review",
+        "indicator_artifact_ref": indicator,
+        "indicator_collection_command": f"python3 mu/tools/metrics/collect_l4_wave_indicators.py --wave-id {wave} --output {indicator}",
+        "require_l4_staged": False,
+    })
+    spec_path = candidate_authority_mod.write_authority_spec(repo, spec, bus_dir=".agent_bus")
+    metadata = {"required": True, "spec_path": str(spec_path),
+                "spec_identity": candidate_authority_mod.authority_spec_identity(repo, spec, authority_required=True)}
+    route = {**_VALID_ROUTING_RECORD, "task_id": "[PIPELINE-RECOVERY]", "wave_name": wave,
+             "wave_class": "L4_ENABLER", "target_gate_id": "G8", "candidate_authority": metadata}
+    impl = _make_successful_impl_with_edits(test)
+    monkeypatch.setitem(sys.modules, "phase_b_implementer", impl)
+    monkeypatch.setattr(pb_mod, "run_sdk_agents", lambda *a, **kw: {"exit_code": 0, "stdout": "", "stderr": ""})
+    monkeypatch.setattr(pb_mod, "prepare_commit_handoff", lambda *a, **kw: repo / ".agent_bus/handoff.json")
+    return SimpleNamespace(repo=repo, wave=wave, plan=plan, reports=reports, spec=spec,
+                           spec_path=spec_path, metadata=metadata, route=route, impl=impl)
+
+
+@pytest.mark.parametrize("reentry", [False, True])
+@pytest.mark.parametrize("declared", [False, True])
+@pytest.mark.parametrize("decision", ["REQUEST_CHANGES", "NO_GO"])
+def test_review_artifact_scope_precedes_correction(
+    declared_review_lane, monkeypatch, reentry, declared, decision,
+):
+    lane = declared_review_lane
+    reviews = []
+    report = (lane.reports["blocking"] if declared else
+              f"reports/deferred/blocking/{lane.wave}_required-sweep.md")
+    blocking_round = 2 if reentry else 1
+    def reviewer(repo, summary, **kwargs):
+        reviews.append({"summary": summary, "job_id": kwargs["job_id"],
+                        "implementations": lane.impl.invoke_implementer.call_count})
+        verdict = decision if len(reviews) == blocking_round else "GO"
+        if verdict == decision:
+            target = repo / report
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Model a late recheck after an envelope: only final reviewer return
+            # establishes the boundary, so these bytes must also be checked.
+            target.write_text(f"# Blocking finding\n{decision}: fix candidate\n")
+        return {"exit_code": int(verdict != "GO"), "stdout": verdict + "\n",
+                "stderr": "", "decision": verdict, "job_id": kwargs["job_id"]}
+    supervisors = []
+    def supervisor(*args, **kwargs):
+        supervisors.append(True)
+        verdict = "NEEDS_PHASE_B" if reentry and len(supervisors) == 1 else "COMMIT_GO"
+        return {"exit_code": 0, "parsed": {"decision": verdict, "summary": "fix candidate",
+                "status": "success", "findings": []}, "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json"}
+    monkeypatch.setattr(pb_mod, "run_bridge_review", reviewer)
+    monkeypatch.setattr(pb_mod, "run_pre_commit_supervisor", supervisor)
+    import validation_execution
+    with complete_process_observation(validation_execution.common):
+        result = pb_mod.run_phase_b(lane.repo, lane.plan, max_bridge_rounds=4,
+                                   routing_record_override=lane.route)
+    assert (lane.repo / report).exists(), (result, reviews)
+    assert (lane.repo / report).read_text() == f"# Blocking finding\n{decision}: fix candidate\n", result
+    if not declared:
+        assert lane.impl.invoke_implementer.call_count == blocking_round, (result, reviews)
+        assert len(reviews) == blocking_round
+        assert result["status"] == "error" and "candidate_authority_scope" in result["step"], result
+        assert result["bridge_decision"] == decision
+        assert report in " ".join(result["errors"])
+    else:
+        assert result["status"] == "commit_ready", result
+        assert lane.impl.invoke_implementer.call_count == blocking_round + 1
+        assert len(reviews) == blocking_round + 1
+        assert len({review["job_id"] for review in reviews}) == len(reviews)
+        assert decision in lane.impl.build_implementation_prompt.call_args_list[-1].args[0]
+        for review in reviews:
+            assert lane.reports["blocking"] in review["summary"]
+            assert lane.reports["non_blocking"] in review["summary"]
+            assert "after an envelope" in review["summary"]
+
+
+@pytest.mark.parametrize("boundary", ["pre_commit_supervisor", "post_reentry_supervisor", "commit_ready_status_supervisor"])
+@pytest.mark.parametrize("pager_failure", [False, True])
+def test_native_supervisor_hold_preserves_phase_b_checkpoint(
+    declared_review_lane, monkeypatch, capsys, native_held_supervisor, boundary, pager_failure,
+):
+    from mu.tools.executors.recovery_gate import FailureClass, classify_failure
+
+    lane = declared_review_lane
+    held = []
+    calls = []
+    checkpoint = lane.repo / ".agent_bus/executors/phase_b_state.json"
+    bridge = MagicMock(side_effect=lambda *a, **kw: {
+        "exit_code": 0, "decision": "GO", "stdout": "GO\n", "stderr": "", "job_id": kw["job_id"],
+    })
+    monkeypatch.setattr(pb_mod, "run_bridge_review", bridge)
+    real_supervisor = pb_mod.run_pre_commit_supervisor
+    handoff = MagicMock(side_effect=AssertionError("handoff after HOLD"))
+    monkeypatch.setattr(pb_mod, "prepare_commit_handoff", handoff)
+
+    def supervisor(repo, package_path, **kwargs):
+        calls.append(True)
+        if len(calls) == 1 and boundary != "pre_commit_supervisor":
+            decision = "NEEDS_PHASE_B" if boundary == "post_reentry_supervisor" else "COMMIT_GO"
+            return {"exit_code": 0, "parsed": {"decision": decision, "status": "success", "summary": "fixture first review"},
+                    "receipt_path": ".agent_bus/meta/pre_commit_receipts/first.json"}
+        held.append((checkpoint.read_bytes(), lane.impl.invoke_implementer.call_count, bridge.call_count))
+        if pager_failure:
+            monkeypatch.setattr(pb_mod, "emit_pipeline_agent_event", MagicMock(side_effect=RuntimeError("fixture pager unavailable")))
+        with patch.dict(sys.modules, {"meta_bridge_client": SimpleNamespace(
+            run_meta_bridge_package=native_held_supervisor.run,
+            MetaBridgeClientError=native_held_supervisor.client.MetaBridgeClientError,
+        )}):
+            return real_supervisor(repo, package_path, **kwargs)
+
+    monkeypatch.setattr(pb_mod, "run_pre_commit_supervisor", supervisor)
+    # The real gates before each boundary observe processes; like the sibling
+    # run_phase_b fixtures, keep unrelated host churn out of that premise.
+    import validation_execution
+    with complete_process_observation(validation_execution.common):
+        result = pb_mod.run_phase_b(lane.repo, lane.plan, routing_record_override=lane.route, max_bridge_rounds=3)
+    assert result["status"] == "validation_budget_hold", result
+    assert result["step"] == boundary
+    assert len(held) == len(native_held_supervisor.responses) == 1
+    assert checkpoint.read_bytes() == held[0][0]
+    assert lane.impl.invoke_implementer.call_count == held[0][1]
+    assert bridge.call_count == held[0][2]
+    assert result["validation"]["error_detail"] == native_held_supervisor.responses[0].error_detail
+    assert result["error_code"] == "VALIDATION_BUDGET_HOLD"
+    assert classify_failure(result) == FailureClass.TERMINAL_POLICY
+    handoff.assert_not_called()
+    if pager_failure:
+        assert "fixture pager unavailable" in result["errors"][-1]
+    capsys.readouterr()
+    monkeypatch.chdir(lane.repo)
+    for json_output in (False, True):
+        with patch.object(pb_mod, "run_phase_b", return_value=result), \
+             patch.dict(sys.modules, {"recovery_gate": SimpleNamespace(attempt_recovery=MagicMock(side_effect=AssertionError("recovery after HOLD")))}), \
+             patch.object(sys, "argv", ["phase_b_executor.py", "--plan", lane.plan] + (["--json"] if json_output else [])):
+            assert pb_mod.main() == 1
+        output = capsys.readouterr().out
+        if json_output:
+            assert classify_failure({"stdout": output}) == FailureClass.TERMINAL_POLICY
+        else:
+            assert result["error_detail"] in output
+        assert checkpoint.read_bytes() == held[0][0]
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_actual_review_child_enforces_post_envelope_artifacts(declared_review_lane, monkeypatch, declared):
+    lane = declared_review_lane
+    report = lane.reports["blocking"] if declared else f"reports/deferred/blocking/{lane.wave}_required-sweep.md"
+    monkeypatch.setenv("FIXTURE_REVIEW_REPORT", report)
+    result = pb_mod.run_scoped_bridge_review(
+        lane.repo, "Review and recheck", wave_id=lane.wave, candidate_authority_required=True,
+        candidate_authority_metadata=lane.metadata, job_id="post-envelope-fixture", timeout=15,
+    )
+    assert result["decision"] == "REQUEST_CHANGES" and result["exit_code"] == 1, result
+    assert (lane.repo / report).read_text() == "Blocking recheck after envelope\n"
+    task = (lane.repo / ".agent_bus/captured-review-task.txt").read_text()
+    assert lane.reports["blocking"] in task and lane.reports["non_blocking"] in task
+    assert "after an envelope" in task
+    assert bool(result.get("candidate_scope_error")) is (not declared)
+    if declared:
+        assert result["review_artifact_files"] == [report]
+    else:
+        assert report in result["candidate_scope_error"]
+    assert lane.impl.invoke_implementer.call_count == 0
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_private_remediation_review_preserves_report_scope(declared_review_lane, monkeypatch, declared):
+    lane = declared_review_lane
+    report = (lane.reports["blocking"] if declared else
+              f"reports/deferred/blocking/{lane.wave}_required-sweep.md")
+    reviews = []
+    gate_calls = []
+    def gate(repo, files, **kwargs):
+        gate_calls.append(True)
+        return {"passed": len(gate_calls) != 1, "exit_code": int(len(gate_calls) == 1),
+                "stdout": "private-attribute remediation required", "stderr": "",
+                "test_files": [p for p in files if p.endswith(".py") and "test_" in p]}
+    def reviewer(repo, summary, **kwargs):
+        reviews.append(summary)
+        verdict = "REQUEST_CHANGES" if len(reviews) == 2 else "GO"
+        if verdict != "GO":
+            assert "private-attr remediation" in summary
+            target = repo / report
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("Blocking private review history\n")
+        return {"exit_code": int(verdict != "GO"), "decision": verdict,
+                "stdout": verdict, "stderr": "", "job_id": kwargs["job_id"]}
+    monkeypatch.setattr(pb_mod, "run_private_attr_gate", gate)
+    monkeypatch.setattr(pb_mod, "run_bridge_review", reviewer)
+    monkeypatch.setattr(pb_mod, "run_pre_commit_supervisor", lambda *a, **kw: {
+        "exit_code": 0, "parsed": {"decision": "COMMIT_GO", "status": "success", "findings": []},
+        "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+    })
+    import validation_execution
+    with complete_process_observation(validation_execution.common):
+        result = pb_mod.run_phase_b(lane.repo, lane.plan, max_bridge_rounds=4,
+                                   routing_record_override=lane.route)
+    assert (lane.repo / report).read_text() == "Blocking private review history\n"
+    assert lane.impl.invoke_implementer.call_count == (3 if declared else 2), result
+    assert len(reviews) == (3 if declared else 2)
+    if declared:
+        assert result["status"] == "commit_ready", result
+        assert all(lane.reports["blocking"] in task for task in reviews)
+    else:
+        assert "candidate_authority_scope" in result["step"]
+        assert result["bridge_decision"] == "REQUEST_CHANGES"
+
+
+@pytest.mark.parametrize("required", [False, True])
+@pytest.mark.parametrize("mutation", ["undeclared", "index_only", "spec_widening"])
+def test_optional_review_authority_is_still_enforced(declared_review_lane, monkeypatch, required, mutation):
+    lane = declared_review_lane
+    extra = lane.repo / "outside.txt"
+    def reviewer(*args, **kwargs):
+        if mutation == "spec_widening":
+            data = lane.spec.to_dict()
+            data["candidate_allowlist"].append("outside.txt")
+            candidate_authority_mod.write_authority_spec(
+                lane.repo, candidate_authority_mod.CandidateAuthoritySpec.from_mapping(data), bus_dir=".agent_bus")
+        else:
+            extra.write_text("preserve unauthorized review output\n")
+            if mutation == "index_only":
+                _git_stdout(lane.repo, "add", "outside.txt")
+                extra.unlink()
+        return {"exit_code": 1, "stdout": "NO_GO\n", "stderr": "", "decision": "NO_GO"}
+    monkeypatch.setattr(pb_mod, "run_bridge_review", reviewer)
+    result = pb_mod.run_scoped_bridge_review(lane.repo, "review", wave_id=lane.wave,
+        candidate_authority_required=required,
+        candidate_authority_metadata=lane.metadata if required else None)
+    assert result["candidate_scope_error"] and result["decision"] == "NO_GO"
+    if mutation == "undeclared":
+        assert extra.read_text() == "preserve unauthorized review output\n"
+    if mutation == "index_only":
+        assert "outside.txt" in _git_stdout(lane.repo, "diff", "--cached", "--name-only")
+    assert lane.impl.invoke_implementer.call_count == 0
+
+
+def test_missing_report_slot_preserves_structured_blocking_outcome(declared_review_lane, monkeypatch):
+    lane = declared_review_lane
+    data = lane.spec.to_dict()
+    data["candidate_allowlist"] = [p for p in data["candidate_allowlist"] if p != lane.reports["blocking"]]
+    spec = candidate_authority_mod.CandidateAuthoritySpec.from_mapping(data)
+    candidate_authority_mod.write_authority_spec(lane.repo, spec, bus_dir=".agent_bus")
+    metadata = {"spec_path": str(lane.spec_path),
+                "spec_identity": candidate_authority_mod.authority_spec_identity(lane.repo, spec)}
+    def reviewer(repo, task, **kwargs):
+        assert '"blocking": []' in task
+        assert "return the existing structured blocking outcome" in task
+        return {"exit_code": 1, "decision": "REQUEST_CHANGES", "stdout": "report unavailable", "stderr": ""}
+    monkeypatch.setattr(pb_mod, "run_bridge_review", reviewer)
+    result = pb_mod.run_scoped_bridge_review(lane.repo, "review", wave_id=lane.wave,
+        candidate_authority_required=True, candidate_authority_metadata=metadata)
+    assert result["decision"] == "REQUEST_CHANGES" and result["exit_code"] == 1
+    assert not result.get("candidate_scope_error") and result["review_artifact_files"] == []
+    assert not (lane.repo / lane.reports["blocking"]).exists()
+
+
+def test_optional_review_without_authority_keeps_legacy_contract(tmp_path, monkeypatch):
+    reviewer = MagicMock(return_value={"exit_code": 1, "decision": "NO_GO", "stdout": "blocking", "stderr": ""})
+    monkeypatch.setattr(pb_mod, "run_bridge_review", reviewer)
+    result = pb_mod.run_scoped_bridge_review(tmp_path, "legacy task", wave_id="legacy")
+    assert result == reviewer.return_value
+    assert reviewer.call_args.args == (tmp_path, "legacy task")
+
+
+@pytest.mark.parametrize("mutation", [
+    "source", "source_mode", "source_delete", "index_only", "executor_config",
+    "bridge_config", "effective_config", "owner", "report_delete", "report_symlink",
+])
+def test_review_input_drift_refuses_before_correction(declared_review_lane, monkeypatch, mutation):
+    lane = declared_review_lane
+    source = lane.repo / "f.py"
+    original = source.read_bytes()
+    report = lane.repo / lane.reports["blocking"]
+    report.parent.mkdir(parents=True)
+    report.write_text("Preserved blocking history\n")
+    outside = lane.repo.parent / "external-report.md"
+    outside.write_text("external bytes\n")
+
+    def reviewer(*args, **kwargs):
+        if mutation == "source":
+            source.write_text("unreviewed source\n")
+        elif mutation == "source_mode":
+            source.chmod(source.stat().st_mode ^ 0o111)
+        elif mutation == "source_delete":
+            source.unlink()
+        elif mutation == "index_only":
+            source.write_text("unreviewed index\n")
+            _git_stdout(lane.repo, "add", "f.py")
+            source.write_bytes(original)
+        elif mutation in {"executor_config", "bridge_config"}:
+            path = lane.repo / ("mu/tools/executors/executor_config.json" if mutation == "executor_config"
+                                else ".agent_bus/bridge_config.json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{"changed":true}\n')
+        elif mutation == "effective_config":
+            monkeypatch.setattr(pb_mod, "load_executor_config", lambda repo: {"changed": True})
+        elif mutation == "owner":
+            monkeypatch.setenv(common_mod.EXECUTOR_PROCESS_OWNER_ENV, "changed-review-owner")
+        else:
+            report.unlink()
+            if mutation == "report_symlink":
+                report.symlink_to(outside)
+        return {"exit_code": 1, "decision": "REQUEST_CHANGES", "stdout": "fix required", "stderr": ""}
+
+    monkeypatch.setattr(pb_mod, "run_bridge_review", reviewer)
+    result = pb_mod.run_scoped_bridge_review(
+        lane.repo, "review", wave_id=lane.wave, candidate_authority_required=True,
+        candidate_authority_metadata=lane.metadata,
+    )
+    assert result["candidate_scope_error"]
+    assert result["decision"] == "REQUEST_CHANGES" and result["exit_code"] == 1
+    assert lane.impl.invoke_implementer.call_count == 0
+    assert outside.read_text() == "external bytes\n"
+    if mutation == "source":
+        assert source.read_text() == "unreviewed source\n"
+    if mutation == "index_only":
+        assert source.read_bytes() == original
+        assert _git_stdout(lane.repo, "show", ":f.py") == "unreviewed index"
+
+
+def test_symlink_report_destination_refuses_before_review(declared_review_lane, monkeypatch):
+    lane = declared_review_lane
+    report = lane.repo / lane.reports["blocking"]
+    report.parent.mkdir(parents=True)
+    report.symlink_to(lane.repo.parent / "outside-report.md")
+    reviewer = MagicMock()
+    monkeypatch.setattr(pb_mod, "run_bridge_review", reviewer)
+    result = pb_mod.run_scoped_bridge_review(
+        lane.repo, "review", wave_id=lane.wave, candidate_authority_required=True,
+        candidate_authority_metadata=lane.metadata,
+    )
+    assert "symlink" in result["candidate_scope_error"]
+    assert result["exit_code"] == 125 and result["decision"] == ""
+    reviewer.assert_not_called()
+    assert report.is_symlink()
 
 
 @pytest.fixture
@@ -572,8 +943,10 @@ def _exercise_native_real_process_release(
                 "import json,os,select,sys,time; from pathlib import Path; "
                 "record=Path(sys.argv[1]); pending=record.with_suffix('.tmp'); "
                 "pending.write_text(json.dumps({'pid':os.getpid(),'pgid':os.getpgrp()})); pending.replace(record); "
+                f"pulse=Path({str(heartbeat)!r}); pending_pulse=pulse.with_suffix('.tmp'); "
                 f"\nwhile True:\n"
-                f" Path({str(heartbeat)!r}).write_text(str(time.monotonic_ns()))\n"
+                " pending_pulse.write_text(str(time.monotonic_ns()))\n"
+                " pending_pulse.replace(pulse)\n"
                 f" if select.select({list(pass_fds)!r}, [], [], 0.03)[0]:\n"
                 f"  assert os.read({pass_fds[0] if detached else -1}, 1) == b''\n"
                 f"  Path({str(child_cleanup)!r}).write_text(json.dumps(dict("
@@ -790,9 +1163,16 @@ def _exercise_native_real_process_release(
                 child = json.loads(child_record.read_text())
                 assert child["pgid"] == child["pid"] != processes[0].pid
                 assert child_alive  # The escaped child is still alive at the HOLD.
-                before_pulse = heartbeat.read_text()
-                time.sleep(0.1)
-                assert heartbeat.read_text() != before_pulse
+                before_pulse = heartbeat.read_text() if heartbeat.exists() else ""
+                after_pulse = before_pulse
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    after_pulse = heartbeat.read_text() if heartbeat.exists() else ""
+                    if after_pulse and after_pulse != before_pulse:
+                        break
+                    time.sleep(0.01)
+                assert after_pulse
+                assert after_pulse != before_pulse
             print(json.dumps({"scenario": scenario or exit_mode, "released": released,
                               "child_alive_at_hold": child_alive, "actor_calls": fixture["calls"],
                               "query_failures": len(query_failures), "protected_files_unchanged": True,
@@ -8456,18 +8836,13 @@ class TestFinalPytestGate:
     """Failed pytest MUST block commit_ready — hard gate after bridge convergence."""
 
     def test_run_pytest_on_files_forces_deterministic_hash_seed(self, tmp_path):
-        completed = subprocess.CompletedProcess(
-            args=["pytest"],
-            returncode=0,
-            stdout="ok",
-            stderr="",
-        )
-        with patch.object(pb_mod.subprocess, "run", return_value=completed) as mock_run:
-            result = pb_mod._run_pytest_on_files(tmp_path, ["mu/tests/tools/test_foo.py"])  # ANTICHEAT_OK: testing internal final-pytest gate helper
-
-        assert result["passed"] is True
-        kwargs = mock_run.call_args.kwargs
-        assert kwargs["env"]["PYTHONHASHSEED"] == "0"
+        import validation_execution as validation
+        from mu.tests.tools.test_executor_common import complete_process_observation
+        path = tmp_path / "test_seed.py"
+        path.write_text("import os\ndef test_seed(): assert os.environ['PYTHONHASHSEED'] == '0'\n")
+        with complete_process_observation(validation.common):
+            result = pb_mod.run_pytest_gate(tmp_path, ["test_seed.py"])
+        assert result["passed"] is True, result
 
     def test_pytest_gate_ignores_non_python_test_fixtures(self):
         selected = pb_mod.select_pytest_gate_files([
@@ -8592,8 +8967,9 @@ class TestFinalPytestGate:
         assert f"mu/tests/l4_gates/test_p7w5_outer_loop_boundary_gate.py {indicator_path}" in note
         assert f"--wave-id {wave_id} --wave-class L4_STRUCTURAL" in note
 
-    def test_pytest_failure_blocks_commit_ready(self, tmp_path):
-        """If final pytest gate fails, status must be error, not commit_ready."""
+    @pytest.mark.parametrize("validation_hold", [False, True])
+    def test_pytest_failure_blocks_commit_ready(self, tmp_path, validation_hold):
+        """Neither failed tests nor validation HOLD can authorize commit_ready."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -8601,6 +8977,20 @@ class TestFinalPytestGate:
 
         mock_impl = _make_mock_impl()
         pager_calls = []
+        checkpoint = {}
+        pytest_result = {
+            "exit_code": 125 if validation_hold else 1,
+            "stdout": "partial validation output", "stderr": "HOLD: source drift" if validation_hold else "",
+            "passed": False, "validation_budget_hold": validation_hold,
+            "receipt_path": "validation/receipt.json", "rcx_process_released": False,
+        }
+
+        def failed_validation(*args, **kwargs):
+            state_path = repo / ".agent_bus/executors/phase_b_state.json"
+            checkpoint["bytes"] = state_path.read_bytes()
+            checkpoint["implementer_calls"] = mock_impl.invoke_implementer.call_count
+            stage.reset_mock()
+            return pytest_result
 
         def fake_emit(repo_root, **kwargs):
             pager_calls.append(kwargs)
@@ -8619,14 +9009,25 @@ class TestFinalPytestGate:
              patch.object(pb_mod, "run_bridge_review", return_value={
                  "exit_code": 0, "stdout": "GO\n", "stderr": "", "decision": "GO", "job_id": "j1",
              }), \
-             patch.object(pb_mod, "_stage_files", return_value=True), \
-             patch.object(pb_mod, "_run_pytest_on_files", return_value={
-                 "exit_code": 1, "stdout": "FAILED test_foo.py", "stderr": "", "passed": False,
-             }):
+             patch.object(pb_mod, "_stage_files", return_value=True) as stage, \
+             patch.object(pb_mod, "run_pre_commit_supervisor") as supervisor, \
+             patch.object(pb_mod, "prepare_commit_handoff") as handoff, \
+             patch.object(pb_mod, "_run_pytest_on_files", side_effect=failed_validation):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        assert result["status"] == "error"
+        assert result["status"] == ("validation_budget_hold" if validation_hold else "error")
         assert result["step"] == "final_pytest_gate"
+        stage.assert_not_called()
+        supervisor.assert_not_called()
+        handoff.assert_not_called()
+        assert mock_impl.invoke_implementer.call_count == checkpoint["implementer_calls"]
+        if validation_hold:
+            from mu.tools.executors.recovery_gate import FailureClass, classify_failure
+            assert result["validation"] == pytest_result
+            assert classify_failure(result) == FailureClass.TERMINAL_POLICY
+            assert (repo / ".agent_bus/executors/phase_b_state.json").read_bytes() == checkpoint["bytes"]
+            assert not any(call["state"] == "final_pytest_failed" for call in pager_calls)
+            return
         assert any(
             call["event_type"] == "phase_b_final_verdict"
             and call["state"] == "final_pytest_failed"
@@ -8638,7 +9039,8 @@ class TestFinalPytestGate:
             for call in pager_calls
         )
 
-    def test_reentry_pytest_failure_emits_final_verdict_and_hard_fail(self, tmp_path):
+    @pytest.mark.parametrize("validation_hold", [False, True])
+    def test_reentry_pytest_failure_emits_final_verdict_and_hard_fail(self, tmp_path, validation_hold):
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / "reports" / "control_plane").mkdir(parents=True)
@@ -8663,6 +9065,21 @@ class TestFinalPytestGate:
 
         mock_impl = _make_mock_impl()
         pager_calls = []
+        checkpoint = {}
+        clear_checkpoint = pb_mod._clear_state  # ANTICHEAT_OK: HOLD must return before checkpoint cleanup
+        pytest_result = {
+            "exit_code": 125 if validation_hold else 1,
+            "stdout": "partial validation output", "stderr": "HOLD: ownership uncertain" if validation_hold else "",
+            "passed": False, "validation_budget_hold": validation_hold,
+            "receipt_path": "validation/receipt.json", "rcx_process_released": False,
+        }
+
+        def failed_validation(*args, **kwargs):
+            checkpoint["bytes"] = (state_dir / "phase_b_state.json").read_bytes()
+            checkpoint["implementer_calls"] = mock_impl.invoke_implementer.call_count
+            stage.reset_mock()
+            clear_state.reset_mock()
+            return pytest_result
 
         def fake_emit(repo_root, **kwargs):
             pager_calls.append(kwargs)
@@ -8689,14 +9106,28 @@ class TestFinalPytestGate:
              patch.object(pb_mod, "_collect_wave_owned_files", return_value=changed_files), \
              patch.object(pb_mod, "run_sdk_agents", return_value={"exit_code": 0, "stdout": "", "stderr": ""}), \
              patch.object(pb_mod, "run_bridge_review", side_effect=bridge_go), \
-             patch.object(pb_mod, "_stage_files", return_value=True), \
-             patch.object(pb_mod, "_run_pytest_on_files", return_value={
-                 "exit_code": 1, "stdout": "FAILED test_foo.py", "stderr": "", "passed": False,
-             }):
+             patch.object(pb_mod, "_stage_files", return_value=True) as stage, \
+             patch.object(pb_mod, "run_pre_commit_supervisor") as supervisor, \
+             patch.object(pb_mod, "prepare_commit_handoff") as handoff, \
+             patch.object(pb_mod, "_clear_state", wraps=clear_checkpoint) as clear_state, \
+             patch.object(pb_mod, "_run_pytest_on_files", side_effect=failed_validation):
             result = pb_mod.run_phase_b(repo, "reports/control_plane/plan.md", max_bridge_rounds=5)
 
-        assert result["status"] == "error"
+        assert result["status"] == ("validation_budget_hold" if validation_hold else "error")
         assert result["step"] == "reentry_pytest_gate"
+        stage.assert_not_called()
+        supervisor.assert_not_called()
+        handoff.assert_not_called()
+        assert mock_impl.invoke_implementer.call_count == checkpoint["implementer_calls"]
+        if validation_hold:
+            from mu.tools.executors.recovery_gate import FailureClass, classify_failure
+            assert result["validation"] == pytest_result
+            assert classify_failure(result) == FailureClass.TERMINAL_POLICY
+            assert (state_dir / "phase_b_state.json").read_bytes() == checkpoint["bytes"]
+            clear_state.assert_not_called()
+            assert not any(call["state"] == "reentry_pytest_failed" for call in pager_calls)
+            return
+        clear_state.assert_called_once_with(repo)
         assert any(
             call["event_type"] == "phase_b_final_verdict"
             and call["state"] == "reentry_pytest_failed"
@@ -9205,6 +9636,7 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
     from tests.tools.test_launch_wave import make_config
     from meta_bridge_supervisor import MetaBridgeResponse, write_pre_commit_receipt, build_meta_reviewer_prompt
     from executor_common import emit_pipeline_agent_event
+    from bridge_supervisor import read_task_text
 
     scenario = getattr(request, "param", "future")
     native_status = scenario in {"status-refresh", "post-reentry", "restored-status-refresh"}
@@ -9273,7 +9705,7 @@ def commit_ready_resume_lane(tmp_path, monkeypatch, request, real_pre_review_pac
                         findings=[], touched_files_claimed=[], validations_claimed=[])
         with sqlite3.connect(repo / bus / "bridge.db") as conn:
             conn.executescript((_EXECUTORS_DIR.parent / "agents/bridge_schema.sql").read_text())
-            conn.execute("INSERT INTO jobs (job_id, created_at, updated_at, status, task_text, reader_agent, reviewer_agent, acceptance_checks_json, current_round, terminal_decision) VALUES (?, '', '', 'DONE', ?, 'codex', 'codex', '[]', 1, 'GO')", (job, summary))
+            conn.execute("INSERT INTO jobs (job_id, created_at, updated_at, status, task_text, reader_agent, reviewer_agent, acceptance_checks_json, current_round, terminal_decision) VALUES (?, '', '', 'DONE', ?, 'codex', 'codex', '[]', 1, 'GO')", (job, read_task_text(summary, None)))
             conn.execute("INSERT INTO turns (turn_id, job_id, round_no, agent_role, status, decision, state_sha_start, prompt_path, raw_output_path, envelope_json, started_at) VALUES (?, ?, 1, 'reviewer', 'completed', 'GO', '', '', '', ?, '')", (turn, job, json.dumps(envelope)))
         return dict(decision="GO", exit_code=0, stdout="GO", stderr="", job_id=job)
 
@@ -9552,6 +9984,48 @@ def test_commit_ready_resume_stale_prepared_checkpoint(commit_ready_resume_lane)
     assert result["step"] == "commit_ready_resume", result
     assert "launcher claim" in str(result["errors"])
     assert lane.state_path.read_bytes() == lane.prepared
+
+
+@pytest.mark.parametrize("commit_ready_resume_lane", ["future"], indirect=True)
+def test_commit_ready_resume_validation_hold_preserves_claim_and_checkpoint(commit_ready_resume_lane):
+    from mu.tools.executors.recovery_gate import FailureClass, classify_failure
+
+    lane = commit_ready_resume_lane
+    meta = lane.repo / lane.bus / "meta"
+    claimed = meta / "launch_wave_dispatch_terminal.claimed.json"
+    (meta / "launch_wave_dispatch_terminal.json").rename(claimed)
+    before_claim = claimed.read_bytes()
+    before_state = lane.state_path.read_bytes()
+    pending_packet = (lane.repo / lane.plan_path).read_bytes()
+    completed_actors = lane.impl.invoke_implementer.call_count
+    validation = {
+        "passed": False, "exit_code": 125, "validation_budget_hold": True,
+        "stdout": "", "stderr": "HOLD: validation budget exhausted",
+        "receipt_path": "validation/receipt.json", "rcx_process_released": False,
+    }
+    with patch.dict(sys.modules, {"phase_b_implementer": lane.impl}), \
+         patch.object(pb_mod, "run_private_attr_gate", return_value={"passed": True}), \
+         patch.object(pb_mod, "_run_pytest_on_files", return_value=validation) as gate, \
+         patch.object(pb_mod, "run_bridge_review") as bridge, \
+         patch.object(pb_mod, "run_sdk_agents") as sdk, \
+         patch.object(pb_mod, "run_pre_commit_supervisor") as supervisor, \
+         patch.object(pb_mod, "prepare_commit_handoff") as handoff:
+        result = pb_mod.run_phase_b(lane.repo, lane.plan_path, bus_dir=lane.bus,
+            routing_record_override={**lane.route, "decision": "ROUTE_PHASE_B"})
+    assert result["status"] == "validation_budget_hold", result
+    assert result["step"] == "commit_ready_resume"
+    assert result["validation"] == validation
+    assert classify_failure(result) == FailureClass.TERMINAL_POLICY
+    gate.assert_called_once()
+    bridge.assert_not_called()
+    sdk.assert_not_called()
+    supervisor.assert_not_called()
+    handoff.assert_not_called()
+    assert lane.impl.invoke_implementer.call_count == completed_actors
+    assert claimed.read_bytes() == before_claim
+    assert lane.state_path.read_bytes() == before_state
+    assert (lane.repo / lane.plan_path).read_bytes() == pending_packet
+    assert json.loads((meta / "phase_b_commit_ready_adoption.json").read_bytes())["state"] == "CLAIMED"
 
 
 @pytest.fixture
@@ -10310,6 +10784,100 @@ class TestPreparedPrivateReviewResume:
         bridge.assert_called_once()
         for actor in [preparation, gate, sdk, impl.invoke_implementer]:
             actor.assert_not_called()
+
+
+def continue_generated_review_case(repo, plan_path, route, *, final_pass=True):
+    """Fresh-process consumer: real native gates, no completed actor replay."""
+    import tempfile
+    import validation_execution as validation
+    from mu.tests.tools.test_executor_common import complete_process_observation
+    impl = _make_mock_impl()
+    impl.invoke_implementer.side_effect = AssertionError("completed implementer replayed")
+    with ExitStack() as stack, tempfile.TemporaryDirectory() as directory:
+        validation_repo = Path(directory)
+        (validation_repo / "test_gate.py").write_text(f"def test_actual_gate(): assert {final_pass!r}\n")
+        stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+        for name in ("run_bridge_review", "run_sdk_agents", "run_private_attr_gate", "_prepare_phase_b_pre_review_package"):
+            stack.enter_context(patch.object(pb_mod, name, side_effect=AssertionError("completed actor/preparation replayed")))
+        stack.enter_context(complete_process_observation(validation.common))
+        stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", side_effect=lambda *a, **kw:
+            pb_mod.run_pytest_gate(validation_repo, ["test_gate.py"], workers=0, timeout=15)))
+        stack.enter_context(patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
+            "exit_code": 0, "receipt_path": ".agent_bus/meta/pre_commit_receipts/r.json",
+            "parsed": {"decision": "COMMIT_GO", "summary": "", "findings": [], "status": "success"},
+        }))
+        stack.enter_context(patch.object(pb_mod, "prepare_commit_handoff", return_value=repo / ".agent_bus/handoff.json"))
+        return pb_mod.run_phase_b(repo, plan_path, routing_record_override=route)
+
+
+@pytest.mark.parametrize("drift", [None, "source", "index", "review", "record", "replay", "interrupted"])
+def test_native_generated_report_survives_failed_gate_and_fresh_consumer(private_review_checkpoint, drift):
+    import tempfile
+    import validation_execution as validation
+    from mu.tests.tools.test_executor_common import complete_process_observation
+    fixture = private_review_checkpoint()
+    original_state = fixture.state_path.read_bytes()
+    fixture.finding = {**fixture.finding, "title": "Fresh private review advisory"}
+    impl = _make_mock_impl()
+    def reviewer(repo_root, summary, **kwargs):
+        _retain_private_review_envelope(fixture, kwargs["job_id"], "GO")
+        return {"job_id": kwargs["job_id"], "decision": "GO", "exit_code": 0, "stdout": "GO", "stderr": ""}
+    with ExitStack() as stack, tempfile.TemporaryDirectory() as directory:
+        validation_repo = Path(directory)
+        (validation_repo / "test_gate.py").write_text("def test_actual_failure(): assert False\n")
+        stack.enter_context(patch.dict(sys.modules, {"phase_b_implementer": impl}))
+        bridge = stack.enter_context(patch.object(pb_mod, "run_bridge_review", side_effect=reviewer))
+        stack.enter_context(complete_process_observation(validation.common))
+        stack.enter_context(patch.object(pb_mod, "_run_pytest_on_files", side_effect=lambda *a, **kw:
+            pb_mod.run_pytest_gate(validation_repo, ["test_gate.py"], workers=0, timeout=15)))
+        first = pb_mod.run_phase_b(fixture.repo, fixture.plan_path, routing_record_override=_VALID_ROUTING_RECORD.copy())
+    assert first["step"] == "final_pytest_gate", first
+    assert first["validation"]["exit_code"] == 1
+    bridge.assert_called_once()
+    impl.invoke_implementer.assert_not_called()
+    retained = fixture.state_path.read_bytes()
+    state = json.loads(retained)
+    assert {k: v for k, v in state.items() if k != "private_attr_post_review"} == json.loads(original_state)
+    post = state["private_attr_post_review"]
+    report = fixture.repo / post["report"]
+    assert "Fresh private review advisory" in report.read_text()
+    assert report.read_bytes() == subprocess.check_output(["git", "show", ":" + post["report"]], cwd=fixture.repo)
+    if drift == "source":
+        (fixture.repo / fixture.test_path).write_text("# unexplained source change\n")
+    elif drift == "index":
+        subprocess.run(["git", "update-index", "--chmod=+x", fixture.test_path], cwd=fixture.repo, check=True)
+    elif drift == "review":
+        with sqlite3.connect(fixture.repo / ".agent_bus/bridge.db") as db:
+            envelope = {**post["envelope"], "summary": "substituted output"}
+            db.execute("UPDATE turns SET envelope_json=? WHERE job_id=?", (json.dumps(envelope), post["review"]["job_id"]))
+    elif drift == "record":
+        (fixture.repo / ".agent_bus/executors" / ("private_attr_post_review_" + post["sha256"] + ".json")).unlink()
+    command = [sys.executable, "-c", f'''
+import sys,json
+from pathlib import Path
+sys.path[:0]=[{str(_EXECUTORS_DIR.parents[2])!r},{str(_EXECUTORS_DIR.parents[1])!r},{str(_EXECUTORS_DIR)!r}]
+from mu.tests.tools.test_phase_b_executor import continue_generated_review_case
+result=continue_generated_review_case(Path({str(fixture.repo)!r}),{fixture.plan_path!r},{_VALID_ROUTING_RECORD!r},final_pass={drift != 'interrupted'!r})
+print(json.dumps(result))
+''']
+    child = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    assert child.returncode == 0, child.stderr
+    result = json.loads(child.stdout.splitlines()[-1])
+    if drift in (None, "replay"):
+        assert result["status"] == "commit_ready", result
+        assert not fixture.state_path.exists()
+        if drift == "replay":
+            fixture.state_path.write_bytes(retained)
+            refused = continue_generated_review_case(fixture.repo, fixture.plan_path, _VALID_ROUTING_RECORD.copy())
+            assert refused["step"] == "private_attr_prepared_resume", refused
+            assert "consumed" in str(refused)
+    elif drift == "interrupted":
+        assert result["step"] == "final_pytest_gate", result
+        refused = continue_generated_review_case(fixture.repo, fixture.plan_path, _VALID_ROUTING_RECORD.copy())
+        assert "consumed" in str(refused)
+    else:
+        assert result["status"] == "error", result
+        assert fixture.state_path.read_bytes() == retained
 
 
 class TestBridgeRenderAssociation:
@@ -11412,7 +11980,10 @@ class TestBridgeLoopReinvokesImplementer:
              patch.object(
                  pb_mod,
                  "_guard_candidate_authority_scope_if_configured",
-                 return_value="outside allowlist: outside.txt",
+                 side_effect=lambda *a, **kw: (
+                     "outside allowlist: outside.txt"
+                     if kw["context"] == "pre-supervisor L4 indicator collector" else None
+                 ),
              ), \
              patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact") as mock_collector, \
              patch.object(pb_mod, "run_pre_commit_supervisor") as mock_supervisor:
@@ -11466,7 +12037,10 @@ class TestBridgeLoopReinvokesImplementer:
              patch.object(
                  pb_mod,
                  "_guard_candidate_authority_scope_if_configured",
-                 return_value="outside allowlist: outside.txt",
+                 side_effect=lambda *a, **kw: (
+                     "outside allowlist: outside.txt"
+                     if kw["context"] == "re-entry pre-supervisor L4 indicator collector" else None
+                 ),
              ), \
              patch.object(pb_mod, "_collect_and_stage_l4_indicator_artifact") as mock_collector, \
              patch.object(pb_mod, "run_pre_commit_supervisor", return_value={
@@ -20389,7 +20963,7 @@ class TestReentryStateClearing:
         """_clear_state must be called before returning from reentry_pytest_gate failure."""
         source = Path(pb_mod.__file__).read_text()  # ANTICHEAT_OK: testing internal executor functions
         # Find the reentry_pytest_gate failure block
-        idx = source.find('"reentry_pytest_gate"')
+        idx = source.find('"step": "reentry_pytest_gate"')
         assert idx > 0, "reentry_pytest_gate error path not found in source"
         # The _clear_state call must appear BEFORE the return in that block.
         # Look backwards from reentry_pytest_gate for _clear_state
@@ -22331,6 +22905,32 @@ class TestOrdinaryBridgeFixMutationOutcome:
         lane.impl.build_implementation_prompt.assert_not_called()
         self.assert_actor_free(lane)
 
+    @pytest.mark.parametrize("status", ["budget_hold", "ownership_hold", "interrupted"])
+    def test_finalizer_validation_hold_preserves_checkpoint_without_actors(self, ordinary_mutation_lane, status):
+        from mu.tools.executors.recovery_gate import FailureClass, classify_failure
+
+        lane = ordinary_mutation_lane
+        self.seal_success(lane)
+        lane.mocks["_collect_changed_files"].return_value = ["f.py", "mu/tests/tools/test_added.py"]
+        before = lane.state_path.read_bytes()
+        validation = {
+            "passed": False, "status": status, "validation_budget_hold": True,
+            "exit_code": 125, "stderr": "HOLD: process ownership uncertain", "stdout": "partial output",
+            "receipt_path": "validation/receipt.json", "rcx_process_released": False,
+        }
+        with patch.object(pb_mod, "_run_pytest_on_files", return_value=validation), \
+             patch.object(pb_mod, "run_pre_commit_supervisor") as supervisor, \
+             patch.object(pb_mod, "prepare_commit_handoff") as handoff:
+            result = self.run(lane)
+        assert result["status"] == "validation_budget_hold"
+        assert result["step"] == "bridge_fix_finalize_pytest"
+        assert result["validation"] == validation
+        assert classify_failure(result) == FailureClass.TERMINAL_POLICY
+        assert lane.state_path.read_bytes() == before
+        supervisor.assert_not_called()
+        handoff.assert_not_called()
+        self.assert_actor_free(lane)
+
     @pytest.mark.parametrize("mutation", [
         "missing", "version_bool", "state_list", "unknown_state", "missing_result", "result_digest",
         "self_consistent_result", "self_consistent_state", "self_consistent_round",
@@ -22520,6 +23120,29 @@ class TestOrdinaryBridgeFixMutationOutcome:
         assert lane.state_path.read_bytes() == finalized[0]
         self.assert_actor_free(lane)
         recovery.assert_not_called()
+
+
+@pytest.mark.parametrize("status", ["validation_budget_hold", "error"])
+@pytest.mark.parametrize("json_output", [False, True])
+def test_validation_hold_cli_exits_nonzero_without_recovery(tmp_path, capsys, status, json_output):
+    result = {
+        "status": status, "step": "reentry_pytest_gate", "validation_budget_hold": True,
+        "errors": ["HOLD: process ownership uncertain"],
+    }
+    recovery = MagicMock(return_value={"recovered": True})
+    argv = ["phase_b_executor.py", "--plan", "plan.md"] + (["--json"] if json_output else [])
+    with patch.dict(sys.modules, {"recovery_gate": SimpleNamespace(attempt_recovery=recovery)}), \
+         patch.object(sys, "argv", argv), \
+         patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0, str(tmp_path), "")), \
+         patch.object(pb_mod, "run_phase_b", return_value=result), \
+         patch.object(pb_mod, "ordinary_bridge_fix_failure_blocks_recovery", return_value=False):
+        assert pb_mod.main() == 1
+    recovery.assert_not_called()
+    output = capsys.readouterr().out
+    if json_output:
+        assert json.loads(output) == result
+    else:
+        assert "HOLD: process ownership uncertain" in output
 
 
 @pytest.mark.parametrize("dispatcher_owned", [False, True])

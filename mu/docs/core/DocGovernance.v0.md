@@ -133,6 +133,7 @@ WorkingRCX/
 - `tools/docs/docs_registry.json` is the central registry for markdown governance classification.
 - New markdown files/folders must be registered there or tests fail.
 - Run `python3 tools/docs/docs_sync_report.py --check` to validate registry coverage and placement rules.
+- Coverage is the git-visible markdown set: files git tracks, plus untracked files that are not git-ignored (`git ls-files --cached --others --exclude-standard`). Git-ignored files cannot be committed, so they are out of scope. `docs_sync_report.py` and `tests/docs/test_doc_governance.py` walk this set; if git cannot list it, the report exits non-zero instead of walking the filesystem.
 
 ---
 

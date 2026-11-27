@@ -15,11 +15,16 @@ Used by:
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent.parent
 REGISTRY_PATH = REPO_ROOT / "tools" / "docs" / "docs_registry.json"
+
+# Finite bound for the git listing; it normally completes in well under a second.
+GIT_LIST_TIMEOUT_SECONDS = 60
 
 
 def _load_registry() -> dict:
@@ -73,6 +78,63 @@ def get_registered_docs_subfolders() -> set[str]:
 def get_exempt_patterns() -> tuple[str, ...]:
     """Get exemption regex patterns."""
     return EXEMPT_PATTERNS
+
+
+def list_git_visible_markdown(root: Path = REPO_ROOT) -> list[Path]:
+    """Return the markdown files under ``root`` that git tracks or could add.
+
+    Docs governance covers only markdown that can be committed: tracked files,
+    plus untracked files that no ignore rule matches (``.gitignore``,
+    ``$GIT_DIR/info/exclude`` or ``core.excludesFile``). This is
+    ``git ls-files --cached --others --exclude-standard`` run in ``root``.
+    Git-ignored files cannot be committed, so they are out of scope.
+
+    A tracked path that is missing from the working tree is skipped, as the
+    on-disk walk this replaces never saw it. The ``*.md`` match is applied
+    here, case-sensitively, rather than through a git pathspec.
+
+    Returns absolute ``root / <path>`` entries, de-duplicated and sorted.
+    Fails closed: raises ``RuntimeError`` when git cannot produce the listing
+    (no git, not a work tree, timeout), instead of falling back to a walk that
+    would include ignored files.
+    """
+    command = [
+        "git",
+        "-C",
+        str(root),
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            timeout=GIT_LIST_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"cannot list git-visible markdown under {root}: {exc}") from exc
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"cannot list git-visible markdown under {root}: git ls-files "
+            f"exited {result.returncode}: {stderr}"
+        )
+
+    found: set[Path] = set()
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        rel = os.fsdecode(raw)
+        if not rel.endswith(".md"):
+            continue
+        path = root / rel
+        if os.path.lexists(path):
+            found.add(path)
+    return sorted(found)
 
 
 def classify_md_path(doc_path: Path) -> str:

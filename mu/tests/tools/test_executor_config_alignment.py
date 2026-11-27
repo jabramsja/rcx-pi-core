@@ -43,6 +43,19 @@ REQUIRED_BRIDGE_AGENT_DEFAULT_KEYS = {
 }
 
 EXECUTORS_DIR = REPO_ROOT / "mu" / "tools" / "executors"
+
+
+def test_validation_envelope_accounts_for_sequential_leaves_without_config_inflation():
+    path = EXECUTORS_DIR / "executor_config.json"
+    before = path.read_bytes()
+    config = json.loads(before)
+    requirements = executor_common.validation_schedule_requirements(REPO_ROOT, 7200)
+    commit = dict(requirements["commit_executor"])
+    assert commit["pre_push_fast"] == config["timeouts"]["pre_push_fast"]
+    assert commit["commit_ci_watch"] == config["timeouts"]["commit_ci_watch"]
+    assert sum(commit.values()) > config["timeouts"]["commit_executor"]
+    assert dict(requirements["phase_b_executor"])["implementation_convergence"] == config["timeouts"]["phase_b_executor"]
+    assert path.read_bytes() == before
 CONFIG_JSON_PATH = EXECUTORS_DIR / "executor_config.json"
 COMMON_PY_PATH = EXECUTORS_DIR / "executor_common.py"
 DISPATCH_PY_PATH = EXECUTORS_DIR / "executor_dispatch.py"

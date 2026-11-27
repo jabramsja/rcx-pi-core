@@ -21,6 +21,62 @@ from tests.repo_root import REPO_ROOT
 common = load_module("executor_common", REPO_ROOT / "mu/tools/executors/executor_common.py")
 
 
+@pytest.mark.parametrize("signal_fields", [
+    {"status": "budget_hold", "validation_budget_hold": True},
+    {"status": "ownership_hold", "validation_budget_hold": True},
+    {"status": "interrupted", "validation_budget_hold": True},
+    {"status": "validation_budget_hold"},
+    {"status": "error", "error_code": "VALIDATION_BUDGET_HOLD"},
+])
+def test_validation_hold_survives_nested_callers(signal_fields):
+    from mu.tools.executors.recovery_gate import FailureClass, classify_failure
+
+    validation = {
+        **signal_fields, "passed": False, "exit_code": 125,
+        "stdout": "partial validation output\n", "stderr": "HOLD: ownership uncertain\n",
+        "receipt_path": "validation/receipt.json", "rcx_process_released": False,
+    }
+    before = copy.deepcopy(validation)
+    gate = common.validation_hold_result(validation, step="pytest_gate")
+    outer = common.validation_hold_result(gate, step="bot_remediation_validation")
+    for result in (gate, outer):
+        assert result["status"] == "validation_budget_hold"
+        assert result["validation_budget_hold"] is True
+        assert result["passed"] is False
+        assert result["stdout"] == validation["stdout"]
+        assert result["stderr"] == validation["stderr"]
+        assert result["errors"] == [validation["stderr"]]
+        assert classify_failure(result) == FailureClass.TERMINAL_POLICY
+        wrapped = {"status": "error", "stdout": json.dumps(result), "exit_code": 1}
+        assert classify_failure(wrapped) == FailureClass.TERMINAL_POLICY
+    assert outer["validation"]["validation"] == before
+    assert validation == before
+
+
+@pytest.mark.parametrize("validation", [
+    {"passed": True, "exit_code": 0},
+    {"passed": False, "exit_code": 1, "stderr": "test assertion mentions HOLD"},
+    {"status": "held", "validation_budget_hold": False},
+    {"status": "error", "validation_budget_hold": "true"},
+    {"status": "error", "error_code": "VALIDATION_FAILED", "error_detail": "mentions VALIDATION_BUDGET_HOLD"},
+    {"status": "error", "error_code": "validation_budget_hold"},
+])
+def test_validation_hold_requires_structured_signal(validation):
+    assert common.validation_hold_result(validation, step="pytest_gate") is None
+
+
+@pytest.mark.parametrize("key", ["phase_b_executor", "pre_push_fast", "unknown"])
+def test_admitted_budget_rejects_scalar_recovery_key_changes(tmp_path, monkeypatch, key):
+    monkeypatch.setenv(common.NATIVE_STAGE_BUDGET_ENV, "sealed invocation")
+    monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_KEY", key)
+    monkeypatch.setenv("RCX_RECOVERY_TIMEOUT_OVERRIDE", "999999")
+    config = copy.deepcopy(common.DEFAULT_EXECUTOR_CONFIG)
+    before = copy.deepcopy(config)
+    with pytest.raises(common.ValidationBudgetError, match="baseline"):
+        common.apply_recovery_config_env_overrides(config)
+    assert config == before
+
+
 @contextmanager
 def complete_process_observation(*modules):
     """Give positive release fixtures one real OS snapshot per observation.
@@ -209,7 +265,10 @@ def test_real_unreaped_process_is_present_until_parent_wait(owned_process, tmp_p
     (tmp_path / "unreaped-process-observations.json").write_text(json.dumps(records) + "\n")
 
 
-def test_real_reparenting_between_queries_is_uncertain(owned_process, monkeypatch, tmp_path):
+@pytest.mark.parametrize("birth_between_queries", [False, True])
+def test_real_reparenting_between_queries_is_uncertain(
+    owned_process, monkeypatch, tmp_path, birth_between_queries,
+):
     """An unrelated real lifetime change legitimately invalidates a full census."""
     proc, owner = owned_process
     parent = subprocess.Popen(
@@ -221,12 +280,22 @@ def test_real_reparenting_between_queries_is_uncertain(owned_process, monkeypatc
     child = int(parent.stdout.readline())
     real_run = subprocess.run
     graphs = []
+    born = []
+    query_parents = []
 
     def reparent(args, **kwargs):
         result = real_run(args, **kwargs)
+        if args[0] == "ps":
+            query_parents.append({int(row.split()[0]): int(row.split()[1])
+                                  for row in result.stdout.splitlines()})
         if args == ["ps", "-axo", "pid=,ppid="] and not graphs:
             graphs.append(result.stdout)
-            assert f"{child}" in result.stdout
+            assert query_parents[0][child] == parent.pid
+            if birth_between_queries:
+                born.append(subprocess.Popen(
+                    [sys.executable, "-B", "-c", "import time; time.sleep(60)"],
+                    start_new_session=True,
+                ))
             parent.kill()
             parent.wait(timeout=5)
             deadline = time.monotonic() + 5
@@ -244,13 +313,25 @@ def test_real_reparenting_between_queries_is_uncertain(owned_process, monkeypatc
         monkeypatch.setattr(subprocess, "run", reparent)
         observation = common.observe_executor_processes(owner, cwd=tmp_path)
         diagnostic = {"complete": observation.complete, "error": observation.error,
-                      "owned_pid": proc.pid, "reparented_pid": child}
+                      "owned_pid": proc.pid, "reparented_pid": child,
+                      "parents": [rows.get(child) for rows in query_parents],
+                      "born_pids": [item.pid for item in born]}
         print(json.dumps(diagnostic, sort_keys=True))
         assert graphs and not observation.complete, diagnostic
         assert observation.error == "process ancestry changed between observations", diagnostic
+        assert query_parents[0][child] != query_parents[1][child], diagnostic
+        assert not observation.parents and not observation.identities
         assert proc.poll() is None
         os.kill(child, 0)
+        if birth_between_queries:
+            assert born[0].pid not in query_parents[0]
+            assert born[0].pid in query_parents[1]
+            assert born[0].poll() is None
     finally:
+        for item in born:
+            if item.poll() is None:
+                item.kill()
+            item.wait(timeout=5)
         if parent.poll() is None:
             parent.kill()
         parent.wait(timeout=5)
@@ -403,29 +484,66 @@ def test_later_partial_tables_cannot_erase_an_unresolved_live_pid(owned_process,
 
 
 def test_process_born_between_queries_requires_complete_resampling(owned_process, monkeypatch):
+    """Isolate a birth from unrelated machine ancestry/identity changes.
+
+    Replay an immutable real census, adding only the new real child's row at
+    the first identity query. These are controlled parser/resampling inputs,
+    never release evidence. The live gap probe and direct-child teardown stay
+    real. The adjacent two-query reparenting controls exercise the unmodified
+    OS queries and must still refuse, including when a child is also born.
+    """
     proc, owner = owned_process
     real_run = subprocess.run
+    real_kill = os.kill
+    identity_command = ["ps", "axeww", "-o", "pid=,ppid=,lstart=,stat=,command="]
+    snapshot = real_run(identity_command, capture_output=True, text=True, check=True,
+                        timeout=5, env={**os.environ, "LC_ALL": "C"}).stdout
     born = []
     graphs = []
+    probes = []
+    identity_queries = []
 
     def observe(args, *a, **kw):
-        result = real_run(args, *a, **kw)
-        if args[0] == "ps" and "-axo" in args:
-            graphs.append(result.stdout)
+        nonlocal snapshot
+        if args == ["ps", "-axo", "pid=,ppid="]:
+            graph = "\n".join(" ".join(row.split(None, 2)[:2])
+                              for row in snapshot.splitlines()) + "\n"
+            graphs.append(graph)
             if not born:
                 born.append(subprocess.Popen(
                     [sys.executable, "-B", "-c", "import time; time.sleep(60)"],
                     start_new_session=True,
                 ))
-        return result
+            return subprocess.CompletedProcess(args, 0, graph, "")
+        if args == identity_command:
+            if not identity_queries:
+                live = real_run(args, *a, **kw)
+                rows = [row for row in live.stdout.splitlines()
+                        if int(row.split()[0]) == born[0].pid]
+                assert len(rows) == 1
+                assert int(rows[0].split()[1]) == os.getpid()
+                snapshot += rows[0] + "\n"
+            identity_queries.append(snapshot)
+            return subprocess.CompletedProcess(args, 0, snapshot, "")
+        return real_run(args, *a, **kw)
 
-    monkeypatch.setattr(subprocess, "run", observe)
+    def probe(pid, signum):
+        probes.append((pid, signum))
+        return real_kill(pid, signum)
+
     try:
-        observation = common.observe_executor_processes(owner)
+        with monkeypatch.context() as patch:
+            patch.setattr(subprocess, "run", observe)
+            patch.setattr(os, "kill", probe)
+            observation = common.observe_executor_processes(owner)
         assert len(graphs) > 1
         assert born[0].pid not in {int(row.split()[0]) for row in graphs[0].splitlines()}
         assert observation.complete, observation.error
         assert {proc.pid, born[0].pid} <= observation.parents.keys() & observation.identities.keys()
+        assert len(graphs) == len(identity_queries) == 2
+        assert probes == [(born[0].pid, 0)]  # Real live gap forces the second census.
+        assert observation.identities[proc.pid].owned
+        assert observation.parents[born[0].pid] == os.getpid()
         assert born[0].poll() is None
     finally:
         for child in born:

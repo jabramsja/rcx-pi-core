@@ -28,6 +28,168 @@ web_mod = load_module("pipeline_dashboard_web_observability", _OBSERVABILITY_DIR
 FailureClass = rg_mod.FailureClass
 
 
+def test_admitted_validation_budget_never_becomes_timeout_retry(tmp_path, monkeypatch):
+    result = {"status": "validation_budget_hold", "validation_budget_hold": True,
+              "errors": ["budget exhausted after validation timeout"]}
+    for payload in (result, {"status": "failed", "stdout": json.dumps(result)}):
+        assert rg_mod.classify_failure(payload) == FailureClass.TERMINAL_POLICY
+    monkeypatch.setenv("RCX_NATIVE_STAGE_BUDGET", "immutable invocation")
+    before = dict(os.environ)
+    fix = rg_mod.fix_process_timeout(tmp_path, result={"executor": "commit_executor"})
+    assert fix["fixed"] is False
+    assert dict(os.environ) == before
+
+
+@pytest.fixture
+def coherent_hybrid_validation():
+    """Positive fixtures use a real coherent census; uncertainty controls do not."""
+    import validation_execution as validation
+    from mu.tests.tools.test_executor_common import complete_process_observation
+    with complete_process_observation(validation.common) as observations:
+        yield observations
+
+
+@pytest.mark.parametrize("owners", [None, "outer-a", "outer-a:outer-b"])
+def test_hybrid_child_receipts_and_live_environment_are_contained(
+    retained_native_scratch, monkeypatch, owners, coherent_hybrid_validation,
+):
+    root = retained_native_scratch.root
+    import executor_common as common
+    monkeypatch.setenv("RCX_AGENT_BUS_DIR", ".agent_bus-live")
+    monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "codex")
+    monkeypatch.setenv(common.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV, str(root))
+    for names in common.ROLE_AGENT_ENV_VARS.values():
+        for name in names:
+            monkeypatch.setenv(name, "codex")
+    monkeypatch.setenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", "reviewer")
+    monkeypatch.setenv("RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE", "100")
+    monkeypatch.setenv("RCX_SKIP_RECEIPT_CHECK", "1")
+    monkeypatch.setenv("UNRELATED_VALIDATION_VAR", "preserve-me")
+    monkeypatch.setenv("RCX_VALIDATION_LOG_DIR", str(root / ".agent_bus-fix37/executors/validation"))
+    if owners is None:
+        monkeypatch.delenv(common.EXECUTOR_PROCESS_OWNER_ENV, raising=False)
+    else:
+        monkeypatch.setenv(common.EXECUTOR_PROCESS_OWNER_ENV, owners)
+    protected = ["RCX_AGENT_BUS_DIR", "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE",
+                 common.ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV, "RCX_SKIP_RECEIPT_CHECK",
+                 "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE",
+                 common.NATIVE_STAGE_BUDGET_ENV, common.VALIDATION_SCHEDULE_ENV]
+    protected += [name for names in common.ROLE_AGENT_ENV_VARS.values() for name in names]
+    target = "mu/tests/tools/test_recovery_gate.py"
+    (root / target).write_text(
+        "import os,sys,json\nfrom pathlib import Path\n"
+        f"sys.path[:0] = {[str(_REPO_ROOT), str(_REPO_ROOT / 'mu'), str(_EXECUTORS_DIR)]!r}\n"
+        "import validation_execution as validation\n"
+        "from mu.tests.tools.test_executor_common import complete_process_observation\n"
+        "def test_child():\n"
+        f"    assert all(key not in os.environ for key in {protected!r})\n"
+        "    assert os.environ['UNRELATED_VALIDATION_VAR'] == 'preserve-me'\n"
+        "    assert os.environ['PYTHONHASHSEED'] == '0' and os.environ['PYTHONDONTWRITEBYTECODE'] == '1'\n"
+        f"    assert os.environ['RCX_EXECUTOR_PROCESS_OWNERS'].split(':')[:-1] == {owners.split(':') if owners else []!r}\n"
+        "    with complete_process_observation(validation.common):\n"
+        "        result=validation.run_validation(Path.cwd(),[sys.executable,'-c','print(42)'],\n"
+        "            timeout=10,profile='fixture',key='meta_validation')\n"
+        "    assert result['passed'], result\n"
+        "    assert not Path(result['receipt_path']).resolve().is_relative_to(Path.cwd().resolve())\n"
+    )
+    before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    parent = dict(os.environ)
+    result = rg_mod.run_hybrid_validation(root, validation_spec=[
+        {"validator": "pytest_targeted", "targets": [target]}], timeout=30)
+    assert result["passed"], result
+    assert result["profile"] == "full" and result["executed_count"] == 1
+    assert "--maxfail=0" in result["command"] and "--max-worker-restart=0" in result["command"]
+    assert all(not Path(result[key]).resolve().is_relative_to(root.resolve())
+               for key in ("receipt_path", "stdout_path", "stderr_path", "hybrid_receipt_path", "junit_path"))
+    assert {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()} == before
+    assert dict(os.environ) == parent
+    assert result["rcx_process_released"] is False
+    assert result["identities"][0][1] == "test_child"
+
+
+@pytest.mark.parametrize("case", ["workers", "over_cap", "parent", "source"])
+def test_hybrid_admission_holds_before_actual_child(tmp_path, monkeypatch, case):
+    import validation_execution as validation
+    common = validation.common
+    marker = tmp_path / "collected"
+    target = "mu/tests/tools/test_recovery_gate.py"
+    (tmp_path / target).parent.mkdir(parents=True)
+    (tmp_path / target).write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\ndef test_leaf(): pass\n")
+    timeout = 10
+    if case == "workers":
+        monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    elif case == "over_cap":
+        timeout = 7201
+    else:
+        budget = common.admit_stage_budget(tmp_path, key="phase_b_executor", command=[sys.executable],
+            baseline=20, seconds=20, ceiling=20, allocations=(("pytest_full", 10), ("review", 10)))
+        monkeypatch.setenv(common.NATIVE_STAGE_BUDGET_ENV, budget.encode())
+        if case == "source":
+            path = tmp_path / "mu/tools/executors/executor_config.json"
+            path.parent.mkdir(parents=True); path.write_text("{}")
+    result = rg_mod.run_hybrid_validation(tmp_path, validation_spec=[
+        {"validator": "pytest_targeted", "targets": [target]}], timeout=timeout)
+    assert not result["passed"] and result["exit_code"] == 125
+    assert result["validation_budget_hold"] and not marker.exists()
+    assert rg_mod.classify_failure(result) == FailureClass.TERMINAL_POLICY
+    assert json.loads(Path(result["hybrid_receipt_path"]).read_text())["validation_budget_hold"]
+
+
+@pytest.mark.parametrize("failing", [False, True])
+def test_hybrid_full_profile_actual_schedules_preserve_identities_and_duration(tmp_path, monkeypatch, coherent_hybrid_validation, failing):
+    monkeypatch.setenv("HYPOTHESIS_PROFILE", "ci_full")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "-x")
+    target = "test_jobs.py"
+    (tmp_path / "pytest.ini").write_text("[pytest]\nmarkers =\n slow: full profile\n fuzzer: full profile\n")
+    (tmp_path / target).write_text(
+        "import os,time,pytest\n@pytest.mark.slow\n@pytest.mark.fuzzer\n@pytest.mark.parametrize('i',range(8))\n"
+        "def test_job(i):\n    assert os.environ['HYPOTHESIS_PROFILE'] == 'ci_full'\n"
+        "    time.sleep(1.5)\n"
+        f"    assert not ({failing!r} and i in (0,5))\n")
+    results = [rg_mod.run_hybrid_validation(tmp_path, validation_spec=[
+        {"validator": "pytest_targeted", "targets": [target]}], timeout=60, workers=workers) for workers in (0,4)]
+    assert results[0]["identities"] == results[1]["identities"]
+    for result in results:
+        assert result["executed_count"] == 8 and result["profile"] == "full"
+        assert result["passed"] is (not failing) and result["exit_code"] == int(failing)
+        assert result["targets"] == [target] and result["rcx_process_released"] is False
+    assert results[1]["elapsed_seconds"] < results[0]["elapsed_seconds"] * 0.8, results
+    measurement = {"serial": results[0]["elapsed_seconds"], "parallel": results[1]["elapsed_seconds"],
+                   "identities": results[0]["identities"], "outcome": results[0]["exit_code"],
+                   "serial_receipt": results[0]["receipt_path"], "parallel_receipt": results[1]["receipt_path"]}
+    Path(results[1]["receipt_path"]).with_suffix(".benchmark.json").write_text(json.dumps(measurement,indent=2))
+
+
+@pytest.mark.parametrize("outcome", ["pass", "failure", "source_drift", "timeout"])
+def test_hybrid_sequential_budget_cannot_restart_or_skip_leaf(tmp_path, monkeypatch, coherent_hybrid_validation, outcome):
+    second_marker = tmp_path / "second-executed"
+    second = tmp_path / "test_second.py"
+    second.write_text(f"from pathlib import Path\ndef test_second():\n    Path({str(second_marker)!r}).touch()\n")
+    (tmp_path / "test_first.py").write_text(
+        "import time\nfrom pathlib import Path\ndef test_first():\n"
+        + ("    time.sleep(30)\n" if outcome == "timeout" else "    time.sleep(0.1)\n")
+        + (f"    Path({str(second)!r}).write_text('def test_substituted(): pass\\n')\n" if outcome == "source_drift" else "")
+        + f"    assert {outcome != 'failure'!r}\n")
+    spec = [{"validator": "pytest_targeted", "targets": [name]} for name in ("test_first.py", "test_second.py")]
+    result = rg_mod.run_hybrid_validation(tmp_path, validation_spec=spec, timeout=2, workers=0)
+    assert result["passed"] is (outcome == "pass"), result
+    assert second_marker.exists() is (outcome == "pass")
+    if outcome == "pass":
+        first, last = result["results"]
+        assert first["enclosing_budget"] == last["enclosing_budget"]
+        assert first["enclosing_budget"]["seconds"] == 4
+        assert first["sequential_reserve_seconds"] == 2 and last["sequential_reserve_seconds"] == 0
+        assert first["budget"]["invocation"] != last["budget"]["invocation"]
+    elif outcome == "source_drift":
+        assert result["validation_budget_hold"] and "source drift" in result["stderr"]
+        assert len(result["results"]) == 1
+    elif outcome == "timeout":
+        assert result["timed_out"] and result["exit_code"] == 124
+    else:
+        assert result["exit_code"] == 1 and not result.get("validation_budget_hold")
+
+
 @pytest.mark.parametrize("bus_change", [False, True])
 @pytest.mark.parametrize("kind", ["refusal", "capacity", "findings", "nonzero", "timeout", "malformed", "incomplete"])
 @pytest.mark.parametrize("transport", ["direct", "subprocess", "chained"])
@@ -753,7 +915,7 @@ def init_hybrid_delegate_tree(repo_root: Path) -> None:
 
 
 @pytest.fixture
-def retained_native_scratch(tmp_path, monkeypatch):
+def retained_native_scratch(tmp_path, monkeypatch, tmp_path_factory):
     """Real Git checkpoint with R1's retained dangling backup link."""
     for key in list(os.environ):
         if key.startswith("GIT_"):
@@ -762,12 +924,18 @@ def retained_native_scratch(tmp_path, monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
     init_hybrid_delegate_tree(tmp_path)
     (tmp_path / ".gitignore").write_text(".scratch/\n__pycache__/\n")
+    # Repo-local, before any commit: `git commit` otherwise detaches `git maintenance
+    # run --auto`, whose sampled objects/17 estimate can start a background repack
+    # (packs in, loose objects out) racing exact .git byte snapshots. Repo-local rather
+    # than per-call `-c` so tests that commit again in this repo stay covered.
+    git_trace = tmp_path_factory.mktemp("retained-git-trace2") / "setup.json"  # outside the snapshotted root
     for args in (
-        ["init"], ["config", "user.name", "fixture"],
-        ["config", "user.email", "fixture@example.invalid"],
+        ["init"], ["config", "gc.auto", "0"], ["config", "maintenance.auto", "false"],
+        ["config", "user.name", "fixture"], ["config", "user.email", "fixture@example.invalid"],
         ["add", "."], ["commit", "-m", "checkpoint seed"],
     ):
-        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True,
+                       env={**os.environ, "GIT_TRACE2_EVENT": str(git_trace)})
     backup = tmp_path / (
         ".scratch/governance-retry-pytest.9PZktE/pytest-of-jeffabrams/pytest-0/"
         "test_sync_primary_moves_nonign0/main/.git/"
@@ -778,7 +946,20 @@ def retained_native_scratch(tmp_path, monkeypatch):
     link.symlink_to("founder-bytes.txt")
     evidence = backup / "retained.json"
     evidence.write_bytes(b'{"owner":"native-sync","mode":384}\n')
-    return SimpleNamespace(root=tmp_path, link=link, backup=backup, evidence=evidence)
+    return SimpleNamespace(root=tmp_path, link=link, backup=backup, evidence=evidence, git_trace=git_trace)
+
+
+def test_retained_native_scratch_git_skips_auto_maintenance(retained_native_scratch):
+    # Exact .git byte snapshots of this repo need its seed commit to skip a detached `git maintenance
+    # run --auto`; repo-local scope (not per-call `-c`) is what also covers later commits here.
+    case = retained_native_scratch
+    for key, value in (("maintenance.auto", "false"), ("gc.auto", "0")):
+        scoped = subprocess.run(["git", "config", "--show-scope", "--get", key], cwd=case.root,
+                                check=True, capture_output=True, text=True).stdout
+        assert scoped == f"local\t{value}\n", (key, scoped)
+    events = [json.loads(line) for line in case.git_trace.read_text().splitlines()]
+    assert any(e["event"] == "start" and "commit" in e["argv"] for e in events), events
+    assert [e for e in events if "maintenance" in e.get("argv", [])] == [], events
 
 
 @pytest.mark.parametrize("mutation", [
@@ -859,7 +1040,7 @@ def test_retained_native_dangling_scratch_escape_is_rejected_at_capture(retained
 
 
 def test_native_recovery_validator_owns_pytest_scratch_without_changing_retained_baseline(
-    retained_native_scratch, monkeypatch,
+    retained_native_scratch, monkeypatch, coherent_hybrid_validation,
 ):
     case = retained_native_scratch
     test_path = "mu/tests/tools/test_recovery_gate.py"
@@ -890,7 +1071,7 @@ def test_native_recovery_validator_owns_pytest_scratch_without_changing_retained
     assert case.link.is_symlink() and not case.link.exists()
 
 
-def test_native_delegate_admits_unchanged_retained_dangling_link(retained_native_scratch, monkeypatch):
+def test_native_delegate_admits_unchanged_retained_dangling_link(retained_native_scratch, monkeypatch, coherent_hybrid_validation):
     case = retained_native_scratch
     module = FakeHybridImplementerModule()
     module.invoke_implementer = lambda *args, **kwargs: dict(
@@ -9182,6 +9363,108 @@ class TestHybridDelegateRuntime:
             assert "hybrid validator timed out after 300s" in responses[1].received_input
 
 
+
+@pytest.mark.parametrize("entry", ["loop", "attempt"])
+@pytest.mark.parametrize("fault", ["workers", "ownership"])
+def test_native_hybrid_hold_stops_next_recovery_actor(retained_native_scratch, monkeypatch, entry, fault):
+    import validation_execution as validation
+    root = retained_native_scratch.root
+    (root / "mu/tools/executors/executor_config.json").write_text(json.dumps({"hybrid_recovery_enabled": True}))
+    payload = make_delegate_response()
+    calls = []
+    command = [sys.executable, "-c", "import json;print(" + repr(json.dumps(payload)) + ")"]
+    invocation = install_mock_recovery_agent(monkeypatch, cmd=command)
+    original = rg_mod.run_recovery_loop
+    module = FakeHybridImplementerModule()
+    monkeypatch.setattr(rg_mod, "_load_phase_b_implementer_module", lambda _root: module)
+    monkeypatch.setattr(rg_mod, "load_relevant_learnings", lambda *a, **kw: "")
+    monkeypatch.setattr(rg_mod, "check_learned_patterns", lambda *a, **kw: None)
+    monkeypatch.setattr(rg_mod, "observe_outcome", lambda *a, **kw: pytest.fail("HOLD entered learning/retry"))
+    if fault == "workers":
+        monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    else:
+        monkeypatch.setattr(validation.common, "observe_executor_processes", lambda *a, **kw:
+            validation.common.ExecutorProcessObservation(False, {}, {}, "changed identity: HOLD"))
+    real_popen = subprocess.Popen
+    def observe(command, *args, **kwargs):
+        if command == invocation["cmd"]:
+            calls.append(list(command))
+        return real_popen(command, *args, **kwargs)
+    monkeypatch.setattr(subprocess, "Popen", observe)
+    retained = retained_native_scratch.evidence.read_bytes()
+    failed = {"status": "failed", "step": "final_pytest_gate", "stderr": "FAILED test_x", "stdout": ""}
+    if entry == "loop":
+        result = original(root, failed, "hybrid-hold", max_iterations=3)
+    else:
+        result = rg_mod.attempt_recovery(root, failed, "hybrid-hold")
+    assert result["validation_budget_hold"] and not result["recovered"], result
+    assert result["failure_class"] == FailureClass.TERMINAL_POLICY.value
+    assert len(calls) == 1 and len(module.invoke_calls) == (0 if fault == "workers" else 1)
+    assert retained_native_scratch.evidence.read_bytes() == retained
+    status = json.loads((root / ".agent_bus/recovery/recovery_status.json").read_text())
+    assert status["state"] == "tier3_validation_hold" and status["active"] is False
+    assert status["outcome"] == "validation_budget_hold"
+    leaf = result["validation"] if entry == "loop" else result["validation"]["validation"]
+    if fault == "ownership":
+        assert leaf["final_audit"]["observed_drift"] == ["mu/tools/executors/recovery_gate.py"]
+        assert leaf["validator_result"]["validation_budget_hold"]
+
+
+def capture_hybrid_children(monkeypatch):
+    """Observe actual pytest launch arguments without replacing child execution."""
+    real_popen, calls = subprocess.Popen, []
+    def observe(command, *args, **kwargs):
+        if isinstance(command, list) and command[1:3] == ["-m", "pytest"]:
+            calls.append((list(command), dict(kwargs)))
+        return real_popen(command, *args, **kwargs)
+    monkeypatch.setattr(subprocess, "Popen", observe)
+    return calls
+
+
+def write_hybrid_targets(root, targets, *, outcome="pass", marker=None):
+    for index, target in enumerate(targets):
+        parts = target.split("::")
+        path = root / parts[0]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        class_name = parts[1] if len(parts) > 1 and parts[1].startswith("Test") else None
+        function = parts[-1] if len(parts) > 1 and not class_name else "test_selection"
+        body = ((f"    Path({str(marker)!r}).touch()\n" if marker else "")
+                + "    print('actual child diagnostic',file=sys.stderr,flush=True)\n"
+                + ("    time.sleep(30)\n" if outcome in {"timeout", "interrupt"} else "")
+                + f"    assert {outcome != 'failure' or index != 0!r}, 'actual child failure'\n")
+        definition = f"def {function}():\n" + body
+        if class_name:
+            definition = f"class {class_name}:\n    def test_selection(self):\n" + "".join("    " + row for row in body.splitlines(True))
+        path.write_text("" if outcome == "empty" else "import os,time,sys\nfrom pathlib import Path\n" + definition)
+
+
+def run_hybrid_negative_fixture(root, monkeypatch, targets, outcome):
+    marker = root / "child-started"
+    write_hybrid_targets(root, targets, outcome=outcome, marker=marker)
+    calls = capture_hybrid_children(monkeypatch)
+    stop = threading.Event()
+    thread = None
+    if outcome == "interrupt":
+        import signal
+        def interrupt():
+            deadline = time.monotonic() + 15
+            while not stop.wait(0.01) and time.monotonic() < deadline:
+                if marker.exists():
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    return
+        thread = threading.Thread(target=interrupt)
+        thread.start()
+    try:
+        result = rg_mod.run_hybrid_validation(root, validation_spec=[
+            {"validator": "pytest_targeted", "targets": targets}], timeout=2 if outcome == "timeout" else 30)
+    finally:
+        stop.set()
+        if thread is not None:
+            thread.join(timeout=2)
+    return result, calls
+
+
+@pytest.mark.usefixtures("coherent_hybrid_validation")
 class TestHybridValidatorContract:
     @pytest.mark.parametrize("target", [
         "elsewhere/test_commit_executor_local_review.py",
@@ -9227,70 +9510,56 @@ class TestHybridValidatorContract:
           "mu/tests/tools/test_workingrcx_fleet_apply.py"], 300, True, 1140),
     ])
     def test_local_review_validator_exact_selection(self, tmp_path, monkeypatch, targets, timeout, workers, deadline):
-        observed = []
-
-        def run(command, **kwargs):
-            observed.append((command, kwargs))
-            env = kwargs["env"]
-            assert Path(env["TMPDIR"]).is_dir()
-            assert Path(env["XDG_CACHE_HOME"]).is_dir()
-            return subprocess.CompletedProcess(command, 0, "selected stdout", "selected stderr")
-
-        monkeypatch.setattr(rg_mod.subprocess, "run", run)
-        result = rg_mod._run_hybrid_validation_spec(  # ANTICHEAT_OK: production validator entry, intercept only child process argv/env/deadline
-            tmp_path, validation_spec=[{"validator": "pytest_targeted", "targets": targets}], timeout=timeout,
-        )
+        write_hybrid_targets(tmp_path, targets)
+        observed = capture_hybrid_children(monkeypatch)
+        result = rg_mod.run_hybrid_validation(tmp_path, validation_spec=[
+            {"validator": "pytest_targeted", "targets": targets}], timeout=timeout)
+        assert result["passed"], result
         assert len(observed) == 1
         command, kwargs = observed[0]
         env = kwargs["env"]
-        assert command == [sys.executable, "-m", "pytest", "-x", "--tb=short", "-p", "no:cacheprovider",
-                           *(["-n", "4", "--dist", "worksteal"] if workers else []),
-                           "--basetemp", str(Path(env["TMPDIR"]) / "pytest"), *targets]
-        assert kwargs == {"cwd": tmp_path, "capture_output": True, "text": True,
-                          "timeout": deadline, "env": env, "check": False}
-        assert env == {**os.environ, "PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1",
-                       "TMPDIR": env["TMPDIR"], "TMP": env["TMPDIR"], "TEMP": env["TMPDIR"],
-                       "XDG_CACHE_HOME": env["XDG_CACHE_HOME"]}
+        assert command[:3] == [sys.executable, "-m", "pytest"]
+        assert all(target in command for target in targets)
+        assert command[command.index("-n") + 1] == "4"
+        assert command[command.index("--dist") + 1] == "worksteal"
+        assert "--max-worker-restart=0" in command and "--maxfail=0" in command
+        assert "-x" not in command and "--import-mode=importlib" not in command
+        assert command.count("-m") == 1 and result["profile"] == "full"
+        assert result["timeout_seconds"] == deadline
+        assert result["targets"] == targets and result["executed_count"] == len(targets)
+        assert env["PYTHONHASHSEED"] == "0" and env["PYTHONDONTWRITEBYTECODE"] == "1"
+        assert env["TMP"] == env["TEMP"] == env["TMPDIR"]
+        assert Path(command[command.index("--basetemp") + 1]).parent == Path(env["TMPDIR"])
         assert not Path(env["TMPDIR"]).is_relative_to(tmp_path)
         assert Path(env["TMPDIR"]) != Path(env["XDG_CACHE_HOME"])
         assert not Path(env["TMPDIR"]).exists() and not Path(env["XDG_CACHE_HOME"]).exists()
-        assert result == {"validator": "pytest_targeted", "command": command, "targets": targets,
-                          "stdout": "selected stdout", "stderr": "selected stderr", "exit_code": 0, "passed": True}
+        assert Path(result["receipt_path"]).is_file() and Path(result["junit_path"]).is_file()
 
     @pytest.mark.parametrize("outcome", ["failure", "empty", "timeout", "interrupt"])
     def test_local_review_validator_preserves_failures_and_cleans_temporary_roots(self, tmp_path, monkeypatch, outcome):
         targets = ["mu/tests/tools/test_commit_executor_local_review.py",
                    "mu/tests/tools/test_local_review_history_recovery.py"]
-        calls = []
-
-        def run(command, **kwargs):
-            calls.append((command, kwargs))
-            assert command[7:11] == ["-n", "4", "--dist", "worksteal"]
-            assert command[-2:] == targets and kwargs["timeout"] == 300
-            if outcome == "timeout":
-                raise subprocess.TimeoutExpired(command, 300, output=b"partial progress", stderr=b"diagnostic")
-            if outcome == "interrupt":
-                raise KeyboardInterrupt("validator interrupted")
-            return subprocess.CompletedProcess(command, 1 if outcome == "failure" else 5, "child stdout", "child stderr")
-
-        monkeypatch.setattr(rg_mod.subprocess, "run", run)
-        spec = [{"validator": "pytest_targeted", "targets": targets}]
-        if outcome in {"timeout", "interrupt"}:
-            with pytest.raises(subprocess.TimeoutExpired if outcome == "timeout" else KeyboardInterrupt) as error:
-                rg_mod._run_hybrid_validation_spec(tmp_path, validation_spec=spec, timeout=300)  # ANTICHEAT_OK: real selection and exception propagation
-            if outcome == "timeout":
-                assert error.value.timeout == 300 and error.value.cmd == calls[0][0]
-                assert error.value.stdout == b"partial progress" and error.value.stderr == b"diagnostic"
-        else:
-            result = rg_mod._run_hybrid_validation_spec(tmp_path, validation_spec=spec, timeout=300)  # ANTICHEAT_OK: real selection preserves unsuccessful subprocess outcomes
-            assert result["passed"] is False
-            assert result["exit_code"] == (1 if outcome == "failure" else 5)
-            assert result["stdout"] == "child stdout" and result["stderr"] == "child stderr"
-        assert len(calls) == 1
+        result, calls = run_hybrid_negative_fixture(tmp_path, monkeypatch, targets, outcome)
+        assert not result["passed"], result
+        assert result["exit_code"] == {"failure": 1, "empty": 5, "timeout": 124, "interrupt": 143}[outcome]
+        assert len(calls) == 1 and result["targets"] == targets
+        assert all(target in result["command"] for target in targets)
+        if outcome == "failure":
+            assert "actual child failure" in result["stdout"]
+            assert result["executed_count"] == 2
+        if outcome == "timeout":
+            assert result["timed_out"] and "boundary:" in result["stderr"]
+        if outcome == "interrupt":
+            assert result["interrupted"] and result["validation_budget_hold"]
+            assert rg_mod.classify_failure(result) == FailureClass.TERMINAL_POLICY
+        for key in ("stdout_path", "stderr_path", "receipt_path", "hybrid_receipt_path"):
+            assert Path(result[key]).is_file()
         env = calls[0][1]["env"]
-        assert not Path(env["TMPDIR"]).exists() and not Path(env["XDG_CACHE_HOME"]).exists()
+        retained = bool(result.get("ownership_hold") or result.get("interrupted"))
+        assert Path(env["TMPDIR"]).exists() is retained
+        assert Path(env["XDG_CACHE_HOME"]).exists() is retained
 
-    @pytest.mark.parametrize("outcome, code", [("pass", 0), ("failure", 2), ("empty", 5)])
+    @pytest.mark.parametrize("outcome, code", [("pass", 0), ("failure", 1), ("empty", 5)])
     def test_local_review_validator_real_mixed_selection_isolated(self, retained_native_scratch, monkeypatch, outcome, code):
         root = retained_native_scratch.root
         # Real Git, inherited provider isolation and actual xdist/pytest process.
@@ -9318,13 +9587,7 @@ class TestHybridValidatorContract:
             subprocess.run(["git", *args], cwd=root, capture_output=True, check=True)
         before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
         monkeypatch.setenv("PYTEST_ADDOPTS", "--basetemp=.scratch/unadmitted-pytest")
-        real_run, observed = subprocess.run, []
-
-        def observe(command, **kwargs):
-            observed.append((command, kwargs))
-            return real_run(command, **kwargs)
-
-        monkeypatch.setattr(rg_mod.subprocess, "run", observe)
+        observed = capture_hybrid_children(monkeypatch)
         result = rg_mod._run_hybrid_validation_spec(  # ANTICHEAT_OK: unchanged production validator and real subprocess, full local-review/history mixture
             root, validation_spec=[{"validator": "pytest_targeted", "targets": targets}], timeout=300,
         )
@@ -9336,34 +9599,24 @@ class TestHybridValidatorContract:
             assert "local-review mixed failure" in result["stdout"]
         assert {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()} == before
         assert not (root / ".scratch/unadmitted-pytest").exists()
-        assert len(observed) == 1 and observed[0][1]["timeout"] == 300
+        assert len(observed) == 1 and result["timeout_seconds"] == 300
         env = observed[0][1]["env"]
         assert not Path(env["TMPDIR"]).exists() and not Path(env["XDG_CACHE_HOME"]).exists()
 
     def test_local_review_validator_real_deadline_cleans_temporary_roots(self, tmp_path, monkeypatch):
         target = "mu/tests/tools/test_commit_executor_local_review.py"
-        (tmp_path / target).parent.mkdir(parents=True)
-        (tmp_path / target).write_text("def test_selection():\n    assert True\n")
-        real_run, observed = subprocess.run, []
-
-        def observe(command, **kwargs):
-            observed.append((command, kwargs))
-            return real_run(command, **kwargs)
-
-        monkeypatch.setattr(rg_mod.subprocess, "run", observe)
-        # A deliberately tiny caller deadline exercises a real child timeout;
-        # this is not a measurement of suite speed or a stalled case claim.
-        with pytest.raises(subprocess.TimeoutExpired) as error:
-            rg_mod._run_hybrid_validation_spec(  # ANTICHEAT_OK: actual subprocess expiration through native validation entry
-                tmp_path, validation_spec=[{"validator": "pytest_targeted", "targets": [target]}], timeout=0.001,
-            )
+        write_hybrid_targets(tmp_path, [target], outcome="timeout")
+        observed = capture_hybrid_children(monkeypatch)
+        result = rg_mod.run_hybrid_validation(tmp_path, validation_spec=[
+            {"validator": "pytest_targeted", "targets": [target]}], timeout=1)
+        assert result["timed_out"] and not result["passed"], result
+        assert result["exit_code"] == 124 and result["timeout_seconds"] == 1
         assert len(observed) == 1
         command, kwargs = observed[0]
-        assert command[7:11] == ["-n", "4", "--dist", "worksteal"]
-        assert error.value.timeout == kwargs["timeout"] == 0.001
-        assert error.value.cmd == command
-        assert not Path(kwargs["env"]["TMPDIR"]).exists()
-        assert not Path(kwargs["env"]["XDG_CACHE_HOME"]).exists()
+        assert command[command.index("-n") + 1] == "4"
+        assert result["command"] == command and result["targets"] == [target]
+        assert Path(kwargs["env"]["TMPDIR"]).exists() is bool(result.get("ownership_hold"))
+        assert Path(kwargs["env"]["XDG_CACHE_HOME"]).exists() is bool(result.get("ownership_hold"))
 
     @pytest.mark.parametrize("shared_basetemp, full_fleet", [
         (True, False), (False, False), (False, True),
@@ -9401,19 +9654,21 @@ class TestHybridValidatorContract:
         )
         monkeypatch.setenv("PYTEST_ADDOPTS", "--basetemp=.scratch/unadmitted-pytest")
         if shared_basetemp:
-            real_run = subprocess.run
+            real_popen = subprocess.Popen
 
-            def run_with_collision(command, **kwargs):
+            def run_with_collision(command, *args, **kwargs):
                 # Recreate only the old ownership relationship; pytest, its
                 # initialization hooks, fixtures and failure reporting run for real.
-                command = list(command)
-                command[command.index("--basetemp") + 1] = kwargs["env"]["TMPDIR"]
-                return real_run(command, **kwargs)
+                if isinstance(command, list) and command[1:3] == ["-m", "pytest"]:
+                    command = list(command)
+                    command[command.index("--basetemp") + 1] = kwargs["env"]["TMPDIR"]
+                return real_popen(command, *args, **kwargs)
 
-            monkeypatch.setattr(rg_mod.subprocess, "run", run_with_collision)
-        result = rg_mod._run_pytest_targeted_validator(  # ANTICHEAT_OK: actual native validator and provider policy
-            tmp_path, targets=[target], timeout=30,
-        )
+            monkeypatch.setattr(subprocess, "Popen", run_with_collision)
+        result = rg_mod.run_hybrid_validation(tmp_path, validation_spec=[
+            {"validator": "pytest_targeted", "targets": [target]}], timeout=30,
+            workers=0 if shared_basetemp else 4)
+
         output = result["stdout"] + "\n" + result["stderr"]
         assert not (tmp_path / ".scratch/unadmitted-pytest").exists()
         assert result["passed"] is (not shared_basetemp), output
@@ -9456,46 +9711,26 @@ class TestHybridValidatorContract:
         (["elsewhere/test_workingrcx_fleet_apply.py"], 60, 60, False),
     ])
     def test_pytest_targeted_uses_executor_owned_argv_and_repo_write_suppressed_env(
-        self, tmp_path, targets, caller_timeout, expected_timeout, parallel,
+        self, tmp_path, monkeypatch, targets, caller_timeout, expected_timeout, parallel,
     ):
-        captured = {}
-
-        def fake_run(args, **kwargs):
-            captured["args"] = list(args)
-            captured["kwargs"] = kwargs
-            return subprocess.CompletedProcess(args, 0, "", "")
-
-        with patch.object(rg_mod.subprocess, "run", side_effect=fake_run):
-            result = rg_mod._run_pytest_targeted_validator(  # ANTICHEAT_OK: validator builder contract
-                tmp_path,
-                targets=targets,
-                timeout=caller_timeout,
-            )
-
-        assert result["passed"] is True
-        assert captured["args"][:7] == [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-x",
-            "--tb=short",
-            "-p",
-            "no:cacheprovider",
-        ]
-        assert captured["args"][-len(targets):] == targets
-        assert result["targets"] == targets
-        assert captured["kwargs"]["timeout"] == expected_timeout
-        if parallel:
-            assert captured["args"][7:11] == ["-n", "4", "--dist", "worksteal"]
-        else:
-            assert "-n" not in captured["args"]
-        env = captured["kwargs"]["env"]
-        assert env["PYTHONHASHSEED"] == "0"
-        assert env["PYTHONDONTWRITEBYTECODE"] == "1"
-        assert not env["TMPDIR"].startswith(str(tmp_path))
-        assert not env["XDG_CACHE_HOME"].startswith(str(tmp_path))
-        basetemp = Path(captured["args"][captured["args"].index("--basetemp") + 1])
-        assert basetemp.parent == Path(env["TMPDIR"])
+        write_hybrid_targets(tmp_path, targets)
+        calls = capture_hybrid_children(monkeypatch)
+        result = rg_mod.run_hybrid_validation(tmp_path, validation_spec=[
+            {"validator": "pytest_targeted", "targets": targets}], timeout=caller_timeout)
+        assert result["passed"], result
+        assert len(calls) == 1
+        command, kwargs = calls[0]
+        assert command[:3] == [sys.executable, "-m", "pytest"]
+        assert "--tb=short" in command and "no:cacheprovider" in command
+        assert all(target in command for target in targets)
+        assert result["targets"] == targets and result["timeout_seconds"] == expected_timeout
+        assert command[command.index("-n") + 1] == "4"
+        assert "--max-worker-restart=0" in command and "--maxfail=0" in command
+        env = kwargs["env"]
+        assert env["PYTHONHASHSEED"] == "0" and env["PYTHONDONTWRITEBYTECODE"] == "1"
+        assert not Path(env["TMPDIR"]).is_relative_to(tmp_path)
+        assert not Path(env["XDG_CACHE_HOME"]).is_relative_to(tmp_path)
+        assert Path(command[command.index("--basetemp") + 1]).parent == Path(env["TMPDIR"])
         assert env["TMP"] == env["TEMP"] == env["TMPDIR"]
         assert Path(env["XDG_CACHE_HOME"]) != Path(env["TMPDIR"])
         assert env["PATH"] == os.environ["PATH"]
@@ -9505,30 +9740,29 @@ class TestHybridValidatorContract:
         targets = ["mu/tests/tools/test_workingrcx_fleet_apply.py",
                    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
                    "mu/tests/tools/test_recovery_gate.py"]
-        calls = []
-        def run(args, **kwargs):
-            calls.append(args)
-            assert args[7:11] == ["-n", "4", "--dist", "worksteal"]
-            assert args[-3:] == targets
-            assert kwargs["timeout"] == 1380
-            if outcome == "timeout":
-                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
-            code = {"pass": 0, "failure": 1, "empty": 5}[outcome]
-            return subprocess.CompletedProcess(args, code, outcome + " stdout", outcome + " stderr")
-        monkeypatch.setattr(rg_mod.subprocess, "run", run)
-        spec = [{"validator": "pytest_targeted", "targets": targets}]
+        import validation_execution as validation
+        marker = tmp_path / "child-started"
+        write_hybrid_targets(tmp_path, targets, outcome=outcome, marker=marker)
+        calls = capture_hybrid_children(monkeypatch)
+        original = validation.common.NativeStageBudget.remaining
+        def elapsed(budget):
+            if outcome == "timeout" and marker.exists():
+                raise validation.common.ValidationBudgetError("HOLD: fixture elapsed original clock")
+            return original(budget)
+        with patch.object(validation.common.NativeStageBudget, "remaining", elapsed):
+            result = rg_mod.run_hybrid_validation(tmp_path, validation_spec=[
+                {"validator": "pytest_targeted", "targets": targets}], timeout=300)
+        assert result["passed"] is (outcome == "pass"), result
+        assert result["exit_code"] == {"pass": 0, "failure": 1, "empty": 5, "timeout": 124}[outcome]
+        assert result["timeout_seconds"] == 1380 and result["targets"] == targets
+        assert len(calls) == 1 and all(target in calls[0][0] for target in targets)
+        assert calls[0][0][calls[0][0].index("-n") + 1] == "4"
         if outcome == "timeout":
-            with pytest.raises(subprocess.TimeoutExpired) as error:
-                rg_mod._run_hybrid_validation_spec(tmp_path, validation_spec=spec, timeout=300)  # ANTICHEAT_OK: real hybrid runner propagates the actual finite deadline.
-            assert error.value.timeout == 1380
-        else:
-            result = rg_mod._run_hybrid_validation_spec(tmp_path, validation_spec=spec, timeout=300)  # ANTICHEAT_OK: hybrid fleet scheduling must preserve negative validator results.
-            assert result["passed"] is (outcome == "pass")
-            assert result["stdout"] == outcome + " stdout"
-            assert result["stderr"] == outcome + " stderr"
-        assert len(calls) == 1
+            assert result["timed_out"] and "original clock" in result["stderr"]
+        if outcome == "failure":
+            assert "actual child failure" in result["stdout"] and result["executed_count"] == 3
 
-    @pytest.mark.parametrize("outcome, code", [("pass", 0), ("failure", 2), ("empty", 5)])
+    @pytest.mark.parametrize("outcome, code", [("pass", 0), ("failure", 1), ("empty", 5)])
     def test_hybrid_full_fleet_runs_real_mixed_selection(self, tmp_path, outcome, code):
         targets = ["mu/tests/tools/test_workingrcx_fleet_apply.py",
                    "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
@@ -9549,7 +9783,7 @@ class TestHybridValidatorContract:
         )
         output = result["stdout"] + "\n" + result["stderr"]
         assert result["passed"] is (outcome == "pass"), output
-        # Preserve xdist's -x INTERRUPTED status and the underlying failure.
+        # Complete selected tests and preserve the underlying assertion failure.
         assert result["exit_code"] == code, output
         if outcome == "pass":
             assert "3 passed" in result["stdout"], result

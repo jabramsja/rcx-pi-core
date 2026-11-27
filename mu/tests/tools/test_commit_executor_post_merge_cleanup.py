@@ -29,6 +29,8 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -107,6 +109,104 @@ def test_retirement_terminal_uses_surviving_primary_and_preserves_detached_sourc
         terminal_action=callback, log=_noop_log)
     assert not again["action_invoked"] and "already attempted" in again["reason"]
     assert seen == [f.original]
+
+
+# One line: the process census parses every command line, including this one.
+_GATE_STANDIN = (
+    "import sys,time;from pathlib import Path;a=sys.argv;"
+    "sys.stdout.buffer.write(Path(a[1]).read_bytes());sys.stdout.buffer.flush();"
+    "sys.stderr.buffer.write(Path(a[2]).read_bytes());sys.stderr.buffer.flush();"
+    "Path(a[3]).touch();time.sleep(60 if a[4]=='hang' else 0);"
+    "sys.exit(0 if a[4]=='hang' else int(a[4]))"
+)
+
+
+def _gate_stream_bytes(value) -> bytes:
+    if value is None:
+        return b""
+    return value if isinstance(value, bytes) else value.encode()
+
+
+@contextmanager
+def _native_gate_boundary(monkeypatch, scratch: Path, outcome, *, stdout=None, stderr=None):
+    """Record the shared runner's pytest admissions at its actual Popen boundary.
+
+    The targeted gate now runs through ``validation_execution``: one admitted,
+    finite budget, a pytest child started with durable stream files, real
+    process observation and identity-checked termination. Only the admitted
+    pytest argv is replaced by an actual short-lived stand-in child that writes
+    the fixture's exact streams and exits with ``outcome`` (or ``"hang"``).
+    Admission, budget, waiting, stream decoding, receipts, the fast-profile
+    collection probe (always a real pytest child) and termination stay real.
+    For ``"hang"``, only the admitted budget's clocks advance to its deadline,
+    after the stand-in has written its streams; the production exhaustion check,
+    termination helper and timeout result then run unchanged. The positive
+    premise uses one coherent real OS snapshot per observation.
+    """
+    import validation_execution as validation  # The module run_pytest_gate imports.
+    from mu.tests.tools.test_executor_common import complete_process_observation
+
+    for key in (validation.common.NATIVE_STAGE_BUDGET_ENV, validation.common.VALIDATION_SCHEDULE_ENV,
+                "PYTEST_ADDOPTS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "RCX_VALIDATION_LOG_DIR"):
+        monkeypatch.delenv(key, raising=False)
+    scratch.mkdir(parents=True, exist_ok=True)
+    out, err, ready = scratch / "stdout.bin", scratch / "stderr.bin", scratch / "ready"
+    out.write_bytes(_gate_stream_bytes(stdout))
+    err.write_bytes(_gate_stream_bytes(stderr))
+    admissions, probes = [], []
+    real_popen = subprocess.Popen
+
+    class Boundary(real_popen):
+        def __init__(self, args, *rest, **kwargs):
+            argv = list(args) if isinstance(args, (list, tuple)) else None
+            pytest_child = argv is not None and argv[1:3] == ["-m", "pytest"]
+            standin = pytest_child and "--collect-only" not in argv
+            if pytest_child:
+                (admissions if standin else probes).append((argv, dict(kwargs)))
+            if standin:
+                args = [sys.executable, "-c", _GATE_STANDIN, str(out), str(err), str(ready), str(outcome)]
+            super().__init__(args, *rest, **kwargs)
+            if standin and outcome == "hang":
+                deadline = time.monotonic() + 30
+                while not ready.exists() and self.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                if not ready.exists():
+                    self.kill()
+                    self.wait(timeout=5)
+                    raise AssertionError("stand-in pytest child never wrote its streams")
+
+    monkeypatch.setattr(subprocess, "Popen", Boundary)
+    if outcome == "hang":
+        original = validation.common.NativeStageBudget.remaining
+
+        def remaining(budget):
+            if ready.exists():
+                # Public constructor: the same admitted budget, both clock
+                # origins moved back by exactly its admitted seconds.
+                shift = budget.seconds * 1_000_000_000
+                budget = validation.common.NativeStageBudget(
+                    version=budget.version, invocation=budget.invocation, repo=budget.repo,
+                    key=budget.key, command=budget.command, baseline=budget.baseline,
+                    seconds=budget.seconds, ceiling=budget.ceiling, allocations=budget.allocations,
+                    environment=budget.environment, started_ns=budget.started_ns - shift,
+                    wall_started_ns=budget.wall_started_ns - shift, bindings=budget.bindings)
+            return original(budget)
+
+        monkeypatch.setattr(validation.common.NativeStageBudget, "remaining", remaining)
+    with complete_process_observation(validation.common) as observations:
+        yield SimpleNamespace(admissions=admissions, probes=probes, observations=observations)
+
+
+_GATE_TIMEOUT_BOUNDARY = "boundary: HOLD: pytest_fast budget exhausted; retry cannot reset it"
+_GATE_PYTEST_INI = "[pytest]\nmarkers =\n slow: slow\n fuzzer: fuzzer\n"
+
+
+def _expected_gate_command(root: Path, selectors):
+    """The shared fast-profile argv with the fixture's pinned configuration."""
+    return [commit_mod.sys.executable, "-m", "pytest", "--tb=short", "-p", "no:cacheprovider",
+            "-c", str(root.resolve() / "pytest.ini"), "--import-mode=importlib",
+            "-m", "not slow and not fuzzer", "-n", "4", "--dist", "worksteal",
+            "--max-worker-restart=0", *selectors, "--maxfail=0"]
 
 
 @pytest.mark.parametrize("selectors, caller_timeout, expected_budget", [
@@ -195,39 +295,42 @@ def test_retirement_terminal_uses_surviving_primary_and_preserves_detached_sourc
 def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
     tmp_path, monkeypatch, selectors, caller_timeout, expected_budget,
 ):
-    """Exercise the real runner through its subprocess boundary without waiting."""
-    calls = []
-
-    def run(args, **kwargs):
-        calls.append((args, kwargs))
-        return SimpleNamespace(returncode=0, stdout="selected tests passed\n", stderr="")
-
-    monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    """Exercise the real shared runner through its actual child boundary without waiting."""
+    (tmp_path / "pytest.ini").write_text(_GATE_PYTEST_INI)
     monkeypatch.setenv("RCX_AGENT_BUS_DIR", ".agent_bus-live-fleet-wave")
     monkeypatch.setenv("RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE", "codex")
-    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: observe the real shared runner's deadline and complete subprocess selection.
-        tmp_path, selectors, timeout=caller_timeout,
-    )
+    with _native_gate_boundary(monkeypatch, tmp_path / ".gate-standin", 0,
+                               stdout="selected tests passed\n", stderr="") as boundary:
+        result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: observe the real shared runner's deadline and complete subprocess selection.
+            tmp_path, selectors, timeout=caller_timeout,
+        )
 
-    assert result == {"exit_code": 0, "stdout": "selected tests passed\n",
-                      "stderr": "", "passed": True}
-    assert len(calls) == 1
-    args, kwargs = calls[0]
-    parallel = ["-n", "4", "--dist", "worksteal"] if (
-        "mu/tests/tools/test_workingrcx_fleet_apply.py" in selectors) else []
-    assert args == [commit_mod.sys.executable, "-m", "pytest", "-x", "--tb=short",
-                    "--import-mode=importlib", "-m", "not slow and not fuzzer", *parallel, *selectors]
-    assert kwargs["cwd"] == tmp_path
-    assert kwargs["timeout"] == expected_budget
-    assert math.isfinite(kwargs["timeout"]) and kwargs["timeout"] > 0
-    assert kwargs["check"] is False
+    assert (result["exit_code"], result["stdout"], result["stderr"], result["passed"]) == (
+        0, "selected tests passed\n", "", True)
+    assert result["status"] == "passed" and not result.get("validation_budget_hold")
+    assert len(boundary.admissions) == 1 and not boundary.probes
+    args, kwargs = boundary.admissions[0]
+    # Every selection keeps its exact order under the bounded parallel policy:
+    # at most four workers, no worker restart and no exitfirst truncation.
+    assert args == _expected_gate_command(tmp_path, selectors)
+    assert result["command"] == args
+    assert kwargs["cwd"] == tmp_path.resolve()
+    # Popen takes no check/timeout: the finite deadline is the admitted budget,
+    # and nonzero exits are returned (see the nonzero-failure test below).
+    assert result["timeout_seconds"] == expected_budget
+    assert result["budget"]["seconds"] == result["budget"]["baseline"] == expected_budget
+    assert result["budget"]["key"] == "pytest_fast" and result["budget"]["command"] == args
+    assert result["budget"]["ceiling"] == 7200
+    assert math.isfinite(result["timeout_seconds"]) and result["timeout_seconds"] > 0
     assert kwargs["env"]["PYTHONHASHSEED"] == "0"
     assert kwargs["env"]["RCX_CI"] == "1"
     assert kwargs["env"]["HYPOTHESIS_PROFILE"] == "ci_fast"
     assert "RCX_AGENT_BUS_DIR" not in kwargs["env"]
     assert "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE" not in kwargs["env"]
+    assert Path(result["stdout_path"]).read_bytes() == b"selected tests passed\n"
+    assert Path(result["receipt_path"]).resolve().is_relative_to(tmp_path.resolve())
     if selectors == ["mu/tests/tools/test_workingrcx_fleet_apply.py"] and caller_timeout == 120:
-        assert 574.48 < kwargs["timeout"] <= 900
+        assert 574.48 < result["timeout_seconds"] <= 900
 
 
 @pytest.mark.parametrize("selectors, expected_budget", [
@@ -251,20 +354,34 @@ def test_targeted_pytest_budget_preserves_selectors_and_caller_timeout(
 def test_targeted_pytest_budget_keeps_nonzero_failure_output(
     tmp_path, monkeypatch, selectors, expected_budget, returncode, stdout, stderr,
 ):
-    calls = []
-
-    def run(args, **kwargs):
-        calls.append(args)
-        assert kwargs["timeout"] == expected_budget
-        return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
-
-    monkeypatch.setattr(commit_mod.subprocess, "run", run)
-    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: larger module budgets must not turn failed or empty collection into success.
-        tmp_path, selectors,
-    )
-    assert result == {"exit_code": returncode, "stdout": stdout,
-                      "stderr": stderr, "passed": False,
-                      "command": calls[0], "timeout_seconds": expected_budget}
+    (tmp_path / "pytest.ini").write_text(_GATE_PYTEST_INI)
+    with _native_gate_boundary(monkeypatch, tmp_path / ".gate-standin", returncode,
+                               stdout=stdout, stderr=stderr) as boundary:
+        result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: larger module budgets must not turn failed or empty collection into success.
+            tmp_path, selectors,
+        )
+    assert len(boundary.admissions) == 1
+    args, _ = boundary.admissions[0]
+    assert args == _expected_gate_command(tmp_path, selectors)
+    assert (result["exit_code"], result["stdout"], result["stderr"], result["passed"]) == (
+        returncode, stdout, stderr, False)
+    assert result["status"] == "failed" and not result.get("validation_budget_hold")
+    assert result["command"] == args
+    assert result["timeout_seconds"] == result["budget"]["seconds"] == expected_budget
+    assert Path(result["stdout_path"]).read_text() == stdout
+    assert Path(result["stderr_path"]).read_text() == stderr
+    if returncode == 5:
+        # Exit 5 without stderr: only an actual serial collection child may
+        # attribute it to the fast-profile marker. This selection collects
+        # nothing, so the larger module budget cannot turn it into success.
+        assert len(boundary.probes) == 1
+        probe_args, _ = boundary.probes[0]
+        assert "--collect-only" in probe_args and "not slow and not fuzzer" not in probe_args
+        assert "-n" not in probe_args and probe_args[-1 - len(selectors):] == [*selectors, "--maxfail=0"]
+        assert result["collection_probe"]["exit_code"] != 0
+        assert "profile_deselected" not in result
+    else:
+        assert not boundary.probes and "collection_probe" not in result
 
 
 @pytest.mark.parametrize("selectors, caller_timeout, expected_budget", [
@@ -301,23 +418,28 @@ def test_targeted_pytest_timeout_reports_selected_budget(
     tmp_path, monkeypatch, selectors, caller_timeout, expected_budget,
     stdout, stderr, expected_stdout, expected_stderr,
 ):
-    calls = []
-
-    def run(args, **kwargs):
-        calls.append(args)
-        assert kwargs["timeout"] == expected_budget
-        assert math.isfinite(kwargs["timeout"]) and kwargs["timeout"] > 0
-        raise subprocess.TimeoutExpired(args, timeout=kwargs["timeout"], output=stdout, stderr=stderr)
-
-    monkeypatch.setattr(commit_mod.subprocess, "run", run)
-    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: the real runner must still fail closed at its selected finite deadline.
-        tmp_path, selectors, timeout=caller_timeout,
-    )
-    assert result == {
-        "exit_code": -1, "stdout": expected_stdout,
-        "stderr": f"pytest timed out after {expected_budget}s" + (f"\n{expected_stderr}" if expected_stderr else ""),
-        "passed": False, "command": calls[0], "timeout_seconds": expected_budget, "timed_out": True,
-    }
+    # Durable stream files carry bytes for every shape; the runner decodes them
+    # with backslashreplace and appends its diagnostic after the child's stderr.
+    (tmp_path / "pytest.ini").write_text(_GATE_PYTEST_INI)
+    with _native_gate_boundary(monkeypatch, tmp_path / ".gate-standin", "hang",
+                               stdout=stdout, stderr=stderr) as boundary:
+        result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: the real runner must still fail closed at its selected finite deadline.
+            tmp_path, selectors, timeout=caller_timeout,
+        )
+    assert len(boundary.admissions) == 1 and not boundary.probes
+    args, _ = boundary.admissions[0]
+    assert args == _expected_gate_command(tmp_path, selectors)
+    diagnostic = f"pytest_fast timed out after {expected_budget}s; {_GATE_TIMEOUT_BOUNDARY}"
+    assert (result["exit_code"], result["stdout"], result["stderr"], result["passed"], result["timed_out"]) == (
+        -1, expected_stdout, expected_stderr + "\n" + diagnostic, False, True)
+    assert result["status"] == "timeout" and result["diagnostic"] == diagnostic
+    assert result["command"] == args
+    assert result["timeout_seconds"] == result["budget"]["seconds"] == expected_budget
+    assert math.isfinite(result["timeout_seconds"]) and result["timeout_seconds"] > 0
+    # The owned stand-in child was observed and stopped by the identity-checked
+    # helper; a timeout is an ordinary failure, never a HOLD or a success.
+    assert result["rcx_process_released"] is True and result["ownership_hold"] is False
+    assert not result.get("validation_budget_hold")
 
 
 @pytest.mark.parametrize("returncode, stdout, stderr, passed", [
@@ -329,14 +451,33 @@ def test_targeted_pytest_timeout_reports_selected_budget(
 def test_targeted_pytest_preserves_marker_only_deselection_semantics(
     tmp_path, monkeypatch, returncode, stdout, stderr, passed,
 ):
-    monkeypatch.setattr(commit_mod.subprocess, "run", lambda *a, **kw: SimpleNamespace(
-        returncode=returncode, stdout=stdout, stderr=stderr,
-    ))
-    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: verify existing success and intentional marker-only collection semantics.
-        tmp_path, ["mu/tests/tools/test_phase_b_executor.py"],
-    )
+    # The selection really is marker-only: three collected tests, all deselected
+    # by the fast profile. Output text alone no longer proves that; the shared
+    # runner's actual serial collection child must collect those real items.
+    selector = "mu/tests/tools/test_phase_b_executor.py"
+    (tmp_path / "pytest.ini").write_text(_GATE_PYTEST_INI)
+    (tmp_path / selector).parent.mkdir(parents=True)
+    (tmp_path / selector).write_text("import pytest\n" + "".join(
+        f"@pytest.mark.slow\ndef test_slow_{index}():\n    assert False\n" for index in range(3)))
+    with _native_gate_boundary(monkeypatch, tmp_path / ".gate-standin", returncode,
+                               stdout=stdout, stderr=stderr) as boundary:
+        result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: verify existing success and intentional marker-only collection semantics.
+            tmp_path, [selector],
+        )
     assert result["passed"] is passed
     assert (result["exit_code"], result["stdout"], result["stderr"]) == (returncode, stdout, stderr)
+    assert len(boundary.admissions) == 1
+    assert boundary.admissions[0][0] == _expected_gate_command(tmp_path, [selector])
+    if returncode == 5 and not stderr:
+        assert len(boundary.probes) == 1
+        probe = result["collection_probe"]
+        assert probe["exit_code"] == 0 and probe["passed"] is True
+        assert "--collect-only" in probe["command"] and "not slow and not fuzzer" not in probe["command"]
+        assert result["status"] == "profile_deselected" and result["profile_deselected"] is True
+    else:
+        # Exit 0 passes as-is; stderr or any other nonzero status is never probed.
+        assert not boundary.probes and "collection_probe" not in result
+        assert result["status"] == ("passed" if returncode == 0 else "failed")
 
 
 @pytest.mark.parametrize("outcome", ["timeout-bytes", "timeout-text", "timeout-none", "failed", "interrupted", "empty"])
@@ -369,7 +510,6 @@ def test_step8b_public_pipeline_retains_complete_pytest_failure(tmp_path, monkey
     monkeypatch.setattr(commit_mod, "emit_pipeline_agent_event", lambda *a, **kw: {"status": "disabled"})
     real_run = subprocess.run
     commands = []
-    pytest_commands = []
     stdout = " first pytest progress\n" + "collected progress\n" * 6000 + "last pytest progress \n"
     stderr = " first pytest stderr\n" + "diagnostic line\n" * 6000 + "last pytest stderr \n"
     exit_code = {"failed": 1, "interrupted": 2, "empty": 5}.get(outcome, -1)
@@ -377,43 +517,46 @@ def test_step8b_public_pipeline_retains_complete_pytest_failure(tmp_path, monkey
         stdout = stderr = ""
 
     def run(args, **kwargs):
+        # Every ordinary subprocess.run, including the shared runner's process
+        # census, is guarded; landing side effects stay prohibited.
         args = list(args)
         commands.append(args)
         assert args[0] != "gh", args
         assert args[:2] not in (["git", "commit"], ["git", "push"], ["git", "merge"]), args
         assert Path(kwargs["cwd"]).resolve() == repo.resolve(), args
-        if args[1:3] == ["-m", "pytest"]:
-            pytest_commands.append(args)
-            assert args[-1:] == [selector]
-            assert kwargs["timeout"] == 600
-            assert kwargs["env"]["RCX_CI"] == "1"
-            if outcome.startswith("timeout"):
-                output = stdout.encode() if outcome == "timeout-bytes" else stdout
-                errors = stderr.encode() if outcome == "timeout-bytes" else stderr
-                raise subprocess.TimeoutExpired(args, timeout=600,
-                    output=output if outcome != "timeout-none" else None,
-                    stderr=errors if outcome != "timeout-none" else None)
-            return SimpleNamespace(returncode=exit_code, stdout=stdout, stderr=stderr)
         return real_run(args, **kwargs)
 
     monkeypatch.setattr(commit_mod.subprocess, "run", run)
     before_head = _git(["rev-parse", "HEAD"], cwd=repo).stdout
-    result = commit_mod.run_commit_pipeline(
-        _make_new_schema_handoff(files_to_stage=[selector]), repo_root=repo,
-    )
+    # The shared runner admits pytest through Popen with durable stream files,
+    # so -bytes and -text now reach the same file-backed decoding; the
+    # nonzero/timeout transport and complete streams are what this pins.
+    with _native_gate_boundary(monkeypatch, tmp_path / "gate-standin",
+                               "hang" if exit_code == -1 else exit_code,
+                               stdout=stdout, stderr=stderr) as boundary:
+        result = commit_mod.run_commit_pipeline(
+            _make_new_schema_handoff(files_to_stage=[selector]), repo_root=repo,
+        )
     assert result["status"] == "error" and result["step"] == "run_pre_commit_script", result
-    assert len(supervisor_calls) == len(pytest_commands) == 1
+    assert len(supervisor_calls) == len(boundary.admissions) == 1
+    assert not boundary.probes  # Nonempty stderr or nonzero status is never probed.
+    pytest_command, pytest_kwargs = boundary.admissions[0]
+    assert pytest_command[-2:] == [selector, "--maxfail=0"]
+    assert Path(pytest_kwargs["cwd"]).resolve() == repo.resolve()
+    assert pytest_kwargs["env"]["RCX_CI"] == "1"
     assert "validate_receipt" in result["steps_completed"]
     assert "git_commit" not in result["steps_completed"]
     assert _git(["rev-parse", "HEAD"], cwd=repo).stdout == before_head
     assert result["stdout"] == stdout
-    expected_stderr = ("pytest timed out after 600s" + ("\n" + stderr if stderr else "")) if exit_code == -1 else stderr
+    expected_stderr = (stderr + "\n" + f"pytest_fast timed out after 600s; {_GATE_TIMEOUT_BOUNDARY}"
+                       if exit_code == -1 else stderr)
     assert result["stderr"] == expected_stderr
     assert "earlier supervisor chatter" not in result["stdout"] + result["stderr"]
+    assert result["validation_budget_hold"] is False
     diagnostic = result["failure_command"]
-    command = shlex.join(pytest_commands[0])
+    command = shlex.join(pytest_command)
     assert diagnostic["command"] == command
-    assert diagnostic["argv"] == pytest_commands[0]
+    assert diagnostic["argv"] == pytest_command
     assert diagnostic["command_sha256"] == hashlib.sha256(command.encode()).hexdigest()
     assert diagnostic["timeout_seconds"] == 600
     assert diagnostic["outcome"] == ("timeout" if exit_code == -1 else "failed")
@@ -428,6 +571,8 @@ def test_targeted_pytest_empty_selection_starts_no_process(tmp_path, monkeypatch
         raise AssertionError("Empty test selection must not start a subprocess")
 
     monkeypatch.setattr(commit_mod.subprocess, "run", run)
+    # The shared runner starts children through Popen; guard that boundary too.
+    monkeypatch.setattr(commit_mod.subprocess, "Popen", run)
     result = commit_mod._run_pytest_on_files(tmp_path, [])  # ANTICHEAT_OK: preserve the existing empty-selection contract.
     assert result == {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
 
@@ -452,7 +597,13 @@ def test_native_wave_mixed_selection_includes_source_gate_hint():
 
 
 @pytest.mark.parametrize("failing", [False, True])
-def test_full_fleet_mixed_policy_runs_every_selected_file_with_real_xdist(tmp_path, failing):
+def test_full_fleet_mixed_policy_runs_every_selected_file_with_real_xdist(tmp_path, monkeypatch, failing):
+    import validation_execution as validation  # The module run_pytest_gate imports.
+    from mu.tests.tools.test_executor_common import complete_process_observation
+
+    for key in (validation.common.NATIVE_STAGE_BUDGET_ENV, validation.common.VALIDATION_SCHEDULE_ENV,
+                "PYTEST_ADDOPTS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "RCX_VALIDATION_LOG_DIR"):
+        monkeypatch.delenv(key, raising=False)
     selectors = ["mu/tests/tools/test_workingrcx_fleet_apply.py",
                  "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
                  "mu/tests/tools/test_recovery_gate.py"]
@@ -468,19 +619,25 @@ def test_full_fleet_mixed_policy_runs_every_selected_file_with_real_xdist(tmp_pa
             f"    Path({str(tmp_path / ('selected-' + str(index)))!r}).write_text('ran')\n"
             f"    assert {not (failing and index == 2)!r}, 'mixed selection failure'\n"
         )
-    result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: real child execution verifies complete mixed selection and nonzero failure propagation.
-        tmp_path, selectors,
-    )
+    with complete_process_observation(validation.common):
+        result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: real child execution verifies complete mixed selection and nonzero failure propagation.
+            tmp_path, selectors,
+        )
     output = result["stdout"] + "\n" + result["stderr"]
     assert result["passed"] is (not failing), output
-    # xdist's -x shutdown reports INTERRUPTED (2), while preserving the
-    # assertion failure. The gate must return that real nonzero status intact.
-    assert result["exit_code"] == (2 if failing else 0), output
+    # Complete-suite execution (no exitfirst, --maxfail=0) reports the assertion
+    # failure as FAILED (1), never an exitfirst INTERRUPTED (2). The gate must
+    # return that real nonzero status intact.
+    assert result["exit_code"] == (1 if failing else 0), output
+    assert result["command"][-9:] == ["-n", "4", "--dist", "worksteal", "--max-worker-restart=0",
+                                      *selectors, "--maxfail=0"]
     if failing:
         assert "mixed selection failure" in result["stdout"], result
+        assert "1 failed, 2 passed" in result["stdout"], result
     else:
         assert "3 passed" in result["stdout"], result
-        assert all((tmp_path / ('selected-' + str(index))).read_text() == 'ran' for index in range(3))
+    # Every selected file executes, including those after a failure.
+    assert all((tmp_path / ('selected-' + str(index))).read_text() == 'ran' for index in range(3))
 
 
 def _write_queue_packet(repo: Path, relpath: str, status: str) -> None:
