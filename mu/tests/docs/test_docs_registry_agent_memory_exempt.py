@@ -82,14 +82,18 @@ class TestAgentMemoryExempt:
     def test_collect_report_excludes_agent_memory_markdown(self):
         """docs_sync_report.collect_report() must not list agent-memory md as unclassified.
 
-        Exercises the real report function end-to-end. ``collect_report()`` walks
-        the filesystem via ``rglob`` (it does not honor .gitignore, which is why
-        gitignored agent-memory markdown tripped the check in the first place), so
-        this creates a real markdown file under .claude/agent-memory/advisor/ --
-        the directory that walk actually visits -- then removes it. With the
-        exemption the file is absent from ``unclassified_markdown``; without it the
-        file would classify ``unknown`` and appear there, so this test fails closed
-        if the registry entry regresses.
+        Exercises the real report function end-to-end. This creates a real
+        markdown file under .claude/agent-memory/advisor/, then removes it.
+        ``collect_report()`` covers only git-visible markdown (tracked, or
+        untracked and not git-ignored), and the committed .gitignore ignores
+        .claude/, so the default report never reaches the probe. The original
+        failure came from a filesystem walk that did not honor .gitignore, so
+        the probe is also passed explicitly through
+        ``collect_report(markdown_files=...)``, which applies the same rules.
+        With the exemption the file is absent from ``unclassified_markdown`` in
+        both reports; without it the explicit report classifies the file
+        ``unknown`` and lists it, so this test fails closed if the registry
+        entry regresses.
         """
         advisor_dir = REPO_ROOT / ".claude" / "agent-memory" / "advisor"
 
@@ -128,6 +132,16 @@ class TestAgentMemoryExempt:
                 if p.startswith(".claude/agent-memory/")
             ]
             assert not leaked, f"agent-memory markdown listed as unclassified: {leaked}"
+
+            # Run the probe itself through the report's rules, so the exemption
+            # stays pinned even though the default walk skips git-ignored files
+            # before classifying them.
+            explicit = collect_report(markdown_files=[probe_file])
+            assert explicit["unclassified_markdown"] == [], (
+                f"{rel} classified unknown in collect_report(markdown_files=...); the "
+                r"`^\.claude/agent-memory/` exemption is not taking effect"
+            )
+            assert explicit["tracker_section_violations"] == []
         finally:
             if probe_file is not None and probe_file.exists():
                 probe_file.unlink()

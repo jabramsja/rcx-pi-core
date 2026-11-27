@@ -9,6 +9,7 @@ dialectic_executor.py.
 from __future__ import annotations
 
 import copy
+import fcntl
 import hashlib
 import json
 import os
@@ -18,11 +19,21 @@ import shlex
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NamedTuple
+
+VALIDATION_EXECUTION_API = 1
+EXECUTOR_COMMON_SOURCE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+# Execution witness: the module code object the interpreter actually ran for
+# this namespace, from source or from any accepted bytecode cache. The supervisor
+# handoff compares it with the code its bound source bytes compile to and never
+# trusts it alone; a stale cache runs, and so records, different code. The disk
+# hash above is a diagnostic only and cannot show which code executed.
+EXECUTED_MODULE_CODE = sys._getframe(0).f_code if hasattr(sys, "_getframe") else None
 
 DEFAULT_AGENT_BUS_DIR = Path(".agent_bus")
 ROUTING_RECORD_PATH = DEFAULT_AGENT_BUS_DIR / "meta" / "post_merge_routing.json"
@@ -219,6 +230,534 @@ class ExecutorCommonError(RuntimeError):
     """Raised when a shared executor utility fails."""
 
 
+VALIDATION_CEILING_SECONDS = 7200
+PHASE_B_PYTEST_FLOOR_SECONDS = 300
+NATIVE_STAGE_BUDGET_ENV = "RCX_NATIVE_STAGE_BUDGET"
+VALIDATION_SCHEDULE_ENV = "RCX_VALIDATION_SCHEDULE"
+
+
+class ValidationBudgetError(ExecutorCommonError):
+    """An inadmissible validation schedule is a HOLD, never a test failure."""
+
+
+def validation_child_environment(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Isolate test authority while retaining ownership and ordinary environment.
+
+    This constructor is only for validation children. Production recovery,
+    review, hook and dispatcher processes retain their invocation authority.
+    """
+    protected = {NATIVE_STAGE_BUDGET_ENV, VALIDATION_SCHEDULE_ENV, "RCX_AGENT_BUS_DIR",
+                 ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV, "RCX_PIPELINE_AGENT_PAGER_ROUTE_OVERRIDE",
+                 "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY", "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE"}
+    for names in ROLE_AGENT_ENV_VARS.values():
+        protected.update(names)
+    return {key: value for key, value in (os.environ if env is None else env).items()
+            if key not in protected and not key.startswith("RCX_SKIP_")}
+
+
+def validation_hold_result(validation: dict[str, Any], *, step: str) -> dict[str, Any] | None:
+    """Carry a native HOLD across caller boundaries without authorizing recovery.
+
+    Keep the complete validation evidence, including receipts and ownership
+    diagnostics. Only the structured signal is authoritative; failure text alone
+    must not turn an ordinary test failure into a terminal policy outcome.
+    """
+    if (validation.get("validation_budget_hold") is not True
+            and validation.get("status") != "validation_budget_hold"
+            and validation.get("error_code") != "VALIDATION_BUDGET_HOLD"):
+        return None
+    return {
+        "status": "validation_budget_hold", "step": step,
+        "passed": False, "validation_budget_hold": True,
+        "errors": list(validation.get("errors") or [
+            validation.get("error_detail") or validation.get("stderr") or validation.get("diagnostic")
+            or "Validation HOLD; automatic recovery is prohibited.",
+        ]),
+        "error_code": "VALIDATION_BUDGET_HOLD",
+        "error_detail": validation.get("error_detail", ""),
+        "stdout": validation.get("stdout", ""),
+        "stderr": validation.get("stderr", ""),
+        "validation": validation,
+    }
+
+
+class NativeStageBudget(NamedTuple):
+    """Immutable, same-host invocation authority; clocks never restart on decode.
+
+    This is a finite allocation, not a scheduler or process-release receipt.
+    The original baseline and each sequential allocation retain their own key.
+    """
+
+    version: int
+    invocation: str
+    repo: str
+    key: str
+    command: tuple[str, ...]
+    baseline: int
+    seconds: int
+    ceiling: int
+    allocations: tuple[tuple[str, int], ...]
+    environment: tuple[tuple[str, str | None], ...]
+    started_ns: int
+    wall_started_ns: int
+    bindings: tuple[tuple[str, str], ...]
+
+    def encode(self) -> str:
+        body = self._asdict()
+        canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        return json.dumps({**body, "digest": hashlib.sha256(canonical.encode()).hexdigest()},
+                          sort_keys=True, separators=(",", ":"))
+
+    def remaining(self) -> float:
+        # Use both clocks: neither a wall-clock rollback nor a reboot/monotonic
+        # reset grants more time. An observation before either origin is stale.
+        elapsed = time.monotonic_ns() - self.started_ns
+        wall_elapsed = time.time_ns() - self.wall_started_ns
+        if min(elapsed, wall_elapsed) < 0:
+            raise ValidationBudgetError("HOLD: validation budget clock/source is stale")
+        remaining = self.seconds - max(elapsed, wall_elapsed) / 1_000_000_000
+        if remaining <= 0:
+            raise ValidationBudgetError(f"HOLD: {self.key} budget exhausted; retry cannot reset it")
+        return remaining
+
+
+def _budget_positive_int(value: Any, label: str) -> int:
+    if type(value) is not int or value <= 0:
+        raise ValidationBudgetError(f"HOLD: {label} must be a positive integer")
+    return value
+
+
+def validation_source_bindings(repo_root: Path, command: tuple[str, ...] = (), *,
+                               bus_dir: str | Path | None = None) -> tuple[tuple[str, str], ...]:
+    """Bind the executing policy and physical config, without role overrides.
+
+    Fixtures may have no repository config. Its absence is explicitly bound;
+    introducing one later is drift, not a fallback to a new authority.
+    """
+    policy_dir = Path(__file__).resolve().parent
+    paths = [policy_dir / name for name in (
+        "executor_common.py", "validation_execution.py", "phase_b_executor.py",
+        "commit_executor.py", "executor_dispatch.py", "launch_wave.py", "recovery_gate.py")]
+    paths += [policy_dir.parent / "agents/meta_bridge_supervisor.py",
+              policy_dir.parent / "agents/meta_bridge_client.py",
+              Path(repo_root).resolve() / "mu/tools/executors/executor_config.json"]
+    if bus_dir is None and "--bus-dir" in command:
+        try:
+            bus_dir = command[command.index("--bus-dir") + 1]
+        except IndexError as exc:
+            raise ValidationBudgetError("HOLD: missing validation bus identity") from exc
+    bus = normalize_agent_bus_dir(bus_dir if bus_dir is not None else os.environ.get("RCX_AGENT_BUS_DIR"))
+    paths.append(Path(repo_root).resolve() / bus / "bridge_config.json")
+    output_value = False
+    for arg in command:
+        # Native pytest output locations are immutable argv, not input source.
+        # A newly written JUnit file must not become a new policy binding on the
+        # next sequential leaf. Selected tests and discovered config stay bound.
+        if output_value:
+            output_value = False
+            continue
+        if arg in {"--junitxml", "--junit-xml", "--basetemp"}:
+            output_value = True
+            continue
+        candidate = Path(repo_root) / arg.split("::", 1)[0]
+        try:
+            if candidate.is_file():
+                paths.append(candidate.resolve())
+        except OSError:
+            pass  # -c source and shell commands are bound by the exact argv.
+    return tuple((str(path), hashlib.sha256(path.read_bytes()).hexdigest()
+                  if path.is_file() else "absent") for path in dict.fromkeys(paths))
+
+
+def validation_environment_binding(env: dict[str, str]) -> tuple[tuple[str, str | None], ...]:
+    return tuple((key, env.get(key)) for key in (
+        "PYTHONHASHSEED", "RCX_CI", "HYPOTHESIS_PROFILE", "PYTHONDONTWRITEBYTECODE",
+        "PYTEST_ADDOPTS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "PYTHONPATH", "PATH",
+        "RCX_META_VALIDATION_TIMEOUT_S"))
+
+
+def admit_stage_budget(
+    repo_root: Path, *, key: str, command: list[str], baseline: int,
+    seconds: int, ceiling: int, allocations: tuple[tuple[str, int], ...] = (),
+    env: dict[str, str] | None = None,
+) -> NativeStageBudget:
+    """Reject an enclosing conflict before the child or its expensive work starts."""
+    import uuid
+
+    for label, value in (("baseline", baseline), ("seconds", seconds), ("ceiling", ceiling)):
+        _budget_positive_int(value, label)
+    if type(key) is not str or key not in {"pytest_full", "pytest_fast", "meta_validation", "phase_b_executor", "commit_executor"}:
+        raise ValidationBudgetError("HOLD: unknown validation budget key")
+    if key in {"pytest_full", "pytest_fast", "meta_validation"} and ceiling > VALIDATION_CEILING_SECONDS:
+        raise ValidationBudgetError("HOLD: validation ceiling exceeds 7200s")
+    if key in {"phase_b_executor", "commit_executor"}:
+        maximum = sum(value for _, value in validation_schedule_requirements(repo_root, VALIDATION_CEILING_SECONDS)[key])
+        if ceiling > maximum:
+            raise ValidationBudgetError("HOLD: native stage exceeds its source-derived finite ceiling")
+    if type(command) is not list or not command or any(type(arg) is not str or not arg or "\0" in arg for arg in command):
+        raise ValidationBudgetError("HOLD: missing budget key or exact command")
+    names = set()
+    for name, value in allocations:
+        if not name or name in names:
+            raise ValidationBudgetError("HOLD: duplicate/empty stage allocation")
+        names.add(name)
+        _budget_positive_int(value, name)
+    required = sum(value for _, value in allocations)
+    if baseline > ceiling or seconds > ceiling or seconds < required:
+        raise ValidationBudgetError(
+            f"HOLD: {key} schedule requires {required}s, allocation={seconds}s, "
+            f"baseline={baseline}s, ceiling={ceiling}s"
+        )
+    return NativeStageBudget(1, uuid.uuid4().hex, str(Path(repo_root).resolve()), key,
+                             tuple(command), baseline, seconds, ceiling, tuple(allocations),
+                             validation_environment_binding(os.environ if env is None else env),
+                             time.monotonic_ns(), time.time_ns(), validation_source_bindings(repo_root, tuple(command)))
+
+
+def decode_stage_budget(raw: str, repo_root: Path, *, key: str | None = None,
+                        command: list[str] | None = None, env: dict[str, str] | None = None) -> NativeStageBudget:
+    """Strict immutable transport: unknown fields, source drift and resets HOLD."""
+    def unique(pairs):
+        result = {}
+        for name, value in pairs:
+            if name in result:
+                raise ValidationBudgetError("HOLD: duplicate budget field")
+            result[name] = value
+        return result
+
+    try:
+        value = json.loads(raw, object_pairs_hook=unique)
+        if type(value) is not dict or set(value) != set(NativeStageBudget._fields) | {"digest"}:
+            raise ValueError("unknown/missing fields")
+        digest = value.pop("digest")
+        canonical = json.dumps(value, sort_keys=True, separators=(",", ":"))
+        if digest != hashlib.sha256(canonical.encode()).hexdigest():
+            raise ValueError("immutable budget digest mismatch (including clock/reset)")
+        if type(value["version"]) is not int or value["version"] != 1:
+            raise ValueError("version")
+        if type(value["invocation"]) is not str or not re.fullmatch(r"[0-9a-f]{32}", value["invocation"]):
+            raise ValueError("invocation")
+        for field in ("baseline", "seconds", "ceiling", "started_ns", "wall_started_ns"):
+            _budget_positive_int(value[field], field)
+        if (type(value["command"]) is not list or not value["command"]
+                or any(type(arg) is not str or not arg for arg in value["command"])):
+            raise ValueError("command")
+        allocations = value["allocations"]
+        if type(allocations) is not list or any(type(pair) is not list or len(pair) != 2
+                                              or type(pair[0]) is not str or not pair[0]
+                                              for pair in allocations):
+            raise ValueError("allocations")
+        for name, seconds in allocations:
+            _budget_positive_int(seconds, name)
+        if len({name for name, _ in allocations}) != len(allocations):
+            raise ValueError("duplicate allocation")
+        if (value["baseline"] > value["ceiling"] or value["seconds"] > value["ceiling"]
+                or sum(seconds for _, seconds in allocations) > value["seconds"]):
+            raise ValueError("over-cap/incoherent budget")
+        if value["key"] in {"pytest_full", "pytest_fast", "meta_validation"} and value["ceiling"] > VALIDATION_CEILING_SECONDS:
+            raise ValueError("validation ceiling exceeds 7200s")
+        if value["key"] in {"phase_b_executor", "commit_executor"}:
+            maximum = sum(seconds for _, seconds in validation_schedule_requirements(repo_root, VALIDATION_CEILING_SECONDS)[value["key"]])
+            if value["ceiling"] > maximum:
+                raise ValueError("native stage exceeds its source-derived finite ceiling")
+        if (value["repo"] != str(Path(repo_root).resolve())
+                or value["key"] not in {"pytest_full", "pytest_fast", "meta_validation", "phase_b_executor", "commit_executor"}):
+            raise ValueError("repo/key")
+        if key is not None and value["key"] != key:
+            raise ValueError("key mismatch")
+        if command is not None and value["command"] != command:
+            raise ValueError("command mismatch")
+        if value["bindings"] != [list(pair) for pair in validation_source_bindings(repo_root, tuple(value["command"]))]:
+            raise ValueError("policy/config source drift")
+        if value["environment"] != [list(pair) for pair in validation_environment_binding(os.environ if env is None else env)]:
+            raise ValueError("validation environment drift")
+        value.update(command=tuple(value["command"]), allocations=tuple(map(tuple, allocations)),
+                     bindings=tuple(map(tuple, value["bindings"])), environment=tuple(map(tuple, value["environment"])))
+        budget = NativeStageBudget(**value)
+        budget.remaining()
+        return budget
+    except (TypeError, ValueError, KeyError, OSError) as exc:
+        raise ValidationBudgetError(f"HOLD: invalid validation budget: {exc}") from exc
+
+
+def validation_parent_remaining(repo_root: Path, *, seconds: int, key: str) -> float | None:
+    """A leaf needs its finite budget plus the parent's remaining stage reserve."""
+    raw = os.environ.get(NATIVE_STAGE_BUDGET_ENV)
+    if raw is None:
+        return None
+    parent = decode_stage_budget(raw, repo_root)
+    allocation = dict(parent.allocations).get(key)
+    if allocation is None or seconds > allocation:
+        raise ValidationBudgetError(f"HOLD: {key} is absent/over-cap in {parent.key}")
+    remaining = parent.remaining()
+    # Reserve the explicitly budgeted review/other sequential work. Validation
+    # must never borrow another key's allowance or extend the parent's deadline.
+    position = [name for name, _ in parent.allocations].index(key)
+    reserve = sum(value for _, value in parent.allocations[position + 1:])
+    if seconds + reserve > remaining:
+        raise ValidationBudgetError(
+            f"HOLD: {key} needs {seconds}s + {reserve}s sequential reserve; "
+            f"{parent.key} has {remaining:.3f}s remaining"
+        )
+    return remaining
+
+
+def phase_b_pytest_timeout(raw_timeout: Any) -> int:
+    """The existing Phase B leaf floor/cap, shared with parent admission."""
+    try:
+        seconds = int(float(raw_timeout))
+    except (TypeError, ValueError):
+        return PHASE_B_PYTEST_FLOOR_SECONDS
+    if seconds <= 0:
+        return PHASE_B_PYTEST_FLOOR_SECONDS
+    return max(PHASE_B_PYTEST_FLOOR_SECONDS, min(seconds, VALIDATION_CEILING_SECONDS))
+
+
+def validation_schedule_requirements(repo_root: Path, validation_seconds: int) -> dict[str, tuple[tuple[str, int], ...]]:
+    """Account for sequential validation and existing non-validation envelopes.
+
+    The old Phase B budget remains the implementation/convergence allowance;
+    the old commit budget remains its hooks, remediation, review and delivery
+    allowance. validation_seconds is the requested evidence allowance; it must
+    not shrink a different pytest key. Phase B retains its configured leaf
+    floor/cap. Commit reserves the finite shared pytest ceiling because its
+    final selectors can include generated tests discovered after admission.
+    These are ceilings, not typical runtimes. No config default is increased.
+    """
+    _budget_positive_int(validation_seconds, "validation_seconds")
+    if validation_seconds > VALIDATION_CEILING_SECONDS:
+        raise ValidationBudgetError("HOLD: validation_seconds exceeds 7200s")
+    path = Path(repo_root) / "mu/tools/executors/executor_config.json"
+    raw = json.loads(path.read_text()) if path.is_file() else {}
+    timeouts = merge_executor_config_overrides(raw)["timeouts"]
+    for key in ("phase_b_executor", "commit_executor", "pre_commit_supervisor", "pre_push_fast",
+                "commit_ci_watch", "commit_ci_poll", "commit_ci_verify"):
+        _budget_positive_int(timeouts[key], key)
+    return {
+        "phase_b_executor": (("implementation_convergence", timeouts["phase_b_executor"]),
+                             ("pytest_full", phase_b_pytest_timeout(timeouts["phase_b_executor"])),
+                             ("meta_validation", validation_seconds),
+                             ("supervisor_review", timeouts["pre_commit_supervisor"])),
+        "commit_executor": (("hooks_review_delivery", timeouts["commit_executor"]),
+                            ("meta_validation", validation_seconds), ("pytest_fast", VALIDATION_CEILING_SECONDS),
+                            ("pre_push_fast", timeouts["pre_push_fast"]),
+                            ("commit_ci_watch", timeouts["commit_ci_watch"]),
+                            ("commit_ci_poll", timeouts["commit_ci_poll"]),
+                            ("commit_ci_verify", timeouts["commit_ci_verify"])),
+    }
+
+
+def validate_validation_schedule(request: Any, repo_root: Path) -> dict[str, Any]:
+    """Validate an explicit per-launch request; never infer larger defaults."""
+    fields = {"validation_seconds", "phase_b_executor", "commit_executor"}
+    if type(request) is not dict or set(request) != fields:
+        raise ValidationBudgetError("HOLD: validation_schedule requires exact per-key allocations")
+    requirements = validation_schedule_requirements(repo_root, request["validation_seconds"])
+    try:
+        ordinary = int(os.environ.get("RCX_META_VALIDATION_TIMEOUT_S", "1200"))
+    except ValueError:
+        ordinary = 1200
+    if not 1 <= ordinary <= VALIDATION_CEILING_SECONDS:
+        ordinary = 1200
+    if request["validation_seconds"] < ordinary:
+        raise ValidationBudgetError(
+            f"HOLD: evidence allowance cannot contain the existing {ordinary}s supervisor leaf; "
+            "small evidence schedules require separate non-evidence allocation"
+        )
+    for key, allocations in requirements.items():
+        required = sum(value for _, value in allocations)
+        _budget_positive_int(request[key], key)
+        # This wave admits only the deterministically accounted envelope. A
+        # larger envelope needs a new policy, not a free-form timeout override.
+        if request[key] != required:
+            raise ValidationBudgetError(f"HOLD: {key} admitted envelope must equal accounted {required}s")
+    return copy.deepcopy(request)
+
+
+def build_validation_schedule_transport(repo_root: Path, request: dict[str, Any], *,
+                                        wave_id: str, evidence_command: str,
+                                        bus_dir: str | Path | None = None) -> str:
+    import uuid
+    validated = validate_validation_schedule(request, repo_root)
+    bus = str(normalize_agent_bus_dir(bus_dir if bus_dir is not None else os.environ.get("RCX_AGENT_BUS_DIR")))
+    body = {"version": 1, "invocation": uuid.uuid4().hex, "wave_id": wave_id, "bus_dir": bus,
+                       "repo": str(Path(repo_root).resolve()), "request": validated,
+                       "evidence_command": evidence_command,
+                       "supervisor_timeout_env": os.environ.get("RCX_META_VALIDATION_TIMEOUT_S"),
+                       "bindings": validation_source_bindings(repo_root, bus_dir=bus)}
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    return json.dumps({**body, "digest": hashlib.sha256(canonical.encode()).hexdigest()}, sort_keys=True)
+
+
+def read_validation_schedule_transport(repo_root: Path, raw: str | None = None, *,
+                                       bus_dir: str | Path | None = None) -> dict[str, Any] | None:
+    raw = os.environ.get(VALIDATION_SCHEDULE_ENV) if raw is None else raw
+    if raw is None:
+        return None
+    try:
+        def unique(pairs):
+            value = {}
+            for name, item in pairs:
+                if name in value:
+                    raise ValueError("duplicate schedule field")
+                value[name] = item
+            return value
+        value = json.loads(raw, object_pairs_hook=unique)
+        if type(value) is not dict or set(value) != {"version", "invocation", "wave_id", "repo", "bus_dir", "request", "evidence_command", "supervisor_timeout_env", "bindings", "digest"}:
+            raise ValueError("unknown/missing schedule fields")
+        digest = value.pop("digest")
+        if digest != hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest():
+            raise ValueError("immutable schedule digest mismatch")
+        if type(value["version"]) is not int or value["version"] != 1:
+            raise ValueError("schedule version")
+        if not re.fullmatch(r"[0-9a-f]{32}", value["invocation"]):
+            raise ValueError("invocation")
+        if value["repo"] != str(Path(repo_root).resolve()):
+            raise ValueError("repo mismatch")
+        if value["supervisor_timeout_env"] != os.environ.get("RCX_META_VALIDATION_TIMEOUT_S"):
+            raise ValueError("supervisor timeout environment drift")
+        bus = str(normalize_agent_bus_dir(bus_dir if bus_dir is not None else os.environ.get("RCX_AGENT_BUS_DIR")))
+        if value["bus_dir"] != bus:
+            raise ValueError("active catalog/bus mismatch")
+        if value["bindings"] != [list(pair) for pair in validation_source_bindings(repo_root, bus_dir=bus)]:
+            raise ValueError("schedule source/config drift")
+        if not isinstance(value["evidence_command"], str) or not isinstance(value["wave_id"], str):
+            raise ValueError("command/wave type")
+        validate_validation_schedule(value["request"], repo_root)
+        return value
+    except (ValueError, TypeError, OSError, KeyError) as exc:
+        raise ValidationBudgetError(f"HOLD: invalid validation schedule: {exc}") from exc
+
+
+def retain_validation_schedule(repo_root: Path, request: dict[str, Any], *, wave_id: str,
+                               evidence_command: str, bus_dir: str | Path | None = None) -> str:
+    """Keep one immutable launch request across authorized native continuations."""
+    if type(wave_id) is not str or not WAVE_ID_RE.fullmatch(wave_id):
+        raise ValidationBudgetError("HOLD: invalid validation schedule wave")
+    path = agent_bus_path(repo_root, bus_dir, "executors", "validation", wave_id + ".schedule.json")
+    if path.is_symlink() or not path.parent.resolve().is_relative_to(Path(repo_root).resolve()):
+        raise ValidationBudgetError("HOLD: validation schedule storage identity is uncertain")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    created = False
+    if not path.exists():
+        raw = build_validation_schedule_transport(repo_root, request, wave_id=wave_id,
+                                                   evidence_command=evidence_command, bus_dir=bus_dir)
+        try:
+            with path.open("x") as handle:
+                handle.write(raw)
+                handle.flush()
+                os.fsync(handle.fileno())
+            created = True
+        except FileExistsError:
+            pass
+    raw = path.read_text()
+    admitted = read_validation_schedule_transport(repo_root, raw, bus_dir=bus_dir)
+    if (admitted is None or admitted["wave_id"] != wave_id or admitted["request"] != request
+            or admitted["evidence_command"] != evidence_command):
+        raise ValidationBudgetError("HOLD: existing validation request cannot be replaced or reset")
+    ledger = path.with_suffix(".admissions.json")
+    if created:
+        with ledger.open("x") as handle:
+            json.dump({"transport": raw, "stages": {"phase_b_executor": None, "commit_executor": None}}, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+    if ledger.is_symlink() or not ledger.is_file():
+        raise ValidationBudgetError("HOLD: missing/interrupted validation admission ledger")
+    return raw
+
+
+def retain_native_stage_budget(repo_root: Path, schedule: dict[str, Any], *,
+                              command: list[str], key: str, baseline: int,
+                              seconds: int, ceiling: int,
+                              allocations: tuple[tuple[str, int], ...]) -> NativeStageBudget:
+    """One durable first-admission transition; missing records never mint clocks.
+
+    The launcher creates both the immutable schedule and its empty ledger. Under
+    the ledger's retained inode lock, record the admitted clock *before* creating
+    the budget file. Interruption, deletion or mismatched copies therefore HOLD.
+    The ledger is never unlinked/recreated by a consumer.
+    """
+    root = Path(repo_root).resolve()
+    path = agent_bus_path(root, schedule["bus_dir"], "executors", "validation",
+                          schedule["wave_id"] + ".schedule.json")
+    ledger = path.with_suffix(".admissions.json")
+    budget_path = path.parent / f"{schedule['invocation']}.{key}.budget.json"
+    witness = budget_path.with_suffix(".admitted.json")
+    for candidate in (path, ledger, budget_path, witness):
+        if candidate.is_symlink() or not candidate.parent.resolve().is_relative_to(root):
+            raise ValidationBudgetError("HOLD: validation storage identity is uncertain")
+    if not path.is_file() or not ledger.is_file():
+        raise ValidationBudgetError("HOLD: retained validation admission ledger disappeared")
+    raw = path.read_text()
+    if read_validation_schedule_transport(root, raw, bus_dir=schedule["bus_dir"]) != schedule:
+        raise ValidationBudgetError("HOLD: retained validation schedule differs")
+    with ledger.open("r+") as handle:
+        # Admission has no stage clock yet. Never wait indefinitely for another
+        # consumer or turn contention into a second first-admission attempt.
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValidationBudgetError("HOLD: validation admission ledger is already locked") from exc
+        try:
+            record = json.load(handle)
+            if (set(record) != {"transport", "stages"} or record["transport"] != raw
+                    or set(record["stages"]) != {"phase_b_executor", "commit_executor"}):
+                raise ValueError("admission ledger identity")
+            previous = record["stages"][key]
+            if previous is None:
+                if budget_path.exists() or witness.exists():
+                    raise ValueError("unexplained budget without first admission")
+                budget = admit_stage_budget(root, key=key, command=command, baseline=baseline,
+                    seconds=seconds, ceiling=ceiling, allocations=allocations)._replace(invocation=schedule["invocation"])
+                previous = budget.encode()
+                record["stages"][key] = previous
+                handle.seek(0)
+                json.dump(record, handle)
+                handle.truncate()
+                handle.flush()
+                os.fsync(handle.fileno())
+                with witness.open("x") as target:
+                    target.write(previous)
+                    target.flush()
+                    os.fsync(target.fileno())
+                with budget_path.open("x") as target:
+                    target.write(previous)
+                    target.flush()
+                    os.fsync(target.fileno())
+            if (not budget_path.is_file() or budget_path.read_text() != previous
+                    or not witness.is_file() or witness.read_text() != previous):
+                raise ValueError("retained budget disappeared or differs; do not reset")
+            budget = decode_stage_budget(previous, root, key=key, command=command)
+            if (budget.invocation != schedule["invocation"] or budget.baseline != baseline
+                    or budget.seconds != seconds or budget.ceiling != ceiling or budget.allocations != allocations):
+                raise ValueError("retry cannot reset/change admitted allocation")
+            return budget
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            raise ValidationBudgetError(f"HOLD: invalid retained stage admission: {exc}") from exc
+
+
+def validate_native_stage_context(repo_root: Path, *, key: str, wave_id: str | None = None,
+                                  transport: str | None = None) -> NativeStageBudget | None:
+    """A native entry point cannot drop the launch request or its elapsed clock."""
+    raw = os.environ.get(VALIDATION_SCHEDULE_ENV)
+    stage = os.environ.get(NATIVE_STAGE_BUDGET_ENV)
+    if transport is not None and (type(transport) is not str or transport != raw):
+        raise ValidationBudgetError("HOLD: native handoff lost/differs from admitted validation transport")
+    if raw is None and stage is None:
+        return None  # Existing scalar-timeout invocation, with no new authority.
+    if raw is None or stage is None:
+        raise ValidationBudgetError("HOLD: native validation request requires its admitted stage clock")
+    schedule = read_validation_schedule_transport(repo_root, raw)
+    budget = decode_stage_budget(stage, repo_root, key=key, command=[sys.executable, *sys.argv])
+    if wave_id is not None and schedule["wave_id"] != wave_id:
+        raise ValidationBudgetError("HOLD: native stage wave mismatch")
+    allocations = validation_schedule_requirements(repo_root, schedule["request"]["validation_seconds"])[key]
+    if (budget.invocation != schedule["invocation"] or budget.seconds != schedule["request"][key]
+            or budget.allocations != allocations):
+        raise ValidationBudgetError("HOLD: native stage allocation/invocation mismatch")
+    return budget
+
+
 def copy_launch_wave_override_authority(
     record: dict[str, Any], *, required: bool = False,
 ) -> dict[str, Any]:
@@ -233,8 +772,14 @@ def copy_launch_wave_override_authority(
         return {}
     value = record.get(key)
     fields = {"version", "implementer_agent", "reviewer_agent", "pager_route", "max_turns"}
-    if type(value) is not dict or set(value) != fields:
+    if type(value) is not dict or set(value) not in (fields, fields | {"validation_schedule"}):
         raise ExecutorCommonError(f"{key} requires the complete version-1 object")
+    if "validation_schedule" in value:
+        request = value["validation_schedule"]
+        if type(request) is not dict or set(request) != {"validation_seconds", "phase_b_executor", "commit_executor"}:
+            raise ValidationBudgetError("HOLD: malformed launch validation schedule")
+        for name, seconds in request.items():
+            _budget_positive_int(seconds, name)
     if type(value["version"]) is not int or value["version"] != 1:
         raise ExecutorCommonError(f"{key} version must be exactly integer 1")
     for field in ("implementer_agent", "reviewer_agent", "pager_route"):
@@ -541,6 +1086,14 @@ def apply_recovery_config_env_overrides(config: dict[str, Any]) -> dict[str, Any
     """
     if not isinstance(config, dict):
         return config
+    if (NATIVE_STAGE_BUDGET_ENV in os.environ or VALIDATION_SCHEDULE_ENV in os.environ) and any(
+        key in os.environ for key in (
+            "RCX_RECOVERY_TIMEOUT_OVERRIDE", "RCX_RECOVERY_TIMEOUT_KEY",
+            "RCX_RECOVERY_STALE_TIMEOUT_OVERRIDE", "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE",
+            "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY",
+        )
+    ):
+        raise ValidationBudgetError("HOLD: scalar recovery overrides cannot change an admitted budget key or baseline")
 
     timeouts = config.setdefault("timeouts", {})
     if isinstance(timeouts, dict):

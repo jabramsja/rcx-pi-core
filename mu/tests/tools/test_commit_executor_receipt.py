@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -49,6 +50,15 @@ candidate_authority_mod = load_module(
 )
 
 _PHASE_B_RECEIPT_PATH = ".agent_bus/meta/pre_commit_receipts/phase_b.json"
+
+
+@pytest.fixture
+def coherent_native_validation():
+    """Positive execution controls retain real children and coherent OS input."""
+    import validation_execution as validation
+    from mu.tests.tools.test_executor_common import complete_process_observation
+    with complete_process_observation(validation.common) as observations:
+        yield observations
 
 
 def _canonical_handoff_sha_for_test(handoff: dict) -> str:
@@ -99,6 +109,48 @@ def _with_founder_override(note: str, token: str) -> str:
     return f"{note} FOUNDER_OVERRIDE:{token} (test authorization)"
 
 
+def test_validation_schedule_survives_builder_and_fresh_commit_dispatch(tmp_path, monkeypatch):
+    import executor_common as common
+    repo = _setup_repo(tmp_path)
+    monkeypatch.setenv("RCX_META_VALIDATION_TIMEOUT_S", "1")
+    rows = common.validation_schedule_requirements(repo, 5)
+    request = {"validation_seconds": 5, **{key: sum(seconds for _, seconds in value) for key, value in rows.items()}}
+    transport = common.retain_validation_schedule(repo, request, wave_id="test-wave", evidence_command="true")
+    monkeypatch.setenv(common.VALIDATION_SCHEDULE_ENV, transport)
+    base = _make_new_schema_handoff()
+    handoff, errors = commit_mod.build_commit_handoff(
+        wave_id=base["wave_id"], task_id=base["task_id"], files_to_stage=base["files_to_stage"],
+        commit_message=base["commit_message"], fixes_implemented=base["fixes_implemented"],
+        tracker_note_text=base["tracker_note_text"], pre_commit_receipt_path=_PHASE_B_RECEIPT_PATH,
+        repo_root=repo)
+    assert not errors, errors
+    assert handoff["validation_schedule"] == transport
+    path = repo / "handoff.json"
+    path.write_text(json.dumps(handoff))
+    command = [sys.executable, str(REPO_ROOT / "mu/tools/executors/commit_executor.py"), "--handoff", str(path)]
+    code = (
+        f"import sys;sys.path.insert(0,{str(REPO_ROOT / 'mu/tools/executors')!r});"
+        "from pathlib import Path;from executor_dispatch import admit_executor_validation_budget;"
+        f"print(admit_executor_validation_budget({command!r},Path({str(repo)!r}),3600).encode())")
+    env = os.environ.copy()
+    env.pop(common.VALIDATION_SCHEDULE_ENV)
+    env.pop(common.NATIVE_STAGE_BUDGET_ENV, None)
+    fresh = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=10)
+    assert fresh.returncode == 0, fresh.stderr
+    budget = json.loads(fresh.stdout)
+    assert budget["seconds"] == request["commit_executor"]
+    assert budget["invocation"] == json.loads(transport)["invocation"]
+    # Direct native entry cannot silently discard the dispatch-owned clock.
+    result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+    assert result["validation_budget_hold"] and result["steps_completed"] == []
+    for bad in (None, "{}", transport.replace('"version": 1', '"version": 2')):
+        candidate = {**handoff, "validation_schedule": bad}
+        assert not commit_mod.validate_handoff(candidate, repo_root=repo)[0]
+    missing = dict(handoff)
+    del missing["validation_schedule"]
+    assert not commit_mod.validate_handoff(missing, repo_root=repo)[0]
+
+
 def _write_pager_config(repo_root: Path, *, route: str = "both") -> None:
     config_path = repo_root / "mu" / "tools" / "executors" / "executor_config.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -141,6 +193,109 @@ def _valid_supervisor_package() -> dict:
         "tracker_note_text": "",
         "evidence_command": "",
     }
+
+
+@pytest.fixture
+def native_held_supervisor(monkeypatch):
+    """Use the real client, supervisor and budget admission in a disposable repo."""
+    client = load_module(
+        "meta_bridge_client_hold_transport_tests",
+        REPO_ROOT / "mu/tools/agents/meta_bridge_client.py",
+    )
+    supervisor = load_module(
+        "meta_bridge_supervisor_hold_transport_tests",
+        REPO_ROOT / "mu/tools/agents/meta_bridge_supervisor.py",
+    )
+    responses = []
+
+    def run(package_path, **kwargs):
+        repo = Path(subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"], cwd=package_path.parent, text=True,
+        ).strip())
+        script = repo / "mu/tools/agents/meta_bridge_supervisor.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        # Relocate only the fixture's repo identity; all production functions
+        # remain real, including the validation runner's pre-child refusal.
+        with monkeypatch.context() as context:
+            context.setattr(supervisor, "__file__", str(script))
+            context.setitem(sys.modules, "meta_bridge_supervisor", supervisor)
+            context.setenv("RCX_VALIDATION_SCHEDULE", "{}")
+            context.setattr(supervisor, "run_meta_review", lambda *a, **kw: pytest.fail("review after HOLD"))
+            response = client.run_meta_bridge_package(package_path, **kwargs)
+        assert response.error_code == "VALIDATION_BUDGET_HOLD", response
+        assert response.error_detail
+        assert not response.receipt_path
+        responses.append(response)
+        return response
+
+    return SimpleNamespace(run=run, responses=responses, client=client)
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_native_supervisor_hold_survives_commit_cli_and_recovery(
+    tmp_path, monkeypatch, capsys, native_held_supervisor, json_output,
+):
+    repo = _setup_repo(tmp_path)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo)
+    handoff = _make_new_schema_handoff()
+    monkeypatch.setattr(commit_mod, "_load_repo_meta_bridge_client", lambda root: (
+        native_held_supervisor.run, native_held_supervisor.client.MetaBridgeClientError,
+    ))
+    result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
+    assert len(native_held_supervisor.responses) == 1
+    response = native_held_supervisor.responses[0]
+    assert result["status"] == "validation_budget_hold", result
+    assert result["step"] == "build_and_run_supervisor"
+    assert result["error_code"] == response.error_code
+    assert result["error_detail"] == response.error_detail
+    assert result["validation"]["error_detail"] == response.error_detail
+    assert result["pre_commit_decision"] == "ERROR_INTERNAL"
+    assert "validate_receipt" not in result["steps_completed"]
+    assert "git_commit" not in result["steps_completed"]
+    assert subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo) == head
+    assert recovery_gate_mod.classify_failure(result) == recovery_gate_mod.FailureClass.TERMINAL_POLICY
+    with patch.object(recovery_gate_mod, "run_recovery_loop") as actor:
+        recovery = recovery_gate_mod.attempt_recovery(repo, result, "test-wave")
+    assert recovery["tier"] == 4 and not recovery["recovered"]
+    actor.assert_not_called()
+    capsys.readouterr()
+    handoff_path = repo / "handoff.json"
+    handoff_path.write_text(json.dumps(handoff))
+    monkeypatch.chdir(repo)
+    with patch.object(commit_mod, "run_commit_pipeline", return_value=result), \
+         patch.object(commit_mod, "_load_repo_recovery_symbols") as recoveries, \
+         patch.object(sys, "argv", ["commit_executor.py", "--handoff", str(handoff_path), "--standalone"]
+                      + (["--json"] if json_output else [])):
+        exit_code = commit_mod.main()
+    assert exit_code == 1
+    recoveries.assert_not_called()
+    output = capsys.readouterr().out
+    if json_output:
+        assert recovery_gate_mod.classify_failure({"stdout": output}) == recovery_gate_mod.FailureClass.TERMINAL_POLICY
+    else:
+        assert response.error_detail in output
+
+
+@pytest.mark.parametrize("decision", ["ERROR_INTERNAL", "NEEDS_PHASE_B"])
+def test_untyped_supervisor_error_retains_ordinary_commit_behavior(tmp_path, monkeypatch, decision):
+    repo = _setup_repo(tmp_path)
+    response = SimpleNamespace(
+        decision=decision, summary="ordinary assertion mentions VALIDATION_BUDGET_HOLD",
+        status="error", error_code="VALIDATION_FAILED", error_detail="assertion failure",
+        validations_failed=[{"name": "wave_evidence", "error": "assertion failure"}],
+    )
+    monkeypatch.setattr(commit_mod, "_load_repo_meta_bridge_client", lambda root: (
+        lambda *a, **kw: response, RuntimeError,
+    ))
+    result = commit_mod.run_commit_pipeline(_make_new_schema_handoff(), repo_root=repo)
+    assert result["status"] == "error", result
+    assert not result.get("validation_budget_hold")
+    assert result["pre_commit_decision"] == decision
+    assert result["supervisor_result"]["validations_failed"] == response.validations_failed
+    assert recovery_gate_mod.classify_failure(result) != recovery_gate_mod.FailureClass.TERMINAL_POLICY
+    if decision == "NEEDS_PHASE_B":
+        assert result["failure_class"] == "needs_phase_b"
+        assert result["resume_after"] == "needs_phase_b_reentry"
 
 
 def test_no_env_commit_retry_handoff_route_drives_commit_and_supervisor_events(
@@ -1558,7 +1713,23 @@ class TestSkipSupervisorBypassClosure:
 
 
 class TestStandaloneRecoveryTrigger:
-    def _run_main_with_pipeline_result(self, tmp_path, result):
+    @pytest.mark.parametrize("status", ["validation_budget_hold", "error", "bot_findings_pending"])
+    @pytest.mark.parametrize("json_output", [False, True])
+    def test_validation_hold_exits_nonzero_without_recovery(self, tmp_path, capsys, status, json_output):
+        result = {
+            "status": status, "step": "run_pre_commit_script",
+            "validation_budget_hold": True, "errors": ["HOLD: ownership uncertain"],
+        }
+        exit_code, recovery_calls = self._run_main_with_pipeline_result(tmp_path, result, json_output=json_output)
+        assert exit_code == 1
+        assert recovery_calls == []
+        output = capsys.readouterr().out
+        if json_output:
+            assert json.loads(output) == result
+        else:
+            assert "HOLD: ownership uncertain" in output
+
+    def _run_main_with_pipeline_result(self, tmp_path, result, *, json_output=False):
         import subprocess
 
         repo = tmp_path / "repo"
@@ -1606,7 +1777,7 @@ class TestStandaloneRecoveryTrigger:
                      "--handoff",
                      str(handoff_path),
                      "--standalone",
-                 ],
+                 ] + (["--json"] if json_output else []),
              ):
             exit_code = commit_mod.main()
 
@@ -2040,8 +2211,9 @@ class TestSupervisorReceiptIsAuthority:
 def _commit_inventory_fixture(tmp_path, *, generated=True, authority_required=True):
     """Native commit mutations in an external temp repo, with launch-owned truth.
 
-    Only the supervisor response is supplied. Git, packet/tracker settlement,
-    Step 5e, affected tests, private-attribute policy and receipt verification run.
+    The supervisor response is supplied, and positive admission uses a coherent
+    real OS snapshot. Git, packet/tracker settlement, Step 5e, affected tests,
+    private-attribute policy and receipt verification run.
     The minimal repo has no L4 checker, an existing optional builder contract.
     """
     repo = _setup_repo(tmp_path)
@@ -2247,11 +2419,13 @@ def _run_inventory_commit(case, monkeypatch, tmp_path, *, drift="", expect_autho
     return result, captured, snapshot
 
 
+@pytest.mark.usefixtures("coherent_native_validation")
 class TestCommitCandidateInventory:
     @pytest.mark.parametrize("generated", [False, True])
     @pytest.mark.parametrize("bytecode_enabled", [False, True])
     def test_finalized_candidate_is_bound_before_supervisor(
         self, tmp_path, monkeypatch, generated, bytecode_enabled,
+        coherent_native_validation,
     ):
         case = _commit_inventory_fixture(tmp_path, generated=generated)
         monkeypatch.setattr(sys, "dont_write_bytecode", not bytecode_enabled)
@@ -2262,6 +2436,12 @@ class TestCommitCandidateInventory:
         monkeypatch.setitem(sys.modules, "candidate_authority", ambient_authority)
         result, package, snapshot = _run_inventory_commit(case, monkeypatch, tmp_path)
         assert result["status"] == "held", result
+        # Generated-test candidates require successful real child admission;
+        # the other case has no affected tests. Retain the real-snapshot premise
+        # used by positive commit fixtures without admitting unnecessary work.
+        assert bool(coherent_native_validation) is generated
+        assert all(row["complete"] and row["snapshot_sha256"]
+                   for row in coherent_native_validation)
         assert "git_commit" in result["steps_completed"]
         assert "validate_receipt" in result["steps_completed"]
         assert "verify_commit_candidate_authority" in result["steps_completed"]
@@ -7812,6 +7992,7 @@ class TestHandoffReceiptContainment:
         assert any("escapes repo" in e.lower() for e in result["errors"])
 
 
+@pytest.mark.usefixtures("coherent_native_validation")
 class TestCommitExecutorPytestGate:
     """Step 8 runs targeted pytest before allowing git commit."""
 
@@ -8136,7 +8317,8 @@ class TestCommitExecutorPytestGate:
         assert captured["timeout"] == commit_mod.PRE_COMMIT_DOC_CHECK_TIMEOUT_SECONDS
         assert captured["timeout"] > 30
 
-    def test_run_commit_pipeline_blocks_on_targeted_pytest_failure(self, tmp_path):
+    @pytest.mark.parametrize("validation_hold", [False, True])
+    def test_run_commit_pipeline_blocks_on_targeted_pytest_failure(self, tmp_path, validation_hold):
         from collections import namedtuple
         import types
 
@@ -8181,18 +8363,25 @@ class TestCommitExecutorPytestGate:
                  commit_mod,
                  "_run_pytest_on_files",
                  return_value={
-                     "exit_code": 1,
+                     "exit_code": 125 if validation_hold else 1,
                      "stdout": "FAILED tests/test_file.py::test_smoke",
-                     "stderr": "",
+                     "stderr": "HOLD: validation source drift" if validation_hold else "",
                      "passed": False,
+                     "validation_budget_hold": validation_hold,
+                     "receipt_path": "validation/receipt.json",
+                     "rcx_process_released": False,
                  },
              ) as mock_pytest, \
              patch.object(commit_mod, "_run", side_effect=intercept_run):
             result = commit_mod.run_commit_pipeline(handoff, repo_root=repo)
 
-        assert result["status"] == "error"
+        assert result["status"] == ("validation_budget_hold" if validation_hold else "error")
         assert result["step"] == "run_pre_commit_script"
-        assert "targeted pytest gate failed" in result["errors"][0]
+        if validation_hold:
+            assert result["validation"] == mock_pytest.return_value
+            assert recovery_gate_mod.classify_failure(result) == recovery_gate_mod.FailureClass.TERMINAL_POLICY
+        else:
+            assert "targeted pytest gate failed" in result["errors"][0]
         assert "git_commit" not in result.get("steps_completed", [])
         assert mock_pytest.call_args[0][1] == ["tests/test_file.py"]
         assert not any(cmd[:2] == ["git", "commit"] for cmd in seen_commands)
@@ -8374,154 +8563,178 @@ class TestCommitExecutorPytestGate:
         assert result["passed"] is True, result
 
     def test_run_pytest_on_files_scales_timeout_with_file_count(self, tmp_path):
-        from types import SimpleNamespace
-
-        repo = tmp_path / "repo"
-        repo.mkdir()
-
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
-        ) as mock_run:
-            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing targeted pytest timeout scaling helper
-                repo,
-                [
-                    "mu/tests/tools/test_agent_bridge_supervisor.py",
-                    "mu/tests/tools/test_executor_dispatch.py",
-                    "tests/tools/test_executor_dispatch.py",
-                    "mu/tests/tools/test_commit_executor_receipt.py",
-                    "tests/test_extra.py",
-                ],
-            )
-
-        assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 1200
+        selectors = ['mu/tests/tools/test_agent_bridge_supervisor.py', 'mu/tests/tools/test_executor_dispatch.py', 'tests/tools/test_executor_dispatch.py', 'mu/tests/tools/test_commit_executor_receipt.py', 'tests/test_extra.py']
+        for index, selector in enumerate(selectors):
+            path = tmp_path / selector
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"def test_budget_{index}(): assert True\n")
+        result = commit_mod.run_pytest_gate(tmp_path, selectors)
+        assert result["passed"] is True, result
+        assert result["timeout_seconds"] == 1200
+        assert all(selector in result["command"] for selector in selectors)
 
     def test_run_pytest_on_files_gives_single_large_file_real_slack(self, tmp_path):
-        from types import SimpleNamespace
-
-        repo = tmp_path / "repo"
-        repo.mkdir()
-
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
-        ) as mock_run:
-            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing exact full Phase B module's 600s allocation
-                repo,
-                ["mu/tests/tools/test_phase_b_executor.py"],
-            )
-
-        assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 600
+        selectors = ['mu/tests/tools/test_phase_b_executor.py']
+        for index, selector in enumerate(selectors):
+            path = tmp_path / selector
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"def test_budget_{index}(): assert True\n")
+        result = commit_mod.run_pytest_gate(tmp_path, selectors)
+        assert result["passed"] is True, result
+        assert result["timeout_seconds"] == 600
+        assert all(selector in result["command"] for selector in selectors)
 
     def test_run_pytest_on_files_gives_two_heavy_files_real_slack(self, tmp_path):
-        from types import SimpleNamespace
-
-        repo = tmp_path / "repo"
-        repo.mkdir()
-
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
-        ) as mock_run:
-            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing Phase B 600s plus ordinary selector 240s allocation
-                repo,
-                [
-                    "mu/tests/tools/test_phase_b_executor.py",
-                    "mu/tests/tools/test_recovery_gate.py",
-                ],
-            )
-
-        assert result["passed"] is True
-        assert mock_run.call_args.kwargs["timeout"] == 840
+        selectors = ['mu/tests/tools/test_phase_b_executor.py', 'mu/tests/tools/test_recovery_gate.py']
+        for index, selector in enumerate(selectors):
+            path = tmp_path / selector
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"def test_budget_{index}(): assert True\n")
+        result = commit_mod.run_pytest_gate(tmp_path, selectors)
+        assert result["passed"] is True, result
+        assert result["timeout_seconds"] == 840
+        assert all(selector in result["command"] for selector in selectors)
 
     def test_run_pytest_on_files_timeout_reports_budget(self, tmp_path):
-        import subprocess
-
-        repo = tmp_path / "repo"
-        repo.mkdir()
-
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            side_effect=subprocess.TimeoutExpired(["pytest"], timeout=840),
-        ):
-            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: testing timeout diagnostic includes computed budget
-                repo,
-                [
-                    "mu/tests/tools/test_phase_b_executor.py",
-                    "mu/tests/tools/test_recovery_gate.py",
-                ],
-            )
-
+        import validation_execution as validation
+        marker = tmp_path / "running"
+        selectors = ["mu/tests/tools/test_phase_b_executor.py", "mu/tests/tools/test_recovery_gate.py"]
+        for selector in selectors:
+            path = tmp_path / selector
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("import time\nfrom pathlib import Path\ndef test_wait():\n"
+                            f"    Path({str(marker)!r}).touch()\n    time.sleep(30)\n")
+        original = validation.common.NativeStageBudget.remaining
+        def elapsed(budget):
+            if marker.exists():
+                raise validation.common.ValidationBudgetError("HOLD: fixture elapsed budget")
+            return original(budget)
+        # Advance only the budget clock after a real pytest child executes. No
+        # production child or timeout result is mocked.
+        with patch.object(validation.common.NativeStageBudget, "remaining", elapsed):
+            result = commit_mod.run_pytest_gate(tmp_path, selectors)
         assert result["passed"] is False
         assert result["exit_code"] == -1
-        assert result["stderr"] == "pytest timed out after 840s"
+        assert result["timeout_seconds"] == 840
+        assert "timed out after 840s" in result["stderr"]
 
     def test_run_pytest_on_files_uses_fast_shard_marker_filter(self, tmp_path):
-        from types import SimpleNamespace
+        selectors = ["mu/tests/l4_gates/test_boot1_default_pipeline_gate.py", "mu/tests/parity/test_boot1_shadow_parity.py"]
+        for selector in selectors:
+            path = tmp_path / selector
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("import os,pytest\ndef test_pins():\n"
+                            "    assert os.environ['PYTHONHASHSEED'] == '0'\n"
+                            "    assert os.environ['RCX_CI'] == '1'\n"
+                            "    assert os.environ['HYPOTHESIS_PROFILE'] == 'ci_fast'\n"
+                            "@pytest.mark.slow\ndef test_excluded(): assert False\n")
+        result = commit_mod.run_pytest_gate(tmp_path, selectors)
+        assert result["passed"] is True, result
+        args = result["command"]
+        assert ["-m", "not slow and not fuzzer"] in [args[index:index + 2] for index in range(len(args) - 1)]
 
-        repo = tmp_path / "repo"
-        repo.mkdir()
-
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
-        ) as mock_run:
-            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: locks commit Step 8b fast-shard marker filter
-                repo,
-                [
-                    "mu/tests/l4_gates/test_boot1_default_pipeline_gate.py",
-                    "mu/tests/parity/test_boot1_shadow_parity.py",
-                ],
-            )
-
-        assert result["passed"] is True
-        args = mock_run.call_args.args[0]
-        assert ["-m", "not slow and not fuzzer"] in [
-            args[index:index + 2]
-            for index in range(len(args) - 1)
-        ]
-        env = mock_run.call_args.kwargs["env"]
-        assert env["PYTHONHASHSEED"] == "0"
-        assert env["RCX_CI"] == "1"
-        assert env["HYPOTHESIS_PROFILE"] == "ci_fast"
-
-    def test_run_pytest_on_files_accepts_all_deselected_fast_marker_lane(self, tmp_path):
-        from types import SimpleNamespace
-
-        repo = tmp_path / "repo"
-        repo.mkdir()
-
-        stdout = (
-            "collected 17 items / 17 deselected / 0 selected\n\n"
-            "============================ 17 deselected in 0.02s ============================"
-        )
-        with patch.object(
-            commit_mod.subprocess,
-            "run",
-            return_value=SimpleNamespace(returncode=5, stdout=stdout, stderr=""),
-        ) as mock_run:
-            result = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: locks slow-only commit gate handling
-                repo,
-                ["mu/tests/l4_gates/test_observer_type_guard_gate.py"],
-            )
-
-        assert result["passed"] is True
-        assert result["exit_code"] == 5
-        args = mock_run.call_args.args[0]
-        assert ["-m", "not slow and not fuzzer"] in [
-            args[index:index + 2]
-            for index in range(len(args) - 1)
-        ]
+    @pytest.mark.parametrize("workers", [0, 4])
+    def test_run_pytest_on_files_accepts_all_deselected_fast_marker_lane(self, tmp_path, workers):
+        # Existing slow-only contract: collected tests that the fast profile
+        # deselects pass with pytest's truthful exit 5. xdist prints "[0 items]"
+        # without counts, so an actual collection-only child must prove it.
+        path = tmp_path / "test_slow.py"
+        path.write_text("import pytest\n@pytest.mark.slow\ndef test_slow(): assert False\n")
+        result = commit_mod.run_pytest_gate(tmp_path, ["test_slow.py"], workers=workers)
+        assert result["passed"] is True, result
+        assert result["exit_code"] == 5 and result["status"] == "profile_deselected"
+        args = result["command"]
+        assert ["-m", "not slow and not fuzzer"] in [args[index:index + 2] for index in range(len(args) - 1)]
+        probe = result["collection_probe"]
+        assert probe["exit_code"] == 0 and probe["passed"] is True
+        assert "--collect-only" in probe["command"] and "not slow and not fuzzer" not in probe["command"]
+        assert "-n" not in probe["command"] and probe["command"][-2:] == ["test_slow.py", "--maxfail=0"]
+        assert json.loads(Path(result["receipt_path"]).read_text())["status"] == "profile_deselected"
+        # Zero collection and collection errors are never promoted into green.
+        (tmp_path / "test_empty.py").write_text("value = 1\n")
+        (tmp_path / "test_broken.py").write_text("def test_broken(:\n    pass\n")
+        for selector in ("test_empty.py", "test_broken.py"):
+            failed = commit_mod.run_pytest_gate(tmp_path, [selector], workers=workers)
+            assert failed["passed"] is False and failed["exit_code"] != 0, failed
+            assert failed["status"] == "failed" and "profile_deselected" not in failed, failed
 
 
 class TestBotRemediationValidation:
+    def test_native_validation_hold_blocks_remediation_delivery_and_recovery(self, tmp_path, monkeypatch):
+        import validation_execution as validation
+
+        repo = _setup_repo(tmp_path)
+        _write_bot_remediation_executor_config(repo)
+        (repo / ".gitignore").write_text(".agent_bus/\n.scratch/\n")
+        (repo / "mu/tests").mkdir(parents=True, exist_ok=True)
+        (repo / "mu/tests/.keep").write_text("")
+        _commit_all_for_test(repo, "baseline remediation fixture")
+        for key in (validation.common.NATIVE_STAGE_BUDGET_ENV, validation.common.VALIDATION_SCHEDULE_ENV,
+                    "RCX_AGENT_BUS_DIR", "RCX_VALIDATION_LOG_DIR", "PYTEST_ADDOPTS"):
+            monkeypatch.delenv(key, raising=False)
+        marker = repo / "validation-collected"
+        actor_calls = []
+
+        def write_changes(repo_root):
+            actor_calls.append(repo_root)
+            test_path = repo_root / "mu/tests/test_bot_fix.py"
+            test_path.parent.mkdir(parents=True, exist_ok=True)
+            test_path.write_text(
+                f"from pathlib import Path\nPath({str(marker)!r}).touch()\ndef test_bot_fix(): pass\n"
+            )
+
+        canonical = repo / ".agent_bus/meta/pre_commit_receipt.json"
+        canonical.write_text(json.dumps({"receipt_type": "bot_remediation", "decision": "COMMIT_GO"}))
+        continuation = repo / ".agent_bus/meta/commit_continuation.json"
+        continuation.write_text('{"status": "pending", "commit_sha": "original-head"}\n')
+        before_continuation = continuation.read_bytes()
+        handoff_receipt = (repo / _PHASE_B_RECEIPT_PATH).read_bytes()
+        real_run = commit_mod._run  # ANTICHEAT_OK: asserts no commit/push after native validation HOLD
+        commands = []
+
+        def guarded_run(args, **kwargs):
+            commands.append(list(args))
+            assert list(args[:2]) not in (["git", "commit"], ["git", "push"])
+            return real_run(args, **kwargs)
+
+        diagnostic = "process ancestry changed between observations"
+        with patch.object(commit_mod, "_bridge_adapters", self._fake_bridge_adapters(write_changes)), \
+             patch.object(commit_mod, "_run", side_effect=guarded_run), \
+             patch.object(commit_mod, "_run_pytest_on_files", side_effect=lambda root, files:
+                          commit_mod.run_pytest_gate(root, files, workers=0)), \
+             patch.object(validation.common, "observe_executor_processes", return_value=
+                          validation.common.ExecutorProcessObservation(False, {}, {}, diagnostic)) as observation, \
+             patch.object(commit_mod, "run_private_attr_test_gate") as private_gate, \
+             patch.object(commit_mod, "_mint_bot_remediation_receipt") as mint:
+            result = commit_mod._attempt_bot_finding_remediation(  # ANTICHEAT_OK: exact supervisor-reproduced Step 15 boundary
+                [{"path": "mu/tests/test_bot_fix.py", "body": "P1 validation hold regression",
+                  "author": commit_mod.BOT_REVIEW_LOGIN, "line": 1}],
+                repo_root=repo, repo_owner="owner", repo_name="repo", pr_number="1036",
+                target_branch="bot-remediation-test", head_sha="original-head", wave_id="validation-hold",
+                continuation_path=continuation, result=self._base_result(), log=lambda _message: None,
+            )
+
+        assert result["status"] == "validation_budget_hold", result
+        assert result["validation_budget_hold"] is True
+        assert result["remediation_rounds_attempted"] == 1
+        assert result["steps_completed"] == self._base_result()["steps_completed"]
+        leaf = result["bot_remediation_gate"]["pytest_gate"]
+        assert leaf["exit_code"] == 125 and leaf["passed"] is False
+        assert leaf["validation_budget_hold"] is True and leaf["rcx_process_released"] is False
+        assert diagnostic in result["stderr"]
+        assert json.loads(Path(leaf["receipt_path"]).read_text()) == leaf
+        assert recovery_gate_mod.classify_failure(result) == recovery_gate_mod.FailureClass.TERMINAL_POLICY
+        assert not commit_mod._should_attempt_standalone_recovery(result)  # ANTICHEAT_OK: HOLD cannot admit a recovery actor
+        observation.assert_called_once()
+        private_gate.assert_not_called()
+        mint.assert_not_called()
+        assert actor_calls == [repo]
+        assert not marker.exists()
+        assert continuation.read_bytes() == before_continuation
+        assert (repo / _PHASE_B_RECEIPT_PATH).read_bytes() == handoff_receipt
+        assert json.loads(canonical.read_text())["decision"] == "COMMIT_BLOCKED"
+        assert not any(command[:2] in (["git", "commit"], ["git", "push"]) for command in commands)
+
     def _fake_bridge_adapters(self, write_changes):
         from types import SimpleNamespace
 
@@ -9744,6 +9957,7 @@ class TestBotRemediationValidation:
         auto_defer.assert_not_called()
 
 
+@pytest.mark.usefixtures("coherent_native_validation")
 class TestCommitValidationChildBusIsolation:
     """Commit-owned validation children must be hermetic against the live lane.
 
@@ -10073,7 +10287,8 @@ class TestCommitValidationChildBusIsolation:
         assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
         assert os.environ.get(self._PAGER_ENV) == "codex"
 
-    def test_run_pytest_on_files_builds_hermetic_validation_env(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("parent_owners", [None, "parent-a", "parent-a:parent-b"])
+    def test_run_pytest_on_files_builds_hermetic_validation_env(self, tmp_path, monkeypatch, parent_owners):
         # Production call sites #3/#4: the Step 8b pre-commit targeted pytest gate
         # and the Step 15 bot-remediation targeted pytest gate both route through
         # _run_pytest_on_files, which built its child env from a raw ``**os.environ``
@@ -10087,17 +10302,24 @@ class TestCommitValidationChildBusIsolation:
         monkeypatch.setenv("UNRELATED_VALIDATION_VAR", "keep-me")
 
         captured: dict[str, object] = {}
-        real_run = subprocess.run
+        real_popen = subprocess.Popen
+        if parent_owners is None:
+            monkeypatch.delenv("RCX_EXECUTOR_PROCESS_OWNERS", raising=False)
+        else:
+            monkeypatch.setenv("RCX_EXECUTOR_PROCESS_OWNERS", parent_owners)
+        parent_before = dict(os.environ)
+        child_env_path = tmp_path / "actual-child-environment.json"
+        test_path = tmp_path / "mu/tests/tools/test_agent_bus_namespacing.py"
+        test_path.parent.mkdir(parents=True)
+        test_path.write_text("import json,os\nfrom pathlib import Path\ndef test_child():\n"
+                             f"    Path({str(child_env_path)!r}).write_text(json.dumps({{'RCX_EXECUTOR_PROCESS_OWNERS': os.environ['RCX_EXECUTOR_PROCESS_OWNERS']}}))\n")
 
         def intercept(args, **kwargs):
             if any("pytest" in str(a) for a in args):
                 captured["env"] = kwargs.get("env")
-                # Do not actually spawn pytest; a clean pass is enough to reach
-                # the env-construction assertions.
-                return subprocess.CompletedProcess(list(args), 0, stdout="1 passed", stderr="")
-            return real_run(args, **kwargs)
+            return real_popen(args, **kwargs)
 
-        with patch.object(commit_mod.subprocess, "run", side_effect=intercept):
+        with patch.object(commit_mod.subprocess, "Popen", side_effect=intercept):
             res = commit_mod._run_pytest_on_files(  # ANTICHEAT_OK: validation-child override isolation regression
                 tmp_path, ["mu/tests/tools/test_agent_bus_namespacing.py"]
             )
@@ -10106,6 +10328,12 @@ class TestCommitValidationChildBusIsolation:
         assert "env" in captured, "_run_pytest_on_files never invoked pytest"
         env = captured["env"]
         assert env is not None
+        actual_env = json.loads(child_env_path.read_text())
+        assert actual_env["RCX_EXECUTOR_PROCESS_OWNERS"] == env["RCX_EXECUTOR_PROCESS_OWNERS"]
+        owners = env["RCX_EXECUTOR_PROCESS_OWNERS"].split(":")
+        assert owners[:-1] == ([] if parent_owners is None else parent_owners.split(":"))
+        assert re.fullmatch(r"[0-9a-f]{32}", owners[-1])
+        assert owners[-1] not in owners[:-1]
         # The reproduced leak is closed: no live lane bus and no live pager/role
         # override reaches the child.
         assert "RCX_AGENT_BUS_DIR" not in env
@@ -10122,13 +10350,17 @@ class TestCommitValidationChildBusIsolation:
         assert env.get("PATH") == os.environ.get("PATH")
         assert not any(k.startswith("RCX_SKIP_") for k in env)
         # It IS exactly the commit-owned validation construction carrying the pins.
-        assert env == commit_mod._commit_validation_env(  # ANTICHEAT_OK: validation-child override isolation regression
-            {"PYTHONHASHSEED": "0", "RCX_CI": "1", "HYPOTHESIS_PROFILE": "ci_fast"}
+        expected = commit_mod._commit_validation_env(  # ANTICHEAT_OK: validation-child override isolation regression
+            {"PYTHONHASHSEED": "0", "RCX_CI": "1", "HYPOTHESIS_PROFILE": "ci_fast", "PYTHONDONTWRITEBYTECODE": "1"}
         )
+        assert {k: v for k, v in env.items() if k != "RCX_EXECUTOR_PROCESS_OWNERS"} == {
+            k: v for k, v in expected.items() if k != "RCX_EXECUTOR_PROCESS_OWNERS"
+        }
         # Building the child env never mutates the parent os.environ.
         assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE
         assert os.environ.get(self._PAGER_ENV) == "codex"
         assert os.environ.get("RCX_SKIP_RECEIPT_CHECK") == "1"
+        assert dict(os.environ) == parent_before
 
     def test_private_attr_gate_builds_hermetic_validation_env(self, tmp_path, monkeypatch):
         # Production call sites #5/#6: the ordinary Step 8c and bot-remediation
@@ -10183,7 +10415,7 @@ class TestCommitValidationChildBusIsolation:
         assert dict(os.environ) == parent_before
 
     def test_pager_receipt_test_passes_through_validation_child_under_live_pager_override(
-        self, monkeypatch
+        self, tmp_path, monkeypatch
     ):
         # THE acceptance regression: run the exact pager receipt test through the
         # real commit-owned validation path (_run_pytest_on_files) while the parent
@@ -10256,10 +10488,14 @@ class TestCommitValidationChildBusIsolation:
 
         # The fix: the commit-owned validation child strips the override and the
         # exact pager receipt test resolves its temporary .agent_bus / config route.
+        monkeypatch.setenv("RCX_VALIDATION_LOG_DIR", str(tmp_path / "validation"))
         res = commit_mod._run_pytest_on_files(REPO_ROOT, [self._PAGER_TEST])  # ANTICHEAT_OK: real e2e validation-child isolation
         combined = (res.get("stdout") or "") + (res.get("stderr") or "")
         assert res["passed"] is True, combined[-2000:]
         assert res["exit_code"] == 0, combined[-2000:]
+        for key in ("receipt_path", "stdout_path", "stderr_path"):
+            assert Path(res[key]).parent == tmp_path / "validation"
+            assert Path(res[key]).is_file()
         assert self._MALICIOUS_LANE not in combined
         # The hermetic child never mutates the parent overrides.
         assert os.environ.get("RCX_AGENT_BUS_DIR") == self._MALICIOUS_LANE

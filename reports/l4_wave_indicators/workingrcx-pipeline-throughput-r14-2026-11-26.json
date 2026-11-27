@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-pipeline-throughput-r14-2026-11-26",
+  "repeat_run_speedup_ratio": 0.987163,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.299923,
+  "repeat_run_raw_seconds": [
+    0.296073,
+    0.299923
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.296073
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.595996
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-11-27T11:26:14Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "baced34fe827da129a02ae5264485be688924d8c"
+}

@@ -3860,6 +3860,73 @@ def _continue_successful_executor_chain(
     }
 
 
+def executor_validation_schedule(args: list[str], cwd: Path):
+    """Bind launcher transport to this command's real routing/handoff identity."""
+    try:
+        import executor_common as common
+    except ImportError:
+        from mu.tools.executors import executor_common as common
+    raw = os.environ.get(common.VALIDATION_SCHEDULE_ENV)
+    record = None
+    try:
+        if "--handoff" in args:
+            record = json.loads((cwd / args[args.index("--handoff") + 1]).read_text())
+            if "validation_schedule" in record:
+                carried = record["validation_schedule"]
+                if type(carried) is not str or not carried or raw is not None and raw != carried:
+                    raise common.ValidationBudgetError("HOLD: handoff validation schedule transport differs")
+                raw = carried
+        elif "--routing-record" in args:
+            record = json.loads(args[args.index("--routing-record") + 1])
+    except (OSError, ValueError, IndexError, TypeError):
+        if raw is not None:
+            raise common.ValidationBudgetError("HOLD: cannot bind validation schedule to native command identity")
+    if raw is None:
+        if isinstance(record, dict) and isinstance(record.get("launch_wave_override_authority"), dict) and record["launch_wave_override_authority"].get("validation_schedule"):
+            raise common.ValidationBudgetError("HOLD: routing validation request lost its admitted transport")
+        return None, None
+    bus_dir = args[args.index("--bus-dir") + 1] if "--bus-dir" in args else os.environ.get("RCX_AGENT_BUS_DIR")
+    schedule = common.read_validation_schedule_transport(cwd, raw, bus_dir=bus_dir)
+    if not isinstance(record, dict) or (record.get("wave_id") or record.get("wave_name")) != schedule["wave_id"]:
+        raise common.ValidationBudgetError("HOLD: validation schedule wave/command mismatch")
+    if "--routing-record" in args:
+        authority = record.get("launch_wave_override_authority")
+        if not isinstance(authority, dict) or authority.get("validation_schedule") != schedule["request"]:
+            raise common.ValidationBudgetError("HOLD: routing authority lacks the exact admitted validation request")
+    return raw, schedule
+
+
+def admit_executor_validation_budget(args: list[str], cwd: Path, timeout: int | float):
+    """Admit the actual native child command, retaining its clock across retries."""
+    try:
+        import executor_common as common
+    except ImportError:
+        from mu.tools.executors import executor_common as common
+    key = Path(args[1]).stem if len(args) > 1 else ""
+    if key not in {"phase_b_executor", "commit_executor"}:
+        return None
+    _, schedule = executor_validation_schedule(args, cwd)
+    # A legacy/native continuation has only its existing scalar timeout
+    # authority. It must not acquire a new schedule or lose its process guards
+    # merely because the executable has the same name. New envelopes are
+    # admitted only from the launcher's explicit immutable request.
+    if schedule is None:
+        return None
+    config_path = cwd / "mu/tools/executors/executor_config.json"
+    raw = json.loads(config_path.read_text()) if config_path.is_file() else {}
+    baseline = common.merge_executor_config_overrides(raw)["timeouts"][key]
+    validation_seconds = schedule["request"]["validation_seconds"]
+    allocations = common.validation_schedule_requirements(cwd, validation_seconds)[key]
+    ceiling = sum(seconds for _, seconds in allocations)
+    seconds = schedule["request"][key]
+    if timeout != baseline:
+        raise common.ValidationBudgetError("HOLD: recovery override cannot replace an admitted stage budget")
+    return common.retain_native_stage_budget(
+        cwd, schedule, command=args, key=key, baseline=baseline,
+        seconds=seconds, ceiling=ceiling, allocations=allocations,
+    )
+
+
 def _run_executor_in_group(
     args: list[str],
     cwd: Path,
@@ -3873,9 +3940,29 @@ def _run_executor_in_group(
     supplies no late-checkpoint replay authority: descendants can detach
     before the executor exits, beyond any subsequent PPID/group observation.
     """
+    try:
+        import executor_common as budget_common
+    except ImportError:
+        from mu.tools.executors import executor_common as budget_common
+    try:
+        budget = admit_executor_validation_budget(args, cwd, timeout)
+        if budget is not None:
+            raw_schedule, schedule = executor_validation_schedule(args, cwd)
+            timeout = budget.remaining()
+    except (ExecutorCommonError, budget_common.ValidationBudgetError, OSError, ValueError, IndexError) as exc:
+        held = subprocess.CompletedProcess(args, 125, json.dumps({
+            "status": "validation_budget_hold", "step": "validation_budget_admission",
+            "validation_budget_hold": True, "errors": [str(exc)],
+        }), "")
+        held.rcx_process_released = False
+        return held
     owner = uuid.uuid4().hex
     inherited = os.environ.get(EXECUTOR_PROCESS_OWNER_ENV, "")
     child_env = {**os.environ, EXECUTOR_PROCESS_OWNER_ENV: ":".join(filter(None, (inherited, owner)))}
+    if budget is not None:
+        child_env["RCX_NATIVE_STAGE_BUDGET"] = budget.encode()
+        child_env["RCX_VALIDATION_SCHEDULE"] = raw_schedule
+        child_env["RCX_AGENT_BUS_DIR"] = schedule["bus_dir"]
     proc = subprocess.Popen(
         args,
         cwd=cwd,

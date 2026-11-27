@@ -12,6 +12,7 @@ import os
 import signal
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock, PropertyMock
@@ -30,6 +31,115 @@ from mu.tests.tools.test_worktree_lifecycle import native_base, native_lane
 from mu.tests.tools.test_commit_executor_local_review import (
     carrier, carrier_repository, local_terminal_attempt,
 )
+
+
+@pytest.mark.parametrize("bus_dir", [None, ".agent_bus-validation-control"])
+def test_native_validation_budget_real_fresh_child_and_no_reset(tmp_path, monkeypatch, bus_dir):
+    import executor_common as common
+    import time
+    monkeypatch.setenv("RCX_META_VALIDATION_TIMEOUT_S", "1")
+    config = tmp_path / "mu/tools/executors/executor_config.json"
+    config.parent.mkdir(parents=True)
+    keys = ("phase_b_executor", "commit_executor", "pre_commit_supervisor", "pre_push_fast",
+            "commit_ci_watch", "commit_ci_poll", "commit_ci_verify")
+    config.write_text(json.dumps({"timeouts": {key: 1 for key in keys}}))
+    request = {"validation_seconds": 1, "phase_b_executor": 303, "commit_executor": 7206}
+    transport = common.retain_validation_schedule(tmp_path, request, wave_id="fixture", evidence_command="true", bus_dir=bus_dir)
+    monkeypatch.setenv(common.VALIDATION_SCHEDULE_ENV, transport)
+    script = tmp_path / "phase_b_executor.py"
+    script.write_text(
+        "import os,sys,json;from pathlib import Path\n"
+        f"sys.path.insert(0,{str(REPO_ROOT / 'mu/tools/executors')!r})\n"
+        "from executor_common import decode_stage_budget,NATIVE_STAGE_BUDGET_ENV,validate_native_stage_context\n"
+        "b=decode_stage_budget(os.environ[NATIVE_STAGE_BUDGET_ENV],Path.cwd(),key='phase_b_executor',command=[sys.executable,*sys.argv])\n"
+        "assert validate_native_stage_context(Path.cwd(),key='phase_b_executor',wave_id='fixture') == b\n"
+        "print(json.dumps({'remaining':b.remaining(),'baseline':b.baseline,'seconds':b.seconds,'started_ns':b.started_ns}))\n"
+    )
+    route = {"wave_name": "fixture", "launch_wave_override_authority": {"validation_schedule": request}}
+    command = [sys.executable, str(script), "--routing-record", json.dumps(route)]
+    if bus_dir is not None:
+        command += ["--bus-dir", bus_dir]
+    result = dispatch_mod._run_executor_in_group(command, cwd=tmp_path, timeout=1)  # ANTICHEAT_OK: real short-lived fixture through native subprocess boundary
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["baseline"] == 1 and observed["seconds"] == 303
+    assert 0 < observed["remaining"] < 303
+    budget = dispatch_mod.admit_executor_validation_budget(command, tmp_path, 1)
+    assert budget.started_ns == observed["started_ns"]
+    # A new process must read the retained origin, not grant a new deadline.
+    probe = (
+        f"import sys;sys.path.insert(0,{str(REPO_ROOT / 'mu/tools/executors')!r});"
+        "from pathlib import Path;from executor_dispatch import admit_executor_validation_budget;"
+        f"print(admit_executor_validation_budget({command!r},Path({str(tmp_path)!r}),1).started_ns)"
+    )
+    fresh = subprocess.run([sys.executable, "-c", probe], env=os.environ.copy(), capture_output=True, text=True, timeout=10)
+    assert fresh.returncode == 0, fresh.stderr
+    assert int(fresh.stdout) == observed["started_ns"]
+    expired_probe = probe.replace("from pathlib import Path;", "import time; original=time.monotonic_ns; time.monotonic_ns=lambda: original()+304_000_000_000; from pathlib import Path;")
+    expired = subprocess.run([sys.executable, "-c", expired_probe], env=os.environ.copy(), capture_output=True, text=True, timeout=10)
+    assert expired.returncode != 0 and "exhausted" in expired.stderr
+    retained = common.agent_bus_path(tmp_path, bus_dir, "executors", "validation",
+        f"{json.loads(transport)['invocation']}.phase_b_executor.budget.json")
+    original = retained.read_bytes()
+    retained.unlink()
+    missing = subprocess.run([sys.executable, "-c", probe], env=os.environ.copy(), capture_output=True, text=True, timeout=10)
+    assert missing.returncode != 0 and "retained budget disappeared" in missing.stderr
+    assert not retained.exists(), "a consumer must not mint a replacement clock"
+    expired_missing = subprocess.run([sys.executable, "-c", expired_probe], env=os.environ.copy(), capture_output=True, text=True, timeout=10)
+    assert expired_missing.returncode != 0 and "retained budget disappeared" in expired_missing.stderr
+    retained.write_bytes(original)
+    # Fresh consumers must reject inconsistent copies and a missing witness
+    # without repairing either retained record or restarting its clock.
+    inconsistent = json.loads(original)
+    inconsistent["started_ns"] += 1
+    altered = json.dumps(inconsistent).encode()
+    retained.write_bytes(altered)
+    mismatch = subprocess.run([sys.executable, "-c", probe], env=os.environ.copy(), capture_output=True, text=True, timeout=10)
+    assert mismatch.returncode != 0 and "retained budget disappeared or differs" in mismatch.stderr
+    assert retained.read_bytes() == altered
+    retained.write_bytes(original)
+    witness = retained.with_suffix(".admitted.json")
+    original_witness = witness.read_bytes()
+    witness.unlink()
+    missing_witness = subprocess.run([sys.executable, "-c", probe], env=os.environ.copy(), capture_output=True, text=True, timeout=10)
+    assert missing_witness.returncode != 0 and "retained budget disappeared or differs" in missing_witness.stderr
+    assert not witness.exists() and retained.read_bytes() == original
+    witness.write_bytes(original_witness)
+    wrong = {**route, "wave_name": "other-wave"}
+    with pytest.raises(common.ValidationBudgetError, match="wave/command mismatch"):
+        wrong_command = list(command)
+        wrong_command[wrong_command.index("--routing-record") + 1] = json.dumps(wrong)
+        dispatch_mod.admit_executor_validation_budget(wrong_command, tmp_path, 1)
+    real_clock = time.monotonic_ns
+    monkeypatch.setattr(time, "monotonic_ns", lambda: real_clock() + 304_000_000_000)
+    with pytest.raises(common.ValidationBudgetError, match="exhausted"):
+        dispatch_mod.admit_executor_validation_budget(command, tmp_path, 1)
+
+
+def test_small_evidence_request_refuses_before_launch(tmp_path):
+    import executor_common as common
+    rows = common.validation_schedule_requirements(tmp_path, 1)
+    request = {"validation_seconds": 1, **{key: sum(v for _, v in items) for key, items in rows.items()}}
+    with pytest.raises(common.ValidationBudgetError, match="supervisor leaf"):
+        common.retain_validation_schedule(tmp_path, request, wave_id="small", evidence_command="touch expensive")
+    assert not (tmp_path / "expensive").exists()
+    assert not (tmp_path / ".agent_bus/executors/validation/small.schedule.json").exists()
+
+
+def test_native_validation_budget_conflict_is_typed_hold_before_child(tmp_path, monkeypatch):
+    import executor_common as common
+    allocations = common.validation_schedule_requirements(tmp_path, 7200)
+    request = {"validation_seconds": 7200, **{key: sum(value for _, value in rows) for key, rows in allocations.items()}}
+    transport = json.loads(common.build_validation_schedule_transport(tmp_path, request, wave_id="fixture", evidence_command="true"))
+    transport["request"]["commit_executor"] = 3600
+    monkeypatch.setenv("RCX_VALIDATION_SCHEDULE", json.dumps(transport))
+    marker = tmp_path / "executed"
+    script = tmp_path / "commit_executor.py"
+    script.write_text(f"from pathlib import Path;Path({str(marker)!r}).touch()")
+    result = dispatch_mod._run_executor_in_group([sys.executable, str(script)], cwd=tmp_path, timeout=3600)  # ANTICHEAT_OK: real admission boundary, child forbidden by conflicting envelope
+    assert result.returncode == 125 and not marker.exists()
+    assert json.loads(result.stdout)["validation_budget_hold"] is True
+    assert result.rcx_process_released is False
 
 # Load executor_common first (dependency)
 common_mod = load_module(
@@ -12772,24 +12882,66 @@ class TestModularSurfaceEntrypoints:
 class TestDispatcherExecutorGroupCleanup:
     """Dispatcher timeout cleanup must reap the process tree before retry."""
 
-    def test_timeout_calls_terminate_process_tree(self):
+    @pytest.mark.parametrize("observer_activity", [False, True])
+    @pytest.mark.parametrize("coherent_observer", [False, True])
+    def test_timeout_calls_terminate_process_tree(self, observer_activity, coherent_observer):
         mock_proc = MagicMock()
-        mock_proc.communicate.side_effect = subprocess.TimeoutExpired(
-            cmd=["test"], timeout=1
-        )
+        observer_proc = MagicMock()
+        executor_command = ["test"]
+        observer_command = ["git", "status", "--porcelain"]
+        census_command = ["ps", "axeww", "-o", "pid=,ppid=,lstart=,stat=,command="]
+
+        def communicate(timeout):
+            if observer_activity:
+                # subprocess is shared across imported modules. An observer
+                # can launch after the executor without its session options.
+                subprocess.Popen(observer_command, stdout=subprocess.PIPE)
+            raise subprocess.TimeoutExpired(cmd=executor_command, timeout=timeout)
+
+        def popen(command, **kwargs):
+            if command == census_command:
+                # A retained coherent-observation wrapper holds subprocess.run
+                # directly, bypassing the module attribute patched below.
+                # Fence query failure at Popen too, without faking absence.
+                raise subprocess.CalledProcessError(1, command)
+            assert command in (executor_command, observer_command)
+            return mock_proc if command == executor_command else observer_proc
+
+        mock_proc.communicate.side_effect = communicate
         mock_proc.pid = 4321
         mock_proc.wait.return_value = None
 
-        with patch.object(dispatch_mod.subprocess, "Popen", return_value=mock_proc) as mock_popen, \
+        with complete_process_observation(common_mod) if coherent_observer else nullcontext():
+            with patch.object(dispatch_mod.subprocess, "Popen", side_effect=popen) as mock_popen, \
              patch.object(dispatch_mod.os, "killpg") as mock_killpg, \
              patch.object(dispatch_mod, "process_descendants", return_value=set()) as mock_descendants, \
              patch.object(dispatch_mod, "terminate_process_tree") as mock_terminate, \
              patch.object(dispatch_mod.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["ps"])):
-            with pytest.raises(subprocess.TimeoutExpired) as expired:
-                dispatch_mod._run_executor_in_group(["test"], cwd=Path("."), timeout=1)  # ANTICHEAT_OK: testing direct executor-group timeout cleanup helper
+                with pytest.raises(subprocess.TimeoutExpired) as expired:
+                    dispatch_mod._run_executor_in_group(executor_command, cwd=Path("."), timeout=1)  # ANTICHEAT_OK: testing direct executor-group timeout cleanup helper
 
-        _, kwargs = mock_popen.call_args
+        print("dispatcher timeout Popen calls:", [
+            {"command": call.args[0], "keyword_names": sorted(call.kwargs)}
+            for call in mock_popen.call_args_list
+        ])
+        executor_calls = [call for call in mock_popen.call_args_list
+                          if call.args == (executor_command,)]
+        assert len(executor_calls) == 1, mock_popen.call_args_list
+        kwargs = executor_calls[0].kwargs
         assert kwargs["start_new_session"] is True
+        assert kwargs["cwd"] == Path(".")
+        assert kwargs["stdout"] is subprocess.PIPE
+        assert kwargs["stderr"] is subprocess.PIPE
+        assert kwargs["text"] is True
+        observer_calls = [call for call in mock_popen.call_args_list
+                          if call.args == (observer_command,)]
+        assert len(observer_calls) == int(observer_activity)
+        if coherent_observer:
+            assert any(call.args == (census_command,) for call in mock_popen.call_args_list)
+        if observer_activity:
+            assert "start_new_session" not in observer_calls[0].kwargs
+            observer_proc.kill.assert_not_called()
+            observer_proc.wait.assert_not_called()
         # The historical node now fences query failure: the directly owned
         # Popen child is reaped, and no best-effort PID set authorizes signaling
         # or replay. The legacy cleanup helper has separate unchanged coverage.
@@ -12799,6 +12951,7 @@ class TestDispatcherExecutorGroupCleanup:
         assert expired.value.rcx_process_released is False
         assert expired.value.rcx_process_release_evidence is None
         mock_proc.kill.assert_called_once()
+        mock_proc.wait.assert_called_once_with(timeout=5)
 
     def test_interrupt_calls_terminate_process_tree(self):
         """Direct dispatcher interruption must reap the child executor tree."""

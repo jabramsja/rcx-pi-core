@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -38,6 +39,23 @@ if str(EXECUTORS_DIR) not in sys.path:
 CHECKS_DIR = SCRIPT_DIR.parent / "checks"
 if str(CHECKS_DIR) not in sys.path:
     sys.path.insert(0, str(CHECKS_DIR))
+
+# A baseline meta_bridge_client callable may itself already be cached in Phase
+# B. Bootstrap the current, source-bound handoff helper from this newly imported
+# supervisor, rather than assuming an edited client reloads an old callable.
+# Its retain-proven transaction keeps a registered dependency pair only when each
+# member executed exactly the code its bound bytes compile to, so a stale but
+# symbol-compatible owner is replaced. A proven pair is kept, so modules imported
+# earlier keep their class identity. The current client executes the pair itself
+# before every handoff import.
+_client_source = SCRIPT_DIR / "meta_bridge_client.py"
+_client_bytes = _client_source.read_bytes()
+_client_name = "rcx_supervisor_client_" + hashlib.sha256(_client_bytes).hexdigest()
+_client_spec = importlib.util.spec_from_file_location(_client_name, _client_source)
+_handoff_client = importlib.util.module_from_spec(_client_spec)
+sys.modules[_client_name] = _handoff_client
+exec(compile(_client_bytes, str(_client_source), "exec", dont_inherit=True), _handoff_client.__dict__)
+_handoff_client.prepare_supervisor_execution_api(SCRIPT_DIR, retain_proven=True)
 
 from bridge_adapters import BridgeAdapterError, get_adapter, load_bridge_config, run_adapter
 from enforce_l4_execution_contract import parse_tracker_notes
@@ -240,6 +258,10 @@ REQUIRED_PACKAGE_FIELDS = {
 
 class MetaBridgeError(RuntimeError):
     """Raised when meta-bridge execution cannot continue."""
+
+
+class ValidationExecutionHold(MetaBridgeError):
+    """Budget/source/ownership uncertainty must stop subsequent actor admission."""
 
 
 def _emit_pre_commit_supervisor_lifecycle_event(
@@ -1339,33 +1361,27 @@ def check_dirty_state(repo_root: Path, claimed_files: list[str], *, fenced_files
 
 
 def run_validation_command(repo_root: Path, command: list[str]) -> tuple[int, str]:
-    """Run a validation command and return (exit_code, output)."""
+    """Execute evidence with the same finite, source-bound native validation policy."""
+    import executor_common as common
+    from validation_execution import run_validation
+
     try:
-        env = {**os.environ, "PYTHONHASHSEED": "0"}
-        proc = subprocess.run(
-            command,
-            cwd=repo_root,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=VALIDATION_COMMAND_TIMEOUT_S,
-        )
-        output = (proc.stdout or "") + ("\n[stderr]\n" + proc.stderr if proc.stderr else "")
-        return proc.returncode, output
-    except subprocess.TimeoutExpired as exc:
-        stdout = _decode_process_text(exc.stdout)
-        stderr = _decode_process_text(exc.stderr)
-        output = f"[error] command timed out after {VALIDATION_COMMAND_TIMEOUT_S}s: {' '.join(command)}"
-        if stdout:
-            output += f"\n[stdout]\n{stdout}"
-        if stderr:
-            output += f"\n[stderr]\n{stderr}"
-        return 124, output
-    except FileNotFoundError:
-        return 127, f"[error] command not found: {command[0]}"
-    except OSError as exc:
-        return 126, f"[error] failed to execute: {exc}"
+        timeout = VALIDATION_COMMAND_TIMEOUT_S
+        schedule = common.read_validation_schedule_transport(repo_root)
+        if schedule is not None and command[:2] == ["bash", "-c"]:
+            if len(command) != 3 or command[2] != schedule["evidence_command"]:
+                raise common.ValidationBudgetError("HOLD: evidence command differs from admitted launch command")
+            timeout = schedule["request"]["validation_seconds"]
+        result = run_validation(repo_root, command, timeout=timeout, profile="evidence",
+                                key="meta_validation", env={**os.environ, "PYTHONHASHSEED": "0"})
+        output = (result["stdout"] or "") + ("\n[stderr]\n" + result["stderr"] if result["stderr"] else "")
+        if result.get("ownership_hold"):
+            raise ValidationExecutionHold("[ownership_hold] " + output)
+        if result.get("interrupted"):
+            raise ValidationExecutionHold("[validation_budget_hold] interrupted: " + output)
+        return result["exit_code"], output
+    except common.ValidationBudgetError as exc:
+        raise ValidationExecutionHold(f"[validation_budget_hold] {exc}") from exc
 
 
 def _repo_relative_path_from_git(raw_path: str) -> str:
@@ -1589,7 +1605,21 @@ def _run_wave_evidence_with_restore_unlocked(repo_root: Path, evidence_command: 
                     repo_root,
                     ["bash", "-c", evidence_command],
                 )
+            except ValidationExecutionHold as exc:
+                exit_code, output = 125, str(exc)
             finally:
+                if exit_code == 125 and output.startswith("[ownership_hold]"):
+                    # An unresolved writer must not race restoration of the
+                    # index/worktree. Retain the actual snapshots for the owner;
+                    # no trusted evidence receipt or successful restore is minted.
+                    import uuid
+                    from executor_common import agent_bus_path
+                    retained = Path(os.environ.get("RCX_VALIDATION_LOG_DIR") or
+                                    agent_bus_path(repo_root, os.environ.get("RCX_AGENT_BUS_DIR"), "executors", "validation"))
+                    retained = retained / ("evidence-ownership-hold-" + uuid.uuid4().hex)
+                    retained.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(snapshot_root, retained)
+                    return 125, output + f"\n[restore HOLD] snapshots preserved at {retained}"
                 try:
                     _restore_git_index(git_index_snapshots)
                 except Exception as exc:
@@ -1902,6 +1932,8 @@ def run_validation_gates(
                 "exit_code": evidence_exit,
                 "output": evidence_detail,
             }
+            if evidence_exit == 125 and evidence_output.startswith(("[ownership_hold]", "[validation_budget_hold]")):
+                raise ValidationExecutionHold(evidence_output)
         else:
             detail = "package evidence_command does not match tracker-declared evidence_command"
             results.append(ValidationResult("wave_evidence", False, detail))
@@ -3814,6 +3846,13 @@ def run_meta_bridge(
             print("[meta-bridge] Running validation gates...")
         validation_results, all_passed = run_validation_gates(
             repo_root, package, verbose=verbose, skip_startup_gates=True
+        )
+    except ValidationExecutionHold as exc:
+        return MetaBridgeResponse(
+            status="error", decision=Decision.ERROR_INTERNAL.value,
+            summary="Native validation HOLD; no subsequent review or retry admitted",
+            error_code="VALIDATION_BUDGET_HOLD", error_detail=str(exc),
+            recovery_hint="Preserve outputs and resolve the exact budget/source/ownership HOLD",
         )
     except KeyboardInterrupt:
         # Handle SIGINT during state capture or validation

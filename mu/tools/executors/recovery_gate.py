@@ -715,6 +715,13 @@ def classify_failure(result: dict[str, Any]) -> FailureClass:
     reason_lower = reason_text.lower()
     step_lower = " ".join(part for part in (step, embedded_step) if part).lower()
     status_failed = status in ("error", "failed") or embedded_status in ("error", "failed")
+    if (result.get("validation_budget_hold") is True
+            or embedded_stdout.get("validation_budget_hold") is True
+            or embedded_stderr.get("validation_budget_hold") is True
+            or any(payload.get("error_code") == "VALIDATION_BUDGET_HOLD"
+                   for payload in (result, embedded_stdout, embedded_stderr))
+            or status == "validation_budget_hold" or embedded_status == "validation_budget_hold"):
+        return FailureClass.TERMINAL_POLICY
 
     # Narrow exception before terminal policy: a pre-commit supervisor rejection
     # caused by package-local wave identity or staged-scope loss is recoverable
@@ -5265,6 +5272,11 @@ def fix_process_timeout(repo_root: Path, **kw: Any) -> dict[str, Any]:
     return and the unlink, creating a new inode at the same path and
     breaking mutual exclusion.
     """
+    # An admitted invocation has an original clock and keyed allocation.
+    # Increasing a scalar timeout here would mint time or change the wrong leaf.
+    if "RCX_NATIVE_STAGE_BUDGET" in os.environ or "RCX_VALIDATION_SCHEDULE" in os.environ:
+        return _fix_result(False, "validation_budget_hold",
+                           "HOLD: admitted validation budgets cannot be reset or increased by recovery")
     timeouts = _load_config_timeouts(repo_root)
     bridge_turn_timeouts = _load_config_bridge_turn_timeouts(repo_root)
     # Determine which executor timed out from the result
@@ -8892,90 +8904,141 @@ def _validate_delegate_implementer_payload(
     }, ""
 
 
-def _run_pytest_targeted_validator(
-    repo_root: Path,
-    *,
-    targets: list[str],
-    timeout: int,
+def hybrid_validation_seconds(validation_spec: list[dict[str, Any]], timeout: int) -> tuple[int, ...]:
+    """Retain existing per-target allowances, with one finite sequential ceiling."""
+    from validation_execution import common
+
+    common._budget_positive_int(timeout, "hybrid validator timeout")
+    if not isinstance(validation_spec, list) or not validation_spec:
+        raise common.ValidationBudgetError("HOLD: hybrid validation requires selected tests")
+    seconds = []
+    for item in validation_spec:
+        if (not isinstance(item, dict) or set(item) != {"validator", "targets"} or item["validator"] != "pytest_targeted"
+                or not isinstance(item["targets"], list) or not item["targets"]):
+            raise common.ValidationBudgetError("HOLD: malformed hybrid validation specification")
+        targets = item["targets"]
+        # Preserve the earlier exact full-fleet allocation; no other module
+        # receives a scalar increase from this scheduling change.
+        seconds.append(max(timeout, 900 + 240 * (len(targets) - 1))
+                       if "mu/tests/tools/test_workingrcx_fleet_apply.py" in targets else timeout)
+    if sum(seconds) > common.VALIDATION_CEILING_SECONDS:
+        raise common.ValidationBudgetError("HOLD: sequential hybrid validation exceeds the 7200s ceiling")
+    return tuple(seconds)
+
+
+def run_hybrid_validation(
+    repo_root: Path, *, validation_spec: list[dict[str, Any]], timeout: int, workers: int = 4,
 ) -> dict[str, Any]:
-    # The canonical fleet module exceeded both the 300s recovery and 900s
-    # commit serial gates on 2026-09-27. Its declared four-worker suite passed
-    # in 281.30s. Match commit's bounded workers and full-module budget here;
-    # The full local-review module also uses four workers, including its mixed
-    # history-recovery invocation, while retaining the finite caller deadline.
-    # Exact module membership excludes foreign paths and node selectors.
-    full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in targets
-    parallel = full_fleet or "mu/tests/tools/test_commit_executor_local_review.py" in targets
-    effective_timeout = max(timeout, 900 + 240 * (len(targets) - 1)) if full_fleet else timeout
-    command = [
-        sys.executable,
-        "-m",
-        "pytest",
-        "-x",
-        "--tb=short",
-        "-p",
-        "no:cacheprovider",
-        *(["-n", "4", "--dist", "worksteal"] if parallel else []),
-    ]
-    with tempfile.TemporaryDirectory(prefix="rcx-recovery-tmp-") as tmp_root, tempfile.TemporaryDirectory(prefix="rcx-recovery-cache-") as cache_root:
-        # Pytest clears basetemp on first tmp_path use. Give it a child so
-        # configuration-time provider guards and other TMPDIR files survive.
-        # An inherited PYTEST_ADDOPTS --basetemp must not create unadmitted
-        # repository scratch. Existing retained evidence is never cleared.
-        command.extend(["--basetemp", str(Path(tmp_root) / "pytest"), *targets])
-        env = {
-            **os.environ,
-            "PYTHONHASHSEED": "0",
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "TMPDIR": tmp_root,
-            "TMP": tmp_root,
-            "TEMP": tmp_root,
-            "XDG_CACHE_HOME": cache_root,
-        }
-        proc = subprocess.run(
-            command,
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=effective_timeout,
-            env=env,
-            check=False,
+    """Execute the existing ordered validators through shared bounded policy.
+
+    Outer receipts and child-created validation evidence are retained outside
+    the candidate. The unchanged final scope audit still rejects every other
+    undeclared write. One source/command-bound enclosing clock covers all leaves;
+    subsequent leaves cannot borrow their sequential reserve or restart it.
+    """
+    import xml.etree.ElementTree as ET
+    from validation_execution import common, pytest_command, run_validation
+
+    repo_root = Path(repo_root).resolve()
+    requested = os.environ.get("RCX_VALIDATION_LOG_DIR")
+    log_root = Path(requested).resolve() if requested else None
+    if log_root is None or log_root.is_relative_to(repo_root):
+        log_root = Path(tempfile.mkdtemp(prefix="rcx-hybrid-validation-", dir="/tmp"))
+    run_root = log_root / ("hybrid-" + uuid.uuid4().hex)
+    run_root.mkdir(parents=True, exist_ok=False)
+    receipt = run_root / "result.json"
+    started = datetime.now(timezone.utc).isoformat()
+    start_ns = time.monotonic_ns()
+    results: list[dict[str, Any]] = []
+    temporary_roots: list[Path] = []
+    result: dict[str, Any] = {}
+    try:
+        seconds = hybrid_validation_seconds(validation_spec, timeout)
+        # Inspect every selection/worker prerequisite and the complete parent
+        # allocation before admitting the first expensive child.
+        base_env = common.validation_child_environment()
+        base_env.update(PYTHONHASHSEED="0", PYTHONDONTWRITEBYTECODE="1",
+                        RCX_VALIDATION_LOG_DIR=str(run_root / "children"))
+        commands, environments, junit_paths = [], [], []
+        for index, item in enumerate(validation_spec):
+            command = pytest_command(item["targets"], profile="full", workers=workers,
+                                     env=base_env, repo_root=repo_root)
+            # Provider guards encode paths in NODE_OPTIONS. Keep temporary
+            # execution paths free of volume-name spaces; durable evidence can
+            # still reside on the explicitly selected recovery volume.
+            scratch = Path(tempfile.mkdtemp(prefix="rcx-recovery-tmp-", dir="/tmp"))
+            cache = Path(tempfile.mkdtemp(prefix="rcx-recovery-cache-", dir="/tmp"))
+            temporary_roots.extend((scratch, cache))
+            junit = run_root / f"validator-{index}.junit.xml"
+            command += ["--basetemp", str(scratch / "pytest"), "--junitxml", str(junit)]
+            commands.append(command)
+            environments.append({**base_env, "TMPDIR": str(scratch), "TMP": str(scratch),
+                                 "TEMP": str(scratch), "XDG_CACHE_HOME": str(cache)})
+            junit_paths.append(junit)
+        common.validation_parent_remaining(repo_root, seconds=sum(seconds), key="pytest_full")
+        enclosing = common.admit_stage_budget(
+            repo_root, key="pytest_full", command=[arg for cmd in commands for arg in cmd],
+            baseline=sum(seconds), seconds=sum(seconds), ceiling=common.VALIDATION_CEILING_SECONDS,
+            allocations=tuple((f"validator_{i}", value) for i, value in enumerate(seconds)), env=base_env,
         )
-    return {
-        "validator": "pytest_targeted",
-        "command": command,
-        "targets": list(targets),
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
-        "exit_code": proc.returncode,
-        "passed": proc.returncode == 0,
-    }
+        for index, item in enumerate(validation_spec):
+            result = run_validation(repo_root, commands[index], timeout=seconds[index], profile="full",
+                key="pytest_full", env=environments[index], log_dir=run_root,
+                enclosing_budget=enclosing, reserve_seconds=sum(seconds[index + 1:]))
+            result.update(validator="pytest_targeted", targets=list(item["targets"]),
+                          junit_path=str(junit_paths[index]))
+            if result.get("ownership_hold") or result.get("interrupted"):
+                result["validation_budget_hold"] = True
+            if junit_paths[index].is_file():
+                xml = junit_paths[index].read_bytes()
+                result["junit_sha256"] = hashlib.sha256(xml).hexdigest()
+                result["identities"] = sorted(
+                    (case.get("classname", ""), case.get("name", ""),
+                     sorted(node.tag for node in case if node.tag in {"failure", "error", "skipped"}))
+                    for case in ET.fromstring(xml).iter("testcase"))
+                result["executed_count"] = len(result["identities"])
+            elif result["passed"]:
+                result.update(passed=False, exit_code=125, status="validation_budget_hold",
+                              validation_budget_hold=True, diagnostic="HOLD: successful pytest omitted its identities")
+            Path(result["receipt_path"]).write_text(json.dumps(result, indent=2) + "\n")
+            results.append(result)
+            if not result["passed"]:
+                break
+    except (common.ValidationBudgetError, OSError, ValueError, TypeError, ET.ParseError) as exc:
+        result = {**result, "validator": "pytest_targeted", "passed": False, "exit_code": 125,
+                  "status": "validation_budget_hold", "validation_budget_hold": True,
+                  "stdout": result.get("stdout", ""),
+                  "stderr": result.get("stderr", "") + "\n" + str(exc),
+                  "timed_out": result.get("timed_out", False), "rcx_process_released": False,
+                  "targets": [target for item in (validation_spec if isinstance(validation_spec, list) else [])
+                              if isinstance(item, dict) and isinstance(item.get("targets"), list)
+                              for target in item["targets"]]}
+    finally:
+        # Uncertain writers retain scratch and provider guards as well as logs.
+        # Cleanup here never constitutes process-tree release evidence.
+        if not result.get("ownership_hold") and not result.get("interrupted"):
+            for path in temporary_roots:
+                shutil.rmtree(path)
+    result = {**result, "validation_spec": validation_spec, "results": results,
+              "hybrid_receipt_path": str(receipt), "started_at": started,
+              "temporary_roots": [str(path) for path in temporary_roots],
+              "finished_at": datetime.now(timezone.utc).isoformat(),
+              "hybrid_elapsed_seconds": (time.monotonic_ns() - start_ns) / 1_000_000_000}
+    receipt.write_text(json.dumps(result, indent=2) + "\n")
+    return result
+
+
+def _run_pytest_targeted_validator(
+    repo_root: Path, *, targets: list[str], timeout: int,
+) -> dict[str, Any]:
+    return run_hybrid_validation(repo_root, validation_spec=[
+        {"validator": "pytest_targeted", "targets": targets}], timeout=timeout)
 
 
 def _run_hybrid_validation_spec(
-    repo_root: Path,
-    *,
-    validation_spec: list[dict[str, Any]],
-    timeout: int,
+    repo_root: Path, *, validation_spec: list[dict[str, Any]], timeout: int,
 ) -> dict[str, Any]:
-    last_result: dict[str, Any] | None = None
-    for item in validation_spec:
-        last_result = _run_pytest_targeted_validator(
-            repo_root,
-            targets=item["targets"],
-            timeout=timeout,
-        )
-        if not last_result["passed"]:
-            return last_result
-    return last_result or {
-        "validator": "",
-        "command": [],
-        "targets": [],
-        "stdout": "",
-        "stderr": "",
-        "exit_code": 0,
-        "passed": True,
-    }
+    return run_hybrid_validation(repo_root, validation_spec=validation_spec, timeout=timeout)
 
 
 def _build_delegate_implementer_prompt(
@@ -9082,6 +9145,29 @@ def _run_delegate_implementer_action(
     )
     if not baseline_ok:
         return {"ok": False, "detail": baseline["detail"], "result_update": None}
+    from validation_execution import common, pytest_command
+
+    implementer_timeout = int(
+        config.get("timeouts", {}).get("recovery_implementer")
+        or config.get("timeouts", {}).get("phase_b_executor", 1200)
+    )
+    validator_timeout = min(max(60, implementer_timeout), 300)
+    try:
+        seconds = hybrid_validation_seconds(delegate_payload["validation_spec"], validator_timeout)
+        for item in delegate_payload["validation_spec"]:
+            pytest_command(item["targets"], profile="full", workers=4, repo_root=repo_root,
+                           env=common.validation_child_environment())
+        remaining = common.validation_parent_remaining(repo_root, seconds=sum(seconds), key="pytest_full")
+        if remaining is not None:
+            parent = common.decode_stage_budget(os.environ[common.NATIVE_STAGE_BUDGET_ENV], repo_root)
+            position = [name for name, _ in parent.allocations].index("pytest_full")
+            reserve = sum(value for _, value in parent.allocations[position + 1:])
+            if implementer_timeout + sum(seconds) + reserve > remaining:
+                raise common.ValidationBudgetError("HOLD: hybrid implementer/validation cannot fit remaining parent and sequential reserve")
+    except common.ValidationBudgetError as exc:
+        held = common.validation_hold_result({"validation_budget_hold": True, "stderr": str(exc)},
+                                             step="hybrid_validation_admission")
+        return {"ok": False, "detail": str(exc), "result_update": held, **held}
     try:
         module = _load_phase_b_implementer_module(repo_root)
     except Exception as exc:
@@ -9097,10 +9183,6 @@ def _run_delegate_implementer_action(
         explanation=explanation,
         delegate_payload=delegate_payload,
         module=module,
-    )
-    implementer_timeout = int(
-        config.get("timeouts", {}).get("recovery_implementer")
-        or config.get("timeouts", {}).get("phase_b_executor", 1200)
     )
     implementer_result = module.invoke_implementer(
         repo_root,
@@ -9145,7 +9227,6 @@ def _run_delegate_implementer_action(
             "implementer_result": implementer_result,
             "pre_validation_audit": pre_validation_audit,
         }
-    validator_timeout = min(max(60, implementer_timeout), 300)
     validator_targets = [
         target
         for item in delegate_payload["validation_spec"]
@@ -9180,14 +9261,17 @@ def _run_delegate_implementer_action(
         files_in_scope=delegate_payload["files_in_scope"],
         exception_paths=exception_paths,
     )
+    hold = common.validation_hold_result(validator_result, step="hybrid_validation")
     if not final_ok:
         return {
             "ok": False,
             "detail": final_audit["detail"],
-            "result_update": None,
+            "result_update": hold,
+            **(hold or {}),
             "implementer_result": implementer_result,
             "validator_result": validator_result,
             "pre_validation_audit": pre_validation_audit,
+            "final_audit": final_audit,
         }
     if not validator_result["passed"]:
         return {
@@ -9196,7 +9280,9 @@ def _run_delegate_implementer_action(
             "result_update": {
                 "stdout": validator_result["stdout"],
                 "stderr": validator_result["stderr"],
+                **(hold or {}),
             },
+            **(hold or {}),
             "implementer_result": implementer_result,
             "validator_result": validator_result,
             "pre_validation_audit": pre_validation_audit,
@@ -9812,6 +9898,18 @@ def run_recovery_loop(
                     "log": loop_log,
                 }
             result_update = delegate_result.get("result_update")
+            if delegate_result.get("validation_budget_hold") is True:
+                detail = delegate_result["detail"]
+                _log_tier3_attempt(repo_root, wave_id, step, fc, i + 1,
+                    "delegate_implementer", "validation_budget_hold", dur, detail,
+                    invocation_id=invocation_id)
+                _finish_recovery_status(repo_root, recovered=False, exhausted=True,
+                    outcome="validation_budget_hold", action="delegate_implementer", detail=detail,
+                    state="tier3_validation_hold")
+                return {"recovered": False, "exhausted": True, "iterations": i + 1,
+                        "log": loop_log, "status": "validation_budget_hold",
+                        "validation_budget_hold": True, "failure_class": FailureClass.TERMINAL_POLICY.value,
+                        "validation": delegate_result}
             if isinstance(result_update, dict):
                 result = dict(result)
                 if "stderr" in result_update:
@@ -12370,6 +12468,11 @@ def attempt_recovery(
             detail = str(loop_result["log"][-1].get("detail", "")).strip()
         if not detail:
             detail = _load_recovery_status(repo_root).get("detail", "")
+        if loop_result.get("validation_budget_hold") is True:
+            return {**_make_result(False, "validation_budget_hold", 4,
+                                  FailureClass.TERMINAL_POLICY, detail, True),
+                    "status": "validation_budget_hold", "validation_budget_hold": True,
+                    "validation": loop_result}
         # Observe outcome for learning store (Tier 3 exit)
         t3_outcome = "success" if loop_result.get("recovered") else "failed"
         observe_outcome(

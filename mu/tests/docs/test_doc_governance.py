@@ -34,6 +34,14 @@ if _sys.path[0] != _repo_root:
     if _repo_root in _sys.path:
         _sys.path.remove(_repo_root)
     _sys.path.insert(0, _repo_root)
+# If tests/tools was imported first, it can shadow the repo tools package
+# (same guard as test_docs_registry_agent_memory_exempt.py).
+if "tools" in _sys.modules:
+    _tools_mod = _sys.modules["tools"]
+    _mod_file = str(getattr(_tools_mod, "__file__", "") or "")
+    _mod_path = str(next(iter(getattr(_tools_mod, "__path__", [])), ""))
+    if "tests/tools" in _mod_file or "tests/tools" in _mod_path:
+        del _sys.modules["tools"]
 
 import re
 from datetime import datetime, timedelta
@@ -46,6 +54,7 @@ from tools.docs.shared_doc_config import (
     REPO_ROOT,
     classify_md_path,
     get_governed_folders_as_strings,
+    list_git_visible_markdown,
 )
 
 # =============================================================================
@@ -192,8 +201,12 @@ def is_governed(doc_path: Path) -> bool:
 
 
 def get_all_md_files() -> list[Path]:
-    """Get all .md files in repo."""
-    return sorted(REPO_ROOT.rglob("*.md"))
+    """Get all git-visible .md files in repo (tracked, or untracked and not git-ignored).
+
+    Git-ignored files cannot be committed, so they are outside governance; this
+    is the same set docs_sync_report.py checks.
+    """
+    return list_git_visible_markdown(REPO_ROOT)
 
 
 def get_governed_docs() -> list[Path]:
@@ -534,7 +547,9 @@ class TestDocStructure:
         if not docs_folder.exists():
             return
 
-        for doc_path in docs_folder.rglob("*.md"):
+        for doc_path in get_all_md_files():
+            if not doc_path.is_relative_to(docs_folder):
+                continue
             rel_path = doc_path.relative_to(REPO_ROOT)
             rel_str = str(rel_path)
 
@@ -682,3 +697,33 @@ class TestAgentBusLaneExemption:
                 f"{bad}/ is not a valid agent-bus namespace (per AGENT_BUS_NAMESPACE_RE) "
                 "and must not classify as exempt via docs_registry.json"
             )
+
+
+class TestGitVisibleCoverage:
+    """The governance walk covers only markdown that git tracks or could add."""
+
+    def test_walk_excludes_git_ignored_markdown_and_keeps_tracked_docs(self):
+        """A git-ignored probe is outside the walk; a tracked governed doc is in it.
+
+        The probe lives under .scratch/, which the committed .gitignore ignores,
+        so the result does not depend on any local exclude file.
+        """
+        import shutil
+        import tempfile
+
+        scratch = REPO_ROOT / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        probe_dir = Path(tempfile.mkdtemp(prefix="pytest_doc_governance_", dir=scratch))
+        try:
+            probe = probe_dir / "ignored_probe.md"
+            probe.write_text("# ignored probe\n", encoding="utf-8")
+            walked = set(get_all_md_files())
+            assert probe not in walked, (
+                f"{probe.relative_to(REPO_ROOT)} is git-ignored and must not be "
+                "in the governance walk"
+            )
+            tracked_doc = REPO_ROOT / "mu" / "docs" / "core" / "DocGovernance.v0.md"
+            assert tracked_doc in walked, "tracked governed doc missing from the walk"
+            assert is_governed(tracked_doc)
+        finally:
+            shutil.rmtree(probe_dir, ignore_errors=True)

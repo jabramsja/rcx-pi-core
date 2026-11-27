@@ -4,6 +4,124 @@ This file is a selected historical changelog, not the complete current
 merge ledger. For live recent wave chronology, use `TASKS.md` plus
 `git log --oneline`.
 
+## 2026-11-26
+
+### Throughput R14: shared bounded validation (local Phase B; native delivery pending)
+
+- Carry R13's reviewed candidate onto `baced34f`. R13 converged in Phase B
+  (re-entry review GO, pre-commit supervisor COMMIT_GO), then its final docs
+  check stopped the wave before commit: the docs sync report counted four
+  git-ignored `.agents/skills` copies, written by the Codex desktop app's
+  import sync, as unclassified markdown. Nothing was committed. All 22 carried
+  files, the three closure records and the TASKS.md checkpoint matched the R14
+  admission record byte for byte. Configured roles and models are unchanged,
+  as are the 300-second ordinary leaf and the 7200-second validation ceiling.
+- Docs checks ignore git-ignored markdown. `docs_sync_report.py`, including
+  its docs/ subfolder discovery, and the walks in `test_doc_governance.py`
+  now cover only markdown that git tracks or could add (`git ls-files --cached
+  --others --exclude-standard`), through one shared helper. Every
+  classification rule is unchanged. If git cannot list that set, the report
+  exits 2 instead of walking the filesystem. On the new regression fixtures
+  the HEAD report fails `--check` on ignored `.agents` and `.codex` copies and
+  an ignored docs/ subfolder; the new report passes and still reports
+  untracked, non-ignored markdown. The agent-memory exemption test also runs
+  its probe through the report's rules explicitly, so it still fails if the
+  registry entry regresses. `test_doc_governance.py` gains the `tools` shadow
+  guard its sibling module already carries: collected after a `mu/tests/tools`
+  module, as this wave's gate does, it failed to import at HEAD too.
+- Two doc tests outside this wave's scope still walk the filesystem
+  (`test_docs_registry_coverage.py`, `test_doc_placement_rules.py`), so
+  ignored copies in a lane can still fail them. That is an owner-40 follow-up.
+- R14's reproduction and handoff controls, the 20-run fixture series, and the
+  declared fourteen-module gate and identical sweep bound to the
+  admission-pinned catalog are recorded with their receipts in this wave's
+  implementation evidence file. The rest of this entry is R13's history,
+  carried with its candidate; its measurements are R13's.
+- Carry R12's reviewed candidate onto `baced34f` (R13): R7's preserved shared
+  validation execution, source-bound supervisor handoff, finite budget
+  transport and typed HOLD propagation, with R8's handoff deltas, R10's
+  implementer work, the reviewed Phase B heartbeat test fix, R11's
+  founder-authorized test migration and fixture quoting fix, and R12's
+  stale-import repair. R12 converged in Phase B (re-entry review GO,
+  pre-commit supervisor COMMIT_GO) but committed nothing: the commit
+  executor's pre-commit targeted gate failed one test that is new in the
+  candidate, and recovery refused the tier-3 delegate's fixture fix because
+  the launcher's log inside the lane counted as out-of-scope drift. R13 also
+  carries that fixture fix. All 22 carried files, the three closure records
+  and the TASKS.md checkpoint matched the admission record byte for byte.
+  Configured roles and models are unchanged, as are the 300-second ordinary
+  leaf and the 7200-second validation ceiling.
+- Re-run the stale common-bytecode reproduction first: all 24 normal and `-B`
+  controls passed (warm, stale, cold and absent caches). A same-size,
+  same-mtime timestamp cache of a 9900-second ceiling sits beside source
+  declaring 7200 seconds, and in every case the exact-bytes handoff refuses a
+  9000-second request.
+- Verify R12's stale-import repair. Each handoff dependency keeps the module
+  code object its import actually ran. The supervisor's transaction keeps a
+  registered pair only when that object equals the code the bound bytes
+  compile to; otherwise it executes the bound source for both dependencies.
+  The focused cached-client/stale-owner, retained-pair failure and bare
+  supervisor-import controls (40 cases) and the complete client module (150
+  tests) pass, and the code-object facts the witness relies on hold on
+  Python 3.13.13.
+- Review the recovery delegate's fixture fix. `retained_native_scratch` now
+  sets repo-local `gc.auto 0` and `maintenance.auto false` before its first
+  commit, so `git commit` no longer detaches an automatic maintenance repack
+  that races the exact `.git` byte snapshot. Its new regression checks the
+  config scope and that no maintenance child ran.
+  `test_hybrid_child_receipts_and_live_environment_are_contained` passed 20
+  consecutive fresh-process runs, each covering all three owner cases. No
+  assertion was weakened.
+- Verify the carried migration and quoting fix. The post-merge cleanup module
+  passes 354 tests. With the shared runner unmutated, the seven migrated tests
+  pass (151 cases), and each of seven injected runner regressions fails the
+  tests that guard it. The JUnit-path regression passes for both native
+  callers under a base temporary directory containing a space.
+- Re-entry repair (pre-commit supervisor NEEDS_PHASE_B). The shared runner
+  treated leader exit as completion. A descendant still holding the inherited
+  output could therefore keep writing after the runner reported success and
+  hashed the files. Reproduced: success after 0.10s with the descendant's
+  output missing and the recorded hash invalidated, where the earlier
+  captured-pipe behaviour waited 3.05s for both lines. The child now writes
+  pipes that only the runner copies into the durable files. Completion needs
+  leader exit and end-of-file on both streams within the same finite
+  allowance. A writer still open at that boundary is a structured ownership
+  HOLD, which every native caller transports before restoration or further
+  admission. Timeout, interruption and release semantics are unchanged. A
+  failed durable write or close is an execution error, never success. New
+  real-process regressions cover the direct runner, both native gate callers
+  and the supervisor's evidence restoration. Six of them fail on behavioural
+  assertions against the pre-repair runner taught to claim completion at leader
+  exit. The seventh is a termination-drain control: it guards against the
+  drain manufacturing a HOLD, and fails there only on the new field. Two
+  fault-injection tests cover the new error paths, and each fails under a
+  mutation that removes its guard.
+- Local measurements on the repaired candidate, which are not delivery claims:
+  - Eight-job fixture: 3.86s in parallel against 12.38s serially (ratio 0.31,
+    acceptance below 0.80), with identical identities.
+  - Commit Step 8b: `test_phase_b_executor.py` (1520 tests) ran in 258.71s
+    within its 600-second budget.
+  - Hybrid recovery: the actual caller passed the four-target full selector
+    as four ordered 300-second leaves with a clean scope audit and complete
+    output. Its `test_phase_b_executor.py` leaf took 245.96s.
+  - The declared eleven-module gate also ran through the supervisor's actual
+    evidence path on the repaired runner. It passed with complete output, with
+    no leaked writer held open past pytest's exit.
+  - `test_hybrid_child_receipts_and_live_environment_are_contained` passed 20
+    consecutive fresh-process runs again on the repaired runner.
+  - R13's declared eleven-module gate and identical sweep, bound to the
+    admission-pinned catalog, were recorded in R13's own evidence file, which
+    stays with R13's preserved lane and is not carried here.
+- A single validator item holding all four targets exceeds the 300-second leaf
+  on this host. R12's first round timed out at 300.07s and held, as both R11
+  runs did. That shape is a recorded fail-closed observation, not the
+  criterion. Two questions remain owner-40 follow-ups: whether recovery
+  delegates should get measured per-target allowances or split multi-module
+  selections, and how the hybrid audit should treat the launcher's in-lane
+  log.
+- Native review, hooks, CI, merge and PRIMARY sync remain pending. Owner38
+  retention and the open original PRs are unchanged.
+
 ## 2026-10-21
 
 ### PR1344 landed; R8 recovered; PR1341 closed; PR1329 coverage R10 in Phase B

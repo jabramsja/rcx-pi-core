@@ -16,6 +16,7 @@ import importlib.util
 import json
 import sys
 import time
+import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -73,67 +74,151 @@ _EXECUTOR_COMMON_SUPERVISOR_IMPORT_SYMBOLS = frozenset({
     "bridge_config_path",
     "ensure_bridge_config_path",
     "resolve_agent_bus_dir",
+    "ValidationBudgetError",
+    "read_validation_schedule_transport",
+    "validation_parent_remaining",
+    "admit_stage_budget",
+    "decode_stage_budget",
+    "ensure_not_agent_review_mode",
+    # Every other module-level executor_common import of meta_bridge_supervisor.
+    "ExecutorCommonError",
+    "bridge_agent_display_name",
+    "configured_role_agents",
+    "emit_pipeline_agent_event",
+    "is_agent_bus_runtime_path",
+    "load_executor_config",
+    "normalize_wave_id",
+    "packet_status_is_completed",
+    "read_control_plane_packet_status",
 })
+_VALIDATION_EXECUTION_SUPERVISOR_SYMBOLS = ("pytest_command", "pytest_timeout", "run_validation", "run_pytest")
+_SUPERVISOR_DEPENDENCY_SYMBOLS = {
+    "executor_common": _EXECUTOR_COMMON_SUPERVISOR_IMPORT_SYMBOLS,
+    "validation_execution": _VALIDATION_EXECUTION_SUPERVISOR_SYMBOLS,
+}
 
 
 def _refresh_executor_common_before_supervisor_import(supervisor_dir: Path) -> None:
-    """Refresh stale executor_common in long-lived executor processes.
+    """Keep the existing caller entry point at the complete dependency boundary."""
+    prepare_supervisor_execution_api(supervisor_dir)
 
-    Phase executors can load executor_common before an in-flight bridge wave patches
-    that shared module. The pre-commit supervisor import happens later in the same
-    process, so ensure the symbols required by meta_bridge_supervisor are available
-    from the current filesystem module before importing it.
+
+def _supervisor_dependency_paths(supervisor_dir: Path) -> dict[str, Path]:
+    executors = supervisor_dir.parent / "executors"
+    return {name: (executors / (name + ".py")).resolve()
+            for name in ("executor_common", "validation_execution")}
+
+
+def _registered_from(module: Any, path: Path) -> bool:
+    source_path = getattr(module, "__file__", None)
+    return bool(source_path) and Path(source_path).resolve() == path
+
+
+def _executed_bound_code(module: Any, code: types.CodeType) -> bool:
+    """Whether a registered namespace executed exactly what its bound bytes denote.
+
+    Each dependency keeps the module code object its own import frame ran
+    (``EXECUTED_MODULE_CODE``), whichever loader supplied it. Equality with the
+    code the bound bytes compile to is the provenance test: a timestamp cache of
+    other source runs, and so records, other code. A missing witness (a baseline
+    module) proves nothing. Symbol compatibility and self-reported disk hashes
+    never substitute for this comparison.
     """
-    executors_dir = supervisor_dir.parent / "executors"
-    executors_dir_str = str(executors_dir)
-    if executors_dir_str not in sys.path:
-        sys.path.insert(0, executors_dir_str)
-    importlib.invalidate_caches()
+    witness = getattr(module, "__dict__", {}).get("EXECUTED_MODULE_CODE")
+    return type(witness) is types.CodeType and witness == code
 
-    module = sys.modules.get("executor_common")
-    if module is None:
-        return
 
-    module_file = getattr(module, "__file__", None)
-    if not module_file:
-        return
-    loaded_path = Path(module_file).resolve(strict=False)
-    expected_path = (executors_dir / "executor_common.py").resolve(strict=False)
-    if loaded_path != expected_path:
-        return
+def _retained_supervisor_dependencies(previous: dict[str, Any], code: dict[str, types.CodeType],
+                                      absent: object) -> tuple[str, ...]:
+    """Registered dependencies a newly imported supervisor may keep, as a pair.
 
-    missing = [
-        name
-        for name in sorted(_EXECUTOR_COMMON_SUPERVISOR_IMPORT_SYMBOLS)
-        if not hasattr(module, name)
-    ]
-    if not missing:
-        return
+    executor_common is kept only when it executed its bound code and exposes every
+    supervisor import. A missing validation module is then executed against that
+    owner, so modules that already imported it keep their class and exception
+    identity. A present validation module is kept only when it too executed its
+    bound code, is complete and consumes that exact owner; any other registered
+    pair is executed again as a whole from the bound bytes.
+    """
+    def proven(name: str) -> bool:
+        module = previous[name]
+        return (module is not absent and _executed_bound_code(module, code[name])
+                and all(callable(getattr(module, symbol, None))
+                        for symbol in _SUPERVISOR_DEPENDENCY_SYMBOLS[name]))
 
-    spec = importlib.util.spec_from_file_location("executor_common", expected_path)
-    if spec is None or spec.loader is None:
-        raise MetaBridgeClientError(
-            f"Cannot refresh stale executor_common missing {missing}: no loader for {expected_path}"
-        )
+    if not proven("executor_common"):
+        return ()
+    validation = previous["validation_execution"]
+    if validation is absent:
+        return ("executor_common",)
+    if proven("validation_execution") and getattr(validation, "common", None) is previous["executor_common"]:
+        return ("executor_common", "validation_execution")
+    return ()
 
-    refreshed = importlib.util.module_from_spec(spec)
-    sys.modules["executor_common"] = refreshed
+
+def prepare_supervisor_execution_api(supervisor_dir: Path, *, retain_proven: bool = False) -> None:
+    """Execute both dependencies from bound bytes as one handoff transaction.
+
+    The client handoff executes the pair every time. A newly imported supervisor
+    passes ``retain_proven=True``: when a baseline client callable is cached it is
+    the only current code that runs, and it keeps only a registered pair proven to
+    have executed its bound code. A stale owner is therefore replaced even when its
+    API is symbol-compatible, while a proven pair keeps its class identity.
+    Existing executor callables retain their original module. No process-wide
+    reload, role override, guard suppression or review restart occurs here. Disk
+    hashes reported by imported modules are diagnostics, never execution
+    provenance: even -B can consume an existing same-size/same-timestamp
+    bytecode cache.
+    """
+    executors = supervisor_dir.parent / "executors"
+    paths = _supervisor_dependency_paths(supervisor_dir)
+    absent = object()
+    previous = {name: sys.modules.get(name, absent) for name in paths}
+    # Refuse either foreign owner before publishing either replacement.
+    for name, module in previous.items():
+        if module is not absent and not _registered_from(module, paths[name]):
+            raise MetaBridgeClientError(f"{name} module has an unexpected source")
+    sources = {name: path.read_bytes() for name, path in paths.items()}
+    # dont_inherit: compile exactly as the import system does, so this client's
+    # own __future__ flags never alter what the bound dependency bytes denote.
+    code = {name: compile(sources[name], str(path), "exec", dont_inherit=True)
+            for name, path in paths.items()}
+    retained = _retained_supervisor_dependencies(previous, code, absent) if retain_proven else ()
+    if str(executors) not in sys.path:
+        sys.path.insert(0, str(executors))
+    current = {name: previous[name] for name in retained}
     try:
-        spec.loader.exec_module(refreshed)
-    except Exception:
-        sys.modules["executor_common"] = module
+        for name, path in paths.items():
+            if name in current:
+                continue
+            spec = importlib.util.spec_from_file_location(name, path)
+            if spec is None or spec.loader is None:
+                raise MetaBridgeClientError(f"Cannot refresh {name}: no loader for {path}")
+            module = importlib.util.module_from_spec(spec)
+            current[name] = module
+            sys.modules[name] = module
+            # Publish common first so validation consumes this exact owner.
+            # Never ask a bytecode loader to decide which source executed.
+            exec(code[name], module.__dict__)
+        for name, symbols in _SUPERVISOR_DEPENDENCY_SYMBOLS.items():
+            missing = sorted(symbol for symbol in symbols if not callable(getattr(current[name], symbol, None)))
+            if missing:
+                raise MetaBridgeClientError(f"Refreshed {name} missing required symbols: {missing}")
+        if current["validation_execution"].common is not current["executor_common"]:
+            raise MetaBridgeClientError("Validation execution changed its common module owner")
+        for name, path in paths.items():
+            if sys.modules.get(name) is not current[name] or path.read_bytes() != sources[name]:
+                raise MetaBridgeClientError(f"{name} source changed during refresh")
+            if not _executed_bound_code(current[name], code[name]):
+                raise MetaBridgeClientError(f"{name} has no execution witness for its bound bytes")
+    except BaseException:
+        # Restore the entire pair, including absence, on failure or interruption.
+        # Old callable namespaces were never mutated, including their classes.
+        for name, module in previous.items():
+            if module is absent:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
         raise
-
-    still_missing = [
-        name
-        for name in sorted(_EXECUTOR_COMMON_SUPERVISOR_IMPORT_SYMBOLS)
-        if not hasattr(refreshed, name)
-    ]
-    if still_missing:
-        sys.modules["executor_common"] = module
-        raise MetaBridgeClientError(
-            f"Refreshed executor_common still missing required symbols: {still_missing}"
-        )
 
 
 def _validate_decision(decision: str) -> None:

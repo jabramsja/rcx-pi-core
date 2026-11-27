@@ -73,6 +73,10 @@ try:
         resolve_agent_bus_dir,
         emit_pipeline_agent_event,
         reviewer_launch_provenance,
+        phase_b_pytest_timeout,
+        validation_hold_result,
+        PHASE_B_PYTEST_FLOOR_SECONDS,
+        VALIDATION_CEILING_SECONDS,
     )
 except ImportError:
     # Fallback for direct execution
@@ -103,6 +107,10 @@ except ImportError:
     resolve_agent_bus_dir = _mod.resolve_agent_bus_dir
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
     reviewer_launch_provenance = _mod.reviewer_launch_provenance
+    phase_b_pytest_timeout = _mod.phase_b_pytest_timeout
+    validation_hold_result = _mod.validation_hold_result
+    PHASE_B_PYTEST_FLOOR_SECONDS = _mod.PHASE_B_PYTEST_FLOOR_SECONDS
+    VALIDATION_CEILING_SECONDS = _mod.VALIDATION_CEILING_SECONDS
 
 _ACTIVE_BUS_DIR: ContextVar[Path | None] = ContextVar("phase_b_executor_bus_dir", default=None)
 
@@ -172,11 +180,11 @@ BRIDGE_REVIEW_POLL_SLEEP = 5.0
 BRIDGE_REVIEW_STALE_TIMEOUT = 120.0
 BRIDGE_REVIEW_AGGREGATION_HANG_TIMEOUT = 60.0
 BRIDGE_PROCESS_OWNER_ENV = "RCX_PHASE_B_BRIDGE_OWNER"
-DEFAULT_PYTEST_GATE_TIMEOUT_S = 300
+DEFAULT_PYTEST_GATE_TIMEOUT_S = PHASE_B_PYTEST_FLOOR_SECONDS
 # Structural/L4 gates can legitimately exceed 40 minutes under the Phase B
 # final sweep. Keep a bounded cap while allowing the configured executor budget
 # to cover a full evidence-sized pytest run.
-MAX_PYTEST_GATE_TIMEOUT_S = 7200
+MAX_PYTEST_GATE_TIMEOUT_S = VALIDATION_CEILING_SECONDS
 _MAINTENANCE_FORBIDDEN_PREFIXES = (
     "mu/host/",
     "mu/substrate/",
@@ -625,6 +633,13 @@ def _write_deferred_packet(
     safe_wave = normalize_wave_id(wave_id)
     packet_path = deferred_dir / f"{safe_wave}_bridge_nonblockers.md"
 
+    packet_path.write_text(_deferred_packet_text(wave_id, non_blocking_findings,
+        wave_class=wave_class, target_gate_id=target_gate_id), encoding="utf-8")
+    return packet_path
+
+
+def _deferred_packet_text(wave_id, non_blocking_findings, *, wave_class="", target_gate_id=""):
+    """Deterministic producer bytes, also bound before post-review mutation."""
     lines = [
         f"# Deferred Non-Blocking Findings: {wave_id}",
         "",
@@ -645,8 +660,7 @@ def _write_deferred_packet(
             lines.append(f"- **Evidence:** `{f['evidence_cmd']}`")
         lines.append("")
 
-    packet_path.write_text("\n".join(lines), encoding="utf-8")
-    return packet_path
+    return "\n".join(lines)
 
 
 def _canonical_deferred_packet_relpath(wave_id: str) -> str:
@@ -1398,44 +1412,31 @@ def _bridge_correction_context(
     return _bounded_bridge_correction_context(context)
 
 
-def _run_pytest_on_files(
-    repo_root: Path,
-    test_files: list[str],
-    *,
-    timeout: int = 120,
+def run_pytest_gate(
+    repo_root: Path, test_files: list[str], *, timeout: int = 120, workers: int = 4,
 ) -> dict[str, Any]:
-    """Run pytest on specific test files. Returns exit_code and output."""
+    """Public native full-profile validation entry point (no dispatch or retry)."""
     if not test_files:
+        # Existing gate contract: an empty selection starts no process. The shared
+        # runner still refuses an empty selector list from any direct caller.
         return {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", "-x", "--tb=short", *test_files],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-            env={**os.environ, "PYTHONHASHSEED": "0"},
-        )
-        return {
-            "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "passed": result.returncode == 0,
-        }
-    except subprocess.TimeoutExpired:
-        return {"exit_code": -1, "stdout": "", "stderr": "pytest timed out", "passed": False}
+        from validation_execution import run_pytest
+    except ImportError:
+        from mu.tools.executors.validation_execution import run_pytest
+    return run_pytest(repo_root, test_files, profile="full", timeout=timeout,
+                      workers=workers, env=None)
+
+
+def _run_pytest_on_files(
+    repo_root: Path, test_files: list[str], *, timeout: int = 120,
+) -> dict[str, Any]:
+    return run_pytest_gate(repo_root, test_files, timeout=timeout)
 
 
 def _resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
     """Bound local pytest gates to a sane floor/cap inside Phase B."""
-    try:
-        timeout_s = int(float(raw_timeout))
-    except (TypeError, ValueError):
-        return DEFAULT_PYTEST_GATE_TIMEOUT_S
-    if timeout_s <= 0:
-        return DEFAULT_PYTEST_GATE_TIMEOUT_S
-    return max(DEFAULT_PYTEST_GATE_TIMEOUT_S, min(timeout_s, MAX_PYTEST_GATE_TIMEOUT_S))
+    return phase_b_pytest_timeout(raw_timeout)
 
 
 def resolve_pytest_gate_timeout(raw_timeout: Any) -> int:
@@ -3468,6 +3469,8 @@ def _save_bridge_fix_transition(
         raise PhaseBExecutorError("; ".join(shape_error["errors"]))
     if _canonical_json_sha256(_load_state(repo_root)) != _canonical_json_sha256(previous):
         raise PhaseBExecutorError("ordinary checkpoint changed before save")
+    if isinstance(previous, dict) and "private_attr_post_review" in previous and "private_attr_post_review" not in following:
+        _spend_private_attr_post_review(repo_root, previous, terminal=True)
     _save_state(repo_root, following)
     if _canonical_json_sha256(_load_state(repo_root)) != _canonical_json_sha256(following):
         raise PhaseBExecutorError("ordinary checkpoint failed save verification")
@@ -3679,6 +3682,9 @@ def _finalize_bridge_fix_success(repo_root: Path, state: dict[str, Any]) -> dict
         test_files = _select_pytest_gate_files(sorted(fix_files), repo_root)
         if test_files:
             pytest_result = _run_pytest_on_files(repo_root, test_files, timeout=context["pytest_gate_timeout"])
+            hold = validation_hold_result(pytest_result, step="bridge_fix_finalize_pytest")
+            if hold is not None:
+                return {**hold, "pytest_result": pytest_result}
             if pytest_result.get("passed") is not True:
                 return {
                     "status": "error", "step": "bridge_fix_finalize_pytest",
@@ -4064,6 +4070,11 @@ def _clear_state(repo_root: Path, *, terminal_success: bool = False) -> None:
             return
     state_path = _state_file_path(repo_root)
     if state_path.exists():
+        state = _load_state(repo_root) or {}
+        if "private_attr_post_review" in state:
+            if not terminal_success:
+                return
+            _spend_private_attr_post_review(repo_root, state, terminal=True)
         state_path.unlink()
 
 
@@ -5498,6 +5509,155 @@ def run_bridge_review(
     return bind_result(result)
 
 
+def declared_review_artifact_contract(
+    repo_root: Path, *, wave_id: str, candidate_authority_required: bool = False,
+    candidate_authority_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Read exact report destinations from existing authority, without mutation."""
+    error = _guard_candidate_authority_scope_if_configured(
+        repo_root, wave_id=wave_id, context="review artifact handoff",
+        required=candidate_authority_required, trusted_metadata=candidate_authority_metadata,
+    )
+    if error:
+        raise PhaseBExecutorError(error)
+    path = _candidate_authority_spec_path(repo_root, wave_id=wave_id)
+    if candidate_authority_metadata and candidate_authority_metadata.get("spec_path"):
+        path = repo_root / candidate_authority_metadata["spec_path"]
+    if not path.exists():
+        return None  # Optional legacy invocation with no candidate authority.
+    spec = _candidate_authority.load_authority_spec(path)
+    if spec.wave_id != wave_id:
+        raise PhaseBExecutorError("Review artifact authority belongs to another wave")
+    # Verify the very spec used for rendering, not just the preceding guard's read.
+    identity = (candidate_authority_metadata or {}).get("spec_identity")
+    if identity is not None:
+        _candidate_authority.verify_authority_spec_identity(repo_root, spec, identity)
+    reports = {
+        lane: [p for p in spec.candidate_allowlist
+               if Path(p).parent.as_posix() == f"reports/deferred/{lane}"
+               and Path(p).name.startswith(wave_id + "_") and Path(p).suffix == ".md"]
+        for lane in ("blocking", "non_blocking")
+    }
+    for paths in reports.values():
+        for report in paths:
+            target = repo_root.resolve() / report
+            if target.resolve() != target:
+                raise PhaseBExecutorError(f"Review report destination traverses a symlink: {report}")
+    return {"wave_id": wave_id, "authority": _candidate_authority.authority_spec_identity(repo_root, spec),
+            "candidate_files": list(spec.candidate_allowlist), "reports": reports}
+
+
+def _review_task_with_artifact_contract(task_summary: str, contract: dict[str, Any] | None) -> str:
+    """Render the exact native task, also used to verify durable reviewer ownership."""
+    if contract is None:
+        return task_summary
+    rendered = task_summary + (
+        "\n\n## Declared review artifact contract\n\n"
+        "The validated frozen candidate authority permits only these exact report destinations:\n"
+        + json.dumps(contract["reports"], sort_keys=True, indent=2)
+        + "\nThis contract applies to the entire review, including rechecks after an envelope. "
+        "Do not invent report suffixes, use directory globs, expand authority, delete findings, "
+        "or downgrade REQUEST_CHANGES/NO_GO. If a required report has no writable allowed "
+        "destination, return the existing structured blocking outcome with the findings in "
+        "the reviewer envelope; do not write another repository path. Preserve candidate source, "
+        "index, configuration and owner bindings. All later native candidate checks and fresh "
+        "convergence remain required.\n"
+    )
+    # The native bridge task-file reader strips outer whitespace before storing
+    # jobs.task_text. Bind the exact stored task in launch and continuation.
+    return rendered.strip()
+
+
+def _review_input_binding(repo_root: Path, contract: dict[str, Any]) -> dict[str, Any]:
+    """Read immutable review inputs; only declared report bytes may change."""
+    reports = {p for paths in contract["reports"].values() for p in paths}
+
+    def file_binding(path: Path) -> dict[str, Any]:
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            return {"missing": True}
+        if stat.S_ISLNK(mode):
+            content = os.fsencode(os.readlink(path))
+        elif stat.S_ISREG(mode):
+            content = path.read_bytes()
+        else:
+            raise PhaseBExecutorError(f"Review input is not a regular file or symlink: {path}")
+        return {"mode": mode, "sha256": _sha256_bytes(content)}
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=repo_root, capture_output=True, timeout=30,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"},
+        )
+        if result.returncode:
+            raise PhaseBExecutorError(f"Cannot bind review Git inputs: {args[0]}")
+        return _sha256_bytes(result.stdout)
+
+    return {
+        "files": {p: file_binding(repo_root / p) for p in contract["candidate_files"] if p not in reports},
+        "index": git("ls-files", "--stage", "-z"), "index_flags": git("ls-files", "-v", "-z"),
+        "head": git("rev-parse", "HEAD^{commit}"), "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        "executor_config": file_binding(repo_root / "mu/tools/executors/executor_config.json"),
+        "bridge_config": file_binding(agent_bus_path(repo_root, _active_bus_dir(), "bridge_config.json")),
+        "effective_config": _canonical_json_sha256(load_executor_config(repo_root)),
+        "owner": os.environ.get(EXECUTOR_PROCESS_OWNER_ENV),
+    }
+
+
+def run_scoped_bridge_review(
+    repo_root: Path, task_summary: str, *, wave_id: str,
+    candidate_authority_required: bool = False,
+    candidate_authority_metadata: dict[str, Any] | None = None, **kwargs: Any,
+) -> dict[str, Any]:
+    """Enforce review output before any correction, including post-envelope work.
+
+    The original reviewer decision and diagnostics remain authoritative. This
+    read-only boundary cannot expand a spec, delete a report or refresh a receipt.
+    """
+    authority = dict(wave_id=wave_id, candidate_authority_required=candidate_authority_required,
+                     candidate_authority_metadata=candidate_authority_metadata)
+    review: dict[str, Any] = {"exit_code": 125, "decision": "", "stdout": "", "stderr": "",
+                              "job_id": kwargs.get("job_id", "")}
+    try:
+        contract = declared_review_artifact_contract(repo_root, **authority)
+        inputs = _review_input_binding(repo_root, contract) if contract is not None else None
+        existing_reports = set()
+        if contract is not None:
+            existing_reports = {p for paths in contract["reports"].values() for p in paths
+                                if (repo_root / p).exists()}
+        task_summary = _review_task_with_artifact_contract(task_summary, contract)
+    except (PhaseBExecutorError, _candidate_authority.CandidateAuthorityError, ExecutorCommonError,
+            OSError, ValueError, subprocess.SubprocessError) as exc:
+        return {**review, "candidate_scope_error": str(exc)}
+    review = run_bridge_review(repo_root, task_summary, **kwargs)
+    try:
+        # Re-read actual worktree AND index after the reviewer finishes, before
+        # consuming any approval or admitting a corrective actor. Compare the
+        # original contract even for an optional legacy spec without launch pins.
+        current = declared_review_artifact_contract(repo_root, **authority)
+        if current != contract:
+            raise PhaseBExecutorError("Review artifact authority changed during review")
+        if contract is not None:
+            if _review_input_binding(repo_root, contract) != inputs:
+                raise PhaseBExecutorError("Candidate source/index/configuration/owner changed during review")
+            if any(not (repo_root / p).is_file() for p in existing_reports):
+                raise PhaseBExecutorError("Reviewer deleted a declared findings report")
+            reports = {p for paths in contract["reports"].values() for p in paths}
+            review = {**review, "review_artifact_files": sorted(reports & set(_collect_changed_files(repo_root)))}
+        return review
+    except (PhaseBExecutorError, _candidate_authority.CandidateAuthorityError, ExecutorCommonError,
+            OSError, ValueError, subprocess.SubprocessError) as exc:
+        return {**review, "candidate_scope_error": str(exc)}
+
+
+def _review_scope_failure(review: dict[str, Any], step: str) -> dict[str, Any]:
+    return {"status": "error", "step": step + "_candidate_authority_scope",
+            "errors": [review["candidate_scope_error"]], "bridge_decision": review.get("decision"),
+            "bridge_job_id": review.get("job_id"), "bridge_exit_code": review.get("exit_code"),
+            "bridge_stdout_path": review.get("stdout_path"), "bridge_stderr_path": review.get("stderr_path")}
+
+
 def _read_bridge_render(repo_root: Path, job_id: str) -> str:
     """Read the rendered bridge output for a specific job_id.
 
@@ -6658,6 +6818,8 @@ def run_pre_commit_supervisor(
                 "request_for_claude": result.request_for_claude,
                 "error_code": result.error_code,
                 "error_detail": result.error_detail,
+                "validations_passed": result.validations_passed,
+                "validations_failed": result.validations_failed,
             },
             "receipt_path": result.receipt_path,
         }
@@ -8205,7 +8367,8 @@ def _validate_private_attr_prepared_state(
     try:
         if _load_state(repo_root) != state:
             raise PhaseBExecutorError("Durable prepared checkpoint changed during recovery")
-        payload = {key: value for key, value in state.items() if key != "private_attr_prepared_sha256"}
+        payload = {key: value for key, value in state.items()
+                   if key not in {"private_attr_prepared_sha256", "private_attr_post_review"}}
         if state.get("private_attr_prepared_sha256") != _canonical_json_sha256(payload):
             raise PhaseBExecutorError("Missing or mismatched prepared checkpoint digest")
         if state.get("wave_id") != wave_id or state.get("plan_path") != plan_path:
@@ -8247,18 +8410,122 @@ def _validate_private_attr_prepared_state(
             or not _valid_state_string(state.get("private_attr_review_reader"))
         ):
             raise PhaseBExecutorError("Malformed prepared reviewer round/context identity")
+        authority = state.get("private_attr_prepared_authority")
+        if "private_attr_post_review" in state:
+            post = _read_private_attr_post_review(repo_root, state)
+            if _private_attr_post_review_path(repo_root, post, spent=True).exists():
+                raise PhaseBExecutorError("Post-review continuation already consumed or interrupted")
+            authority = post["authority"]
         expected = _private_attr_prepared_authority(
             repo_root, state, routing_record=routing_record, plan=plan,
             plan_path=plan_path, wave_id=wave_id,
         )
-        if state.get("private_attr_prepared_authority") != expected:
+        if authority != expected:
             raise PhaseBExecutorError("Prepared checkpoint authority or staged candidate changed")
-    except (PhaseBExecutorError, OSError, ValueError, TypeError, KeyError) as exc:
+    except (PhaseBExecutorError, OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
         return {
             "status": "error", "step": "private_attr_prepared_resume",
             "authority_error": "invalid", "errors": [str(exc)],
         }
     return None
+
+
+def _private_attr_post_review_path(repo_root, post, *, spent=False):
+    return agent_bus_path(repo_root, _active_bus_dir(), "executors",
+        "private_attr_post_review_" + post["sha256"] + (".used" if spent else ".json"))
+
+
+def _read_private_attr_post_review(repo_root, state):
+    """Read the native producer's exact transition, never re-seal live bytes."""
+    post = state["private_attr_post_review"]
+    if (type(post) is not dict or set(post) != {"version", "prepared_sha256", "authority", "review",
+            "envelope", "findings", "finding_history", "report", "generated_sha256", "sha256"}
+            or type(post["version"]) is not int or post["version"] != 1):
+        raise PhaseBExecutorError("Malformed post-review producer transition")
+    body = {key: value for key, value in post.items() if key != "sha256"}
+    if (post["sha256"] != _canonical_json_sha256(body)
+            or post["prepared_sha256"] != state["private_attr_prepared_sha256"]):
+        raise PhaseBExecutorError("Post-review transition seal differs")
+    path = _private_attr_post_review_path(repo_root, post)
+    if path.is_symlink() or json.loads(path.read_bytes()) != post:
+        raise PhaseBExecutorError("Post-review producer record missing or changed")
+    envelope = _read_recovered_private_attr_envelope(repo_root, post["review"]["job_id"], post["review"])
+    if envelope != post["envelope"] or not _is_go_bridge_decision(envelope["decision"]):
+        raise PhaseBExecutorError("Post-review reviewer output changed")
+    return post
+
+
+def _spend_private_attr_post_review(repo_root, state, *, terminal=False):
+    post = _read_private_attr_post_review(repo_root, state)
+    path = _private_attr_post_review_path(repo_root, post, spent=True)
+    if terminal and path.is_file() and not path.is_symlink():
+        if path.read_text() == post["sha256"]:
+            return
+    try:
+        with path.open("x") as handle:
+            handle.write(post["sha256"])
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError as exc:
+        raise PhaseBExecutorError("Post-review continuation already consumed or interrupted") from exc
+    return post
+
+
+def _seal_private_attr_post_review(repo_root, previous, review, *, routing_record,
+                                   plan, plan_path, wave_id, findings, wave_class, target_gate_id):
+    """Seal only the deterministic active-report update produced by this GO.
+
+    Original preparation/review bindings stay byte-for-byte in the checkpoint.
+    All source/index entries except the already-owned active report must match.
+    Archive/deletion transitions need their own authority and HOLD here.
+    """
+    report = _canonical_deferred_packet_relpath(wave_id)
+    before = previous["private_attr_prepared_authority"]
+    original = {row["path"]: row for row in before["index"]["blobs"]}
+    live = repo_root / report
+    if report not in original or original[report]["mode"] != "100644" or not findings:
+        raise PhaseBExecutorError("Post-review transition requires the prepared active report")
+    expected = _deferred_packet_text(wave_id, findings, wave_class=wave_class,
+                                     target_gate_id=target_gate_id).encode()
+    if live.is_symlink() or live.read_bytes() != expected:
+        raise PhaseBExecutorError("Post-review generated report differs from deterministic reviewer output")
+    envelope = _read_recovered_private_attr_envelope(repo_root, review["job_id"], review)
+    history = dict(previous["finding_history"])
+    parsed = _parse_findings_from_render("", ["BEGIN_AGENT_ENVELOPE\n" + json.dumps(envelope) + "\nEND_AGENT_ENVELOPE"])
+    blocking, nonblocking = _classify_findings(parsed, history)
+    deduplicated = list({_finding_key(f): f for f in nonblocking}.values())
+    if blocking or deduplicated != findings:
+        raise PhaseBExecutorError("Post-review report findings differ from canonical reviewer envelope")
+    if not _stage_files(repo_root, [report]):
+        raise PhaseBExecutorError("Cannot stage deterministic post-review report")
+    after = _private_attr_prepared_authority(repo_root, previous, routing_record=routing_record,
+        plan=plan, plan_path=plan_path, wave_id=wave_id)
+    newer = {row["path"]: row for row in after["index"]["blobs"]}
+    if (before["identity"] != after["identity"] or before["candidate"] != after["candidate"]
+            or set(newer) != set(original)
+            or any(original[p] != newer[p] for p in original if p != report)
+            or any(before["index"][key] != after["index"][key] for key in ("head_commit", "branch"))
+            or set(before["index"]["staged_files"]) - {report} != set(after["index"]["staged_files"]) - {report}
+            or newer[report]["mode"] != "100644"):
+        raise PhaseBExecutorError("Unrelated source/index drift during post-review generation")
+    entries = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=repo_root)
+    old, new = original[report], newer[report]
+    restored_entries = entries.replace(f"{new['mode']} {new['oid']} 0\t{report}\0".encode(),
+                                      f"{old['mode']} {old['oid']} 0\t{report}\0".encode())
+    if _sha256_bytes(restored_entries) != before["index"]["index_entries_sha256"]:
+        raise PhaseBExecutorError("Index outside post-review report changed")
+    post = {"version": 1, "prepared_sha256": previous["private_attr_prepared_sha256"],
+            "authority": after, "review": review, "envelope": envelope, "findings": findings,
+            "finding_history": history, "report": report, "generated_sha256": _sha256_bytes(expected)}
+    post["sha256"] = _canonical_json_sha256(post)
+    path = _private_attr_post_review_path(repo_root, post)
+    with path.open("x") as handle:
+        json.dump(post, handle, sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+    following = {**previous, "private_attr_post_review": post}
+    _save_bridge_fix_transition(repo_root, previous, following)
+    return following
 
 
 COMMIT_READY_STATUS = "IMPLEMENTED - PIPELINE REPAIR PENDING COMMIT"
@@ -8302,7 +8569,8 @@ def commit_ready_resume_authority(
             or state.get("native_supervisor_reentry_exhausted")
             or _validate_resumable_state_shape(state_path, state) is not None):
         raise PhaseBExecutorError("Not a completed ordinary private-review checkpoint")
-    payload = {k: v for k, v in state.items() if k != "private_attr_prepared_sha256"}
+    payload = {k: v for k, v in state.items()
+               if k not in {"private_attr_prepared_sha256", "private_attr_post_review"}}
     if state.get("private_attr_prepared_sha256") != _canonical_json_sha256(payload):
         raise PhaseBExecutorError("Prepared checkpoint seal changed")
     if ("implementer_mutation" not in state or _implementer_mutation_issue(state)
@@ -8318,6 +8586,8 @@ def commit_ready_resume_authority(
     route_raw = read(route_path)
     route = json.loads(route_raw)
     before = state["private_attr_prepared_authority"]
+    if "private_attr_post_review" in state:
+        before = _read_private_attr_post_review(repo_root, state)["authority"]
     if (before["candidate"] != _private_attr_candidate_binding(repo_root, wave, route)
             or not before["candidate"]["required"]):
         raise PhaseBExecutorError("Prepared candidate/role authority changed")
@@ -8471,9 +8741,19 @@ def commit_ready_resume_authority(
         raise PhaseBExecutorError("Missing or ambiguous historical COMMIT_GO binding")
     receipt_path, receipt_raw, _receipt = receipts[0]
     db_path = agent_bus_path(repo_root, _active_bus_dir(), "bridge.db").resolve()
+    # The saved summary and frozen authority remain unchanged. Match the exact
+    # task sent to the reviewer, including the deterministically rendered report
+    # contract, rather than accepting another task or restamping old evidence.
+    review_task = _review_task_with_artifact_contract(
+        state["private_attr_review_summary"],
+        declared_review_artifact_contract(
+            repo_root, wave_id=wave, candidate_authority_required=True,
+            candidate_authority_metadata=_candidate_authority_metadata_from_routing_record(route),
+        ),
+    )
     with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)) as conn:
         conn.row_factory = sqlite3.Row
-        jobs = conn.execute("SELECT * FROM jobs WHERE task_text = ?", (state["private_attr_review_summary"],)).fetchall()
+        jobs = conn.execute("SELECT * FROM jobs WHERE task_text = ?", (review_task,)).fetchall()
     if (len(jobs) != 1 or jobs[0]["status"] != "DONE" or jobs[0]["terminal_decision"] != "GO"
             or jobs[0]["reader_agent"] != state["private_attr_review_reader"]
             or jobs[0]["reviewer_agent"] != route["candidate_authority"]["spec_identity"]["reviewer_agent"]):
@@ -8611,6 +8891,9 @@ def _resume_commit_ready_supervisor(
             raise PhaseBExecutorError("Commit-ready private-attribute gate failed")
         tests = _run_pytest_on_files(repo_root, select_pytest_gate_files(files, repo_root),
                                     timeout=authority["pytest_gate_timeout"])
+        hold = validation_hold_result(tests, step="commit_ready_resume")
+        if hold is not None:
+            return hold
         if not tests.get("passed"):
             raise PhaseBExecutorError("Commit-ready final tests failed")
         if commit_ready_resume_authority(repo_root) != authority:
@@ -10665,6 +10948,13 @@ def run_phase_b(
             "errors": [str(exc)],
         }
 
+    import executor_common as budget_common
+    try:
+        budget_common.validate_native_stage_context(repo_root, key="phase_b_executor")
+    except budget_common.ValidationBudgetError as exc:
+        return {"status": "validation_budget_hold", "step": "validation_budget_admission",
+                "validation_budget_hold": True, "errors": [str(exc)]}
+
     result: dict[str, Any] = {
         "status": "success",
         "plan_path": plan_path,
@@ -10679,6 +10969,28 @@ def run_phase_b(
     def log(msg: str) -> None:
         if verbose:
             print(f"[phase-b] {msg}")
+
+    def _supervisor_validation_hold(envelope: dict[str, Any], step: str) -> dict[str, Any] | None:
+        parsed = envelope.get("parsed", {})
+        hold = validation_hold_result(parsed, step=step)
+        if hold is None:
+            return None
+        held = {**result, **hold, "supervisor_result": envelope,
+                "pre_commit_decision": parsed.get("decision"),
+                "pre_commit_summary": _supervisor_reason_text(parsed)}
+        log(f"{step}: validation HOLD; checkpoint and diagnostics retained")
+        try:
+            _emit_phase_b_event(
+                repo_root, routing_record=routing_record, plan=plan, plan_path=plan_path,
+                event_type="pre_commit_supervisor_completed", state="validation_budget_hold",
+                transition_key=_phase_b_transition_key(str(package_path.relative_to(repo_root)), f"{step}:validation_budget_hold"),
+                summary=held["pre_commit_summary"],
+                artifact_paths={"supervisor_package": str(package_path.relative_to(repo_root))},
+            )
+        except Exception as exc:
+            held["errors"].append(f"Phase B pager emission failed during validation HOLD: {exc}")
+        # No checkpoint cleanup, corrective actor, status refresh or handoff.
+        return held
 
     def _activate_matching_saved_state(saved: dict[str, Any]) -> str | dict[str, Any]:
         shape_error = _validate_resumable_state_shape(_state_file_path(repo_root), saved)
@@ -11929,7 +12241,31 @@ def run_phase_b(
         prepared_state: dict[str, Any] | None = None,
     ) -> tuple[list[str], dict[str, Any] | None]:
         """Freshly review implementer changes made by the private-attr gate."""
-        nonlocal all_non_blocking, deferred_packet_path, changed_files, approved_private_attr_state
+        nonlocal all_non_blocking, deferred_packet_path, changed_files, approved_private_attr_state, finding_history
+
+        if prepared_state is not None and "private_attr_post_review" in prepared_state:
+            if prepared_state["private_attr_review_reader"] != backend:
+                return candidate_files, {"status": "error", "step": "private_attr_post_review_resume",
+                                         "errors": ["Prepared reviewer reader identity changed"]}
+            error = _validate_private_attr_prepared_state(repo_root, prepared_state,
+                routing_record=routing_record, plan=plan, plan_path=plan_path, wave_id=wave_id)
+            if error is not None:
+                return candidate_files, error
+            try:
+                post = _spend_private_attr_post_review(repo_root, prepared_state)
+            except (PhaseBExecutorError, OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
+                return candidate_files, {"status": "error", "step": "private_attr_post_review_resume", "errors": [str(exc)]}
+            all_non_blocking = list(post["findings"])
+            finding_history = dict(post["finding_history"])
+            deferred_packet_path = post["report"]
+            result.update(bridge_rounds=prepared_state["private_attr_review_round"],
+                bridge_job_id=post["review"]["job_id"], deferred_packet_path=deferred_packet_path,
+                bridge_stdout_path=post["review"].get("stdout_path"),
+                bridge_stderr_path=post["review"].get("stderr_path"))
+            if reentry:
+                approved_private_attr_state = prepared_state
+            changed_files = list(prepared_state["private_attr_review_files"])
+            return changed_files, None
 
         current_files = (
             list(prepared_state["private_attr_review_files"]) if prepared_state is not None
@@ -12013,13 +12349,15 @@ def run_phase_b(
         )
         review_checkpoint = _load_state(repo_root)
         try:
-            bridge_result = run_bridge_review(
+            bridge_result = run_scoped_bridge_review(
                 repo_root,
                 (
                     prepared_state["private_attr_review_summary"] if prepared_state is not None else
                     ("Phase B re-entry" if reentry else "Phase B")
                     + f" private-attr remediation review R{next_round} for {plan_path}"
                 ),
+                wave_id=wave_id,
+                **candidate_authority_package_kwargs,
                 job_id=bridge_job_id,
                 reader_agent=backend,
                 verbose=verbose,
@@ -12056,6 +12394,12 @@ def run_phase_b(
         result["bridge_job_id"] = bridge_job_id
         result["bridge_stdout_path"] = bridge_result.get("stdout_path")
         result["bridge_stderr_path"] = bridge_result.get("stderr_path")
+        if bridge_result.get("candidate_scope_error"):
+            return current_files, _review_scope_failure(bridge_result, step_name + "_post_review")
+        review_artifacts = bridge_result.get("review_artifact_files", [])
+        executor_created.update(review_artifacts)
+        current_files = sorted(set(current_files) | set(review_artifacts))
+        changed_files = current_files
         bridge_decision = bridge_result.get("decision", "")
         _consume_implementer_review_continuation(repo_root, bridge_result)
         log(
@@ -12121,6 +12465,12 @@ def run_phase_b(
                         "Fail closed."
                     ],
                 }
+            preparation_error = _validate_private_attr_prepared_state(
+                repo_root, review_checkpoint, routing_record=routing_record, plan=plan,
+                plan_path=plan_path, wave_id=wave_id,
+            )
+            if preparation_error is not None:
+                return current_files, preparation_error
             if render or raw_texts:
                 prior_deferred_packet_path = deferred_packet_path
                 all_non_blocking, deferred_packet_path = _sync_deferred_non_blocking_state(
@@ -12137,6 +12487,21 @@ def run_phase_b(
                     result["deferred_packet_path"] = deferred_packet_path
                 else:
                     result.pop("deferred_packet_path", None)
+                report = _canonical_deferred_packet_relpath(wave_id)
+                old_report = next((row for row in review_checkpoint["private_attr_prepared_authority"]["index"]["blobs"]
+                                   if row["path"] == report), None)
+                live_report = repo_root / report
+                live_sha = _sha256_bytes(live_report.read_bytes()) if live_report.is_file() else None
+                if old_report is not None and old_report["sha256"] != live_sha:
+                    try:
+                        review_checkpoint = _seal_private_attr_post_review(
+                            repo_root, review_checkpoint,
+                            {key: bridge_result.get(key) for key in ("job_id", "decision", "exit_code", "stdout_path", "stderr_path")},
+                            routing_record=routing_record, plan=plan, plan_path=plan_path, wave_id=wave_id,
+                            findings=all_non_blocking, wave_class=wave_class, target_gate_id=target_gate_id,
+                        )
+                    except (PhaseBExecutorError, OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
+                        return current_files, {"status": "error", "step": "private_attr_post_review_seal", "errors": [str(exc)]}
             try:
                 _emit_phase_b_event(
                     repo_root,
@@ -12908,9 +13273,11 @@ def run_phase_b(
             )
 
         try:
-            bridge_result = run_bridge_review(
+            bridge_result = run_scoped_bridge_review(
                 repo_root,
                 task_summary,
+                wave_id=wave_id,
+                **candidate_authority_package_kwargs,
                 job_id=bridge_job_id,
                 reader_agent=backend,
                 verbose=verbose,
@@ -12945,6 +13312,11 @@ def run_phase_b(
         result["bridge_job_id"] = bridge_job_id
         result["bridge_stdout_path"] = bridge_result.get("stdout_path")
         result["bridge_stderr_path"] = bridge_result.get("stderr_path")
+        if bridge_result.get("candidate_scope_error"):
+            return _review_scope_failure(bridge_result, "bridge_post_review")
+        review_artifacts = bridge_result.get("review_artifact_files", [])
+        executor_created.update(review_artifacts)
+        changed_files = sorted(set(changed_files) | set(review_artifacts))
         bridge_decision = bridge_result.get("decision", "")
         _consume_implementer_review_continuation(repo_root, bridge_result)
         log(f"Bridge decision: {bridge_decision!r} (exit={bridge_result['exit_code']})")
@@ -13434,6 +13806,9 @@ def run_phase_b(
                 _clear_state(repo_root)
                 return result
             final_pytest = _run_pytest_on_files(repo_root, final_test_files, timeout=pytest_gate_timeout)
+            hold = validation_hold_result(final_pytest, step="final_pytest_gate")
+            if hold is not None:
+                return hold
             if not final_pytest["passed"]:
                 failure_summary = (
                     f"Final pytest gate FAILED (exit={final_pytest['exit_code']}). "
@@ -13464,6 +13839,8 @@ def run_phase_b(
                     "status": "error",
                     "step": "final_pytest_gate",
                     "errors": [failure_summary],
+                    "validation_budget_hold": final_pytest.get("validation_budget_hold", False),
+                    "validation": final_pytest,
                 }
             log("Final pytest gate: PASSED")
             try:
@@ -13779,6 +14156,9 @@ def run_phase_b(
         supervisor_result = run_pre_commit_supervisor(
             repo_root, package_path, verbose=verbose, bus_dir=_active_bus_dir(),
         )
+        hold = _supervisor_validation_hold(supervisor_result, "pre_commit_supervisor")
+        if hold is not None:
+            return hold
         supervisor_parsed = supervisor_result.get("parsed", {})
         result["pre_commit_decision"] = supervisor_parsed.get("decision")
         result["pre_commit_summary"] = _supervisor_reason_text(supervisor_parsed)
@@ -13984,9 +14364,11 @@ def run_phase_b(
             bridge_job_id = f"phase-b-reentry-r{reentry_round}-{uuid.uuid4().hex[:8]}"
             transition_key = _phase_b_review_transition_key(reentry_round, bridge_job_id)
             try:
-                bridge_result = run_bridge_review(
+                bridge_result = run_scoped_bridge_review(
                     repo_root,
                     f"Phase B re-entry R{reentry_round} after NEEDS_PHASE_B for {plan_path}",
+                    wave_id=wave_id,
+                    **candidate_authority_package_kwargs,
                     job_id=bridge_job_id,
                     reader_agent=backend,
                     verbose=verbose,
@@ -14017,6 +14399,11 @@ def run_phase_b(
                     "step": "phase_b_pager",
                     "errors": [f"Phase B pager emission failed after re-entry reviewer launch: {exc}"],
                 }
+            if bridge_result.get("candidate_scope_error"):
+                return _review_scope_failure(bridge_result, "reentry_bridge_post_review")
+            review_artifacts = bridge_result.get("review_artifact_files", [])
+            executor_created.update(review_artifacts)
+            changed_files = sorted(set(changed_files) | set(review_artifacts))
             bridge_decision = bridge_result.get("decision", "")
             _consume_implementer_review_continuation(repo_root, bridge_result)
             log(f"Reentry bridge decision: {bridge_decision!r}")
@@ -14453,6 +14840,11 @@ def run_phase_b(
         if reentry_test_files:
             log(f"Re-entry pytest gate: running {len(reentry_test_files)} test file(s)...")
             reentry_pytest = _run_pytest_on_files(repo_root, reentry_test_files, timeout=pytest_gate_timeout)
+            hold = validation_hold_result(reentry_pytest, step="reentry_pytest_gate")
+            if hold is not None:
+                # Retain the converged checkpoint and its pending commit state.
+                # A HOLD must not enter failure cleanup or actor recovery.
+                return hold
             if not reentry_pytest["passed"]:
                 failure_summary = (
                     f"Re-entry pytest gate FAILED (exit={reentry_pytest['exit_code']}). "
@@ -14769,6 +15161,9 @@ def run_phase_b(
         supervisor_result = run_pre_commit_supervisor(
             repo_root, package_path, verbose=verbose, bus_dir=_active_bus_dir(),
         )
+        hold = _supervisor_validation_hold(supervisor_result, "post_reentry_supervisor")
+        if hold is not None:
+            return hold
         supervisor_parsed = supervisor_result.get("parsed", {})
         decision = supervisor_parsed.get("decision")
         receipt_path = supervisor_result.get("receipt_path", "")
@@ -15042,6 +15437,9 @@ def run_phase_b(
         supervisor_result = run_pre_commit_supervisor(
             repo_root, package_path, verbose=verbose, bus_dir=_active_bus_dir(),
         )
+        hold = _supervisor_validation_hold(supervisor_result, "commit_ready_status_supervisor")
+        if hold is not None:
+            return hold
         supervisor_parsed = supervisor_result.get("parsed", {})
         decision = supervisor_parsed.get("decision")
         receipt_path = supervisor_result.get("receipt_path", "")
@@ -15640,6 +16038,8 @@ def main() -> int:
 
     if (
         result.get("status") not in ("success", "ready", "commit_ready", "continue_phase_b")
+        and result.get("status") != "validation_budget_hold"
+        and result.get("validation_budget_hold") is not True
         and not args.dispatcher_owned_recovery
         and not protected_ordinary_failure
     ):

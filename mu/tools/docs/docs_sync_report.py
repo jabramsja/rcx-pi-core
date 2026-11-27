@@ -6,6 +6,11 @@ Checks:
 1. Every markdown file is classified by docs registry.
 2. Every docs/<subfolder>/ containing markdown is registered.
 3. Tracker-only section headers (NOW/NEXT/VECTOR/SINK) appear only in root canonical docs.
+
+Coverage is the git-visible markdown set: files git tracks, plus untracked
+files that are not git-ignored (``git ls-files --cached --others
+--exclude-standard``). Git-ignored files cannot be committed, so they are out
+of scope for every check above.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 # Ensure repo root is at position 0 for imports
@@ -25,20 +31,29 @@ from tools.docs.shared_doc_config import (
     REPO_ROOT,
     classify_md_path,
     get_registered_docs_subfolders,
+    list_git_visible_markdown,
 )
 
 
 TRACKER_SECTION_PATTERN = re.compile(r"^##\s*(NOW|NEXT|VECTOR|SINK)\b", re.MULTILINE)
 
 
-def collect_report() -> dict:
+def collect_report(markdown_files: Iterable[Path] | None = None) -> dict:
+    """Build the report for the git-visible markdown set under REPO_ROOT.
+
+    ``markdown_files`` replaces that set with explicit paths under REPO_ROOT,
+    evaluated by the same rules (including docs/ subfolder discovery). It lets
+    a caller run a path that git ignores through the classification rules.
+    """
     report: dict = {
         "unclassified_markdown": [],
         "unregistered_docs_subfolders": [],
         "tracker_section_violations": [],
     }
 
-    markdown_files = sorted(REPO_ROOT.rglob("*.md"))
+    if markdown_files is None:
+        markdown_files = list_git_visible_markdown(REPO_ROOT)
+    markdown_files = sorted(markdown_files)
 
     for md_file in markdown_files:
         rel = str(md_file.relative_to(REPO_ROOT))
@@ -58,7 +73,9 @@ def collect_report() -> dict:
 
     docs_root = REPO_ROOT / "docs"
     discovered: set[str] = set()
-    for md_file in docs_root.rglob("*.md"):
+    for md_file in markdown_files:
+        if not md_file.is_relative_to(docs_root):
+            continue
         rel = md_file.relative_to(docs_root)
         if len(rel.parts) >= 2:
             discovered.add(rel.parts[0])
@@ -99,7 +116,12 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print JSON report")
     args = parser.parse_args()
 
-    report = collect_report()
+    try:
+        report = collect_report()
+    except RuntimeError as exc:
+        # No git listing means no coverage set: refuse rather than report clean.
+        print(f"docs_sync_report: {exc}", file=sys.stderr)
+        return 2
     violations = (
         len(report["unclassified_markdown"])
         + len(report["unregistered_docs_subfolders"])

@@ -1,0 +1,2667 @@
+{
+  "schema_version": 1,
+  "wave_id": "workingrcx-pipeline-throughput-r14-2026-11-26",
+  "task_id": "FLEET-NATIVE-LIFECYCLE-PREVENTION",
+  "phase": "B (native Claude implementer)",
+  "status": "PHASE_B_LOCAL_VALIDATION_PASSED",
+  "generated_utc": "2026-11-27T10:32:45.487092+00:00",
+  "implementer_job_id": "impl-cb9b3fb2",
+  "checkout": {
+    "lane": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126",
+    "head": "baced34fe827da129a02ae5264485be688924d8c",
+    "comparison_base": "baced34fe827da129a02ae5264485be688924d8c",
+    "frozen_at": "2026-11-27T10:02:40.031376+00:00",
+    "tracked_diff_sha256_at_freeze": "b73d2e771fb408226dd5f33fba9e1a13bf224fa9f22ba9a5bde3c29e571f00a9",
+    "index_path": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.git/worktrees/pipeline-throughput-r14-20261126/index"
+  },
+  "hash_semantics": "All sha256 values were taken at evidence time from the lane. They bind the gate and sweep inputs only; files the executors generate or reconcile later are not covered: TASKS.md tracker note (executor reconciles it later); reports/deferred/non_blocking/workingrcx-pipeline-throughput-r14-2026-11-26_bridge_nonblockers.md; reports/l4_wave_indicators/workingrcx-pipeline-throughput-r14-2026-11-26.json; mu/tests/docs/test_growth_caps.py (Step 5e).",
+  "changed_files": {
+    "evidence_time_sha256": {
+      "CHANGELOG.md": "bde031cafd5ad1a542e799e9872223fda10f9c34865b0e5ae4201523afcea87b",
+      "TASKS.md": "3b7aa1f858777df374e5e70488406752b2e05b990be76f1d48e7accde6fb6c2f",
+      "mu/docs/agents/AgentRunbook.v0.md": "46e7c1c6715f6fbf75759d1ec42b4aec2d95b38a69b92b9dd5833c80fc120457",
+      "mu/docs/core/DocGovernance.v0.md": "b9edcc6b60498f81d804cece7cf46a9c0a260001f355f2a62b1b0a087ce42f76",
+      "mu/tests/docs/test_doc_governance.py": "6d1fabebfbcd697a81a2de1a30d32d463b010b92b6c74d026946c047854eb16a",
+      "mu/tests/docs/test_docs_registry_agent_memory_exempt.py": "fd1f2a78dcd8572b7ce83e6bf1e150b7a8ed71c80d8d207cd8773781bdafc8c9",
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": "a728f9c2fa6426f384b923a9d41efbd2b46d4d20fa6c4a4add2da457d3fe7e08",
+      "mu/tests/tools/test_commit_executor_receipt.py": "4276fe90b6df769c39d76283f484586cc7d42915b2546aab6e54aa0906332f2d",
+      "mu/tests/tools/test_docs_sync_report.py": "d6803cf34f832392decb780f5deea02700355a9fcc19d8e75d19f12c36d94375",
+      "mu/tests/tools/test_executor_common.py": "3ab4fb2d9ec23d4b5b00877215f90b896de500ac3e0f95ca1be26d721dd94a5d",
+      "mu/tests/tools/test_executor_config_alignment.py": "9cc0a3f27eb1f478962a8cb36568df4feda6deb9b02c50f652e31f19c37359aa",
+      "mu/tests/tools/test_executor_dispatch.py": "5a3f64503188d67b37d617e416cb135b43011f63375360f29cf5ac0031599982",
+      "mu/tests/tools/test_launch_wave.py": "8bb24e950488730e0691f137918fc50d9be18eb6720fcea5ec5e27082df4faab",
+      "mu/tests/tools/test_meta_bridge_client.py": "deda79cfa9e3894310b366589227ad0f7b21128dd16b6272f21fca140d2a0168",
+      "mu/tests/tools/test_meta_bridge_supervisor.py": "34b47003dd7c339f75ae5025bf1164ebd004923b0dfd60ed33556a0d166b8a2a",
+      "mu/tests/tools/test_phase_b_executor.py": "f5c1061ebc657ef9e9e87f46a3a40da263a7ec13526f0548f43eed9272890c13",
+      "mu/tests/tools/test_recovery_gate.py": "ceab026a3038f8d1722cbcbfa4faa395f9bc722321cd3f2705adbc5182f293dc",
+      "mu/tests/tools/test_validation_execution.py": "066f15044f263207d9886a69dc2016a98c4d2c2c89643a327871981b50ff57fc",
+      "mu/tools/agents/meta_bridge_client.py": "1a618ac6e7248e299c1765e3d4defd31bbf2488e3f89a095cef5434eca662c71",
+      "mu/tools/agents/meta_bridge_supervisor.py": "afd2e721470f91627eebc2d03b005101b4a5daa93e6023f85a1b5d7c9009a431",
+      "mu/tools/docs/docs_sync_report.py": "369d8c8b7212f8507a527e171309f1f6ac36f8fc4388c592aaa7f8e3c36ead47",
+      "mu/tools/docs/shared_doc_config.py": "467eed93e1c8610c0856edb9f0887fef18ccfc78da80d5356ebc03e3beb76643",
+      "mu/tools/executors/commit_executor.py": "63305d86d9ece676e9c4a59fdcf1ee207ebf167229cc67ac1fd746b38b120ab3",
+      "mu/tools/executors/executor_common.py": "301f17d6f504c1746375d72cb0880e9d262b319e521e56ec7b76c0d628a2f43e",
+      "mu/tools/executors/executor_dispatch.py": "5e7e09af2097203d65de0b16eb1b201b161c2afceea723482401e2a7c4229351",
+      "mu/tools/executors/launch_wave.py": "09a050eadc859e9630b8c25c41156205be79ccb266bc18d144dff3ce7301464c",
+      "mu/tools/executors/phase_b_executor.py": "f79595d0ef81c118c43ce72280c7559618562dc7cd7caaf8855338533f646ddb",
+      "mu/tools/executors/recovery_gate.py": "285dc8815d7aaa051325f39288d3ea6d14aa671b4f6be90494db3eaf183ef778",
+      "mu/tools/executors/validation_execution.py": "dc0964506389d250bd6f9a3f808d14f1ad436e80d923b50bcbb066a08076fc3f",
+      "reports/archive/deferred/commit-targeted-pytest-gate-phase-b-module-budget-2026-11-26_closed-by-workingrcx-pipeline-throughput-r14-2026-11-26.md": "48c9781d04af5ab22ea6ed304ec4103e35d097eead6bcdf23e8fcfde644a50c8",
+      "reports/archive/deferred/phase-b-heartbeat-observation-window-ci-flake-2026-11-26_closed-by-workingrcx-pipeline-throughput-r14-2026-11-26.md": "c8c6425e569ae8f909a233e716f7228a05c70c25dd2702d86b4c3c858417643f",
+      "reports/archive/deferred/workingrcx-pipeline-throughput-r7-2026-10-29_bridge_blockers_closed-by-workingrcx-pipeline-throughput-r14-2026-11-26.md": "5423f0755a2c72d01ba2ef58100d227015e75e57f4c9f11133e1d3260bd0d28d",
+      "reports/control_plane/workingrcx-pipeline-throughput-r14-2026-11-26_2026-11-26.md": "00e35e3baab8feb8a6b882cdb33bf6aff45c355c72490ade251aacd78e2bd920"
+    },
+    "unchanged_since_freeze": true,
+    "r14_authored": {
+      "mu/tools/docs/shared_doc_config.py": "New shared helper list_git_visible_markdown(root): git ls-files -z --cached --others --exclude-standard in root, *.md matched case-sensitively in Python (no pathspec), tracked paths absent from disk skipped, finite 60 s timeout, RuntimeError (fail closed) when git cannot list the set.",
+      "mu/tools/docs/docs_sync_report.py": "collect_report(markdown_files=None) covers the git-visible set; docs/ subfolder discovery uses the same set; every classification, exemption and tracker-section rule unchanged; main() exits 2 with a message when git cannot list the set.",
+      "mu/tests/tools/test_docs_sync_report.py": "Three hermetic real-CLI regressions in fresh child processes on a fixture work tree whose tools/ links to mu/tools (as the lane root does): ignored .agents/.codex copies and an ignored docs/ subfolder alone pass --check; untracked non-ignored markdown is still reported (exact payload); outside a git work tree the report exits 2. Existing tests unchanged.",
+      "mu/tests/docs/test_doc_governance.py": "get_all_md_files() and the mu/docs walk use the shared git-visible set; adds the tools-package shadow guard its sibling module already carries; adds one regression (a .scratch/ probe ignored by the committed .gitignore is outside the walk, a tracked governed doc is in it). All existing assertions unchanged.",
+      "mu/tests/docs/test_docs_registry_agent_memory_exempt.py": "Keeps its real-repo assertions and also runs the probe through collect_report(markdown_files=[probe]), so the .claude/agent-memory/ exemption stays pinned although the default walk now skips git-ignored files; docstring corrected.",
+      "mu/docs/core/DocGovernance.v0.md": "Registry rule states the git-visible coverage rule and the fail-closed exit.",
+      "CHANGELOG.md": "Carried entry retitled for R14 with the docs-check change; R13's measurements attributed to R13; corrected the carried claim that R13's eleven-module receipts are in this wave's evidence file.",
+      "mu/tests/tools/test_phase_b_executor.py": "Carried test correction found by this wave's actual hybrid caller run: test_native_supervisor_hold_preserves_phase_b_checkpoint now wraps run_phase_b in the existing complete_process_observation helper, exactly as its two sibling run_phase_b fixtures do. No assertion changed; the landed observation guard is unchanged."
+    }
+  },
+  "admission_verification": {
+    "record": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-admission/carry-record.json",
+    "carried_files": {
+      "CHANGELOG.md": {
+        "admission_sha256": "47c8ac9f429e39e098cf5ddb0ed43b179aaf5a67fa31d175a548535f42b9a15d",
+        "evidence_time_sha256": "bde031cafd5ad1a542e799e9872223fda10f9c34865b0e5ae4201523afcea87b",
+        "byte_identical_to_admission": false
+      },
+      "mu/docs/agents/AgentRunbook.v0.md": {
+        "admission_sha256": "46e7c1c6715f6fbf75759d1ec42b4aec2d95b38a69b92b9dd5833c80fc120457",
+        "evidence_time_sha256": "46e7c1c6715f6fbf75759d1ec42b4aec2d95b38a69b92b9dd5833c80fc120457",
+        "byte_identical_to_admission": true
+      },
+      "mu/tools/agents/meta_bridge_client.py": {
+        "admission_sha256": "1a618ac6e7248e299c1765e3d4defd31bbf2488e3f89a095cef5434eca662c71",
+        "evidence_time_sha256": "1a618ac6e7248e299c1765e3d4defd31bbf2488e3f89a095cef5434eca662c71",
+        "byte_identical_to_admission": true
+      },
+      "mu/tools/agents/meta_bridge_supervisor.py": {
+        "admission_sha256": "afd2e721470f91627eebc2d03b005101b4a5daa93e6023f85a1b5d7c9009a431",
+        "evidence_time_sha256": "afd2e721470f91627eebc2d03b005101b4a5daa93e6023f85a1b5d7c9009a431",
+        "byte_identical_to_admission": true
+      },
+      "mu/tools/executors/commit_executor.py": {
+        "admission_sha256": "63305d86d9ece676e9c4a59fdcf1ee207ebf167229cc67ac1fd746b38b120ab3",
+        "evidence_time_sha256": "63305d86d9ece676e9c4a59fdcf1ee207ebf167229cc67ac1fd746b38b120ab3",
+        "byte_identical_to_admission": true
+      },
+      "mu/tools/executors/executor_common.py": {
+        "admission_sha256": "301f17d6f504c1746375d72cb0880e9d262b319e521e56ec7b76c0d628a2f43e",
+        "evidence_time_sha256": "301f17d6f504c1746375d72cb0880e9d262b319e521e56ec7b76c0d628a2f43e",
+        "byte_identical_to_admission": true
+      },
+      "mu/tools/executors/executor_dispatch.py": {
+        "admission_sha256": "5e7e09af2097203d65de0b16eb1b201b161c2afceea723482401e2a7c4229351",
+        "evidence_time_sha256": "5e7e09af2097203d65de0b16eb1b201b161c2afceea723482401e2a7c4229351",
+        "byte_identical_to_admission": true
+      },
+      "mu/tools/executors/launch_wave.py": {
+        "admission_sha256": "09a050eadc859e9630b8c25c41156205be79ccb266bc18d144dff3ce7301464c",
+        "evidence_time_sha256": "09a050eadc859e9630b8c25c41156205be79ccb266bc18d144dff3ce7301464c",
+        "byte_identical_to_admission": true
+      },
+      "mu/tools/executors/phase_b_executor.py": {
+        "admission_sha256": "f79595d0ef81c118c43ce72280c7559618562dc7cd7caaf8855338533f646ddb",
+        "evidence_time_sha256": "f79595d0ef81c118c43ce72280c7559618562dc7cd7caaf8855338533f646ddb",
+        "byte_identical_to_admission": true
+      },
+      "mu/tools/executors/recovery_gate.py": {
+        "admission_sha256": "285dc8815d7aaa051325f39288d3ea6d14aa671b4f6be90494db3eaf183ef778",
+        "evidence_time_sha256": "285dc8815d7aaa051325f39288d3ea6d14aa671b4f6be90494db3eaf183ef778",
+        "byte_identical_to_admission": true
+      },
+      "mu/tools/executors/validation_execution.py": {
+        "admission_sha256": "dc0964506389d250bd6f9a3f808d14f1ad436e80d923b50bcbb066a08076fc3f",
+        "evidence_time_sha256": "dc0964506389d250bd6f9a3f808d14f1ad436e80d923b50bcbb066a08076fc3f",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_commit_executor_receipt.py": {
+        "admission_sha256": "4276fe90b6df769c39d76283f484586cc7d42915b2546aab6e54aa0906332f2d",
+        "evidence_time_sha256": "4276fe90b6df769c39d76283f484586cc7d42915b2546aab6e54aa0906332f2d",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_executor_common.py": {
+        "admission_sha256": "3ab4fb2d9ec23d4b5b00877215f90b896de500ac3e0f95ca1be26d721dd94a5d",
+        "evidence_time_sha256": "3ab4fb2d9ec23d4b5b00877215f90b896de500ac3e0f95ca1be26d721dd94a5d",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_executor_config_alignment.py": {
+        "admission_sha256": "9cc0a3f27eb1f478962a8cb36568df4feda6deb9b02c50f652e31f19c37359aa",
+        "evidence_time_sha256": "9cc0a3f27eb1f478962a8cb36568df4feda6deb9b02c50f652e31f19c37359aa",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_executor_dispatch.py": {
+        "admission_sha256": "5a3f64503188d67b37d617e416cb135b43011f63375360f29cf5ac0031599982",
+        "evidence_time_sha256": "5a3f64503188d67b37d617e416cb135b43011f63375360f29cf5ac0031599982",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_launch_wave.py": {
+        "admission_sha256": "8bb24e950488730e0691f137918fc50d9be18eb6720fcea5ec5e27082df4faab",
+        "evidence_time_sha256": "8bb24e950488730e0691f137918fc50d9be18eb6720fcea5ec5e27082df4faab",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_meta_bridge_client.py": {
+        "admission_sha256": "deda79cfa9e3894310b366589227ad0f7b21128dd16b6272f21fca140d2a0168",
+        "evidence_time_sha256": "deda79cfa9e3894310b366589227ad0f7b21128dd16b6272f21fca140d2a0168",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_meta_bridge_supervisor.py": {
+        "admission_sha256": "34b47003dd7c339f75ae5025bf1164ebd004923b0dfd60ed33556a0d166b8a2a",
+        "evidence_time_sha256": "34b47003dd7c339f75ae5025bf1164ebd004923b0dfd60ed33556a0d166b8a2a",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_phase_b_executor.py": {
+        "admission_sha256": "95403552eb56836c44700c04ae65a223429ca61ec22ab47884559d884ce9dd2f",
+        "evidence_time_sha256": "f5c1061ebc657ef9e9e87f46a3a40da263a7ec13526f0548f43eed9272890c13",
+        "byte_identical_to_admission": false
+      },
+      "mu/tests/tools/test_recovery_gate.py": {
+        "admission_sha256": "ceab026a3038f8d1722cbcbfa4faa395f9bc722321cd3f2705adbc5182f293dc",
+        "evidence_time_sha256": "ceab026a3038f8d1722cbcbfa4faa395f9bc722321cd3f2705adbc5182f293dc",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_validation_execution.py": {
+        "admission_sha256": "066f15044f263207d9886a69dc2016a98c4d2c2c89643a327871981b50ff57fc",
+        "evidence_time_sha256": "066f15044f263207d9886a69dc2016a98c4d2c2c89643a327871981b50ff57fc",
+        "byte_identical_to_admission": true
+      },
+      "mu/tests/tools/test_commit_executor_post_merge_cleanup.py": {
+        "admission_sha256": "a728f9c2fa6426f384b923a9d41efbd2b46d4d20fa6c4a4add2da457d3fe7e08",
+        "evidence_time_sha256": "a728f9c2fa6426f384b923a9d41efbd2b46d4d20fa6c4a4add2da457d3fe7e08",
+        "byte_identical_to_admission": true
+      }
+    },
+    "closures": {
+      "reports/archive/deferred/workingrcx-pipeline-throughput-r7-2026-10-29_bridge_blockers_closed-by-workingrcx-pipeline-throughput-r14-2026-11-26.md": {
+        "admission_sha256": "5423f0755a2c72d01ba2ef58100d227015e75e57f4c9f11133e1d3260bd0d28d",
+        "evidence_time_sha256": "5423f0755a2c72d01ba2ef58100d227015e75e57f4c9f11133e1d3260bd0d28d",
+        "byte_identical_to_admission": true
+      },
+      "reports/archive/deferred/phase-b-heartbeat-observation-window-ci-flake-2026-11-26_closed-by-workingrcx-pipeline-throughput-r14-2026-11-26.md": {
+        "admission_sha256": "c8c6425e569ae8f909a233e716f7228a05c70c25dd2702d86b4c3c858417643f",
+        "evidence_time_sha256": "c8c6425e569ae8f909a233e716f7228a05c70c25dd2702d86b4c3c858417643f",
+        "byte_identical_to_admission": true
+      },
+      "reports/archive/deferred/commit-targeted-pytest-gate-phase-b-module-budget-2026-11-26_closed-by-workingrcx-pipeline-throughput-r14-2026-11-26.md": {
+        "admission_sha256": "48c9781d04af5ab22ea6ed304ec4103e35d097eead6bcdf23e8fcfde644a50c8",
+        "evidence_time_sha256": "48c9781d04af5ab22ea6ed304ec4103e35d097eead6bcdf23e8fcfde644a50c8",
+        "byte_identical_to_admission": true
+      }
+    },
+    "all_carried_byte_identical": false,
+    "all_closures_byte_identical": true,
+    "tasks_md_minus_this_wave_note_sha256": "370ec6712096af743cdb3ae4034eacfb58648631e9aa694ed03cbe800fca96e5",
+    "tasks_md_checkpoint_sha256": "370ec6712096af743cdb3ae4034eacfb58648631e9aa694ed03cbe800fca96e5",
+    "tasks_md_equals_checkpoint_plus_note": true
+  },
+  "catalog_binding": {
+    "option": "A (admission-time pinned copy)",
+    "pinned_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-admission/models_cache.pinned.json",
+    "pinned_sha256_expected": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+    "live_models_sha256_expected": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+    "canonicalization": "sha256(json.dumps(models, sort_keys=True, separators=(',', ':')))",
+    "checked_before_and_after_every_run": true,
+    "all_runs_pinned_ok": true,
+    "all_runs_live_models_unchanged": true,
+    "live_fetched_at_values": [
+      "2026-11-27T04:07:06.919524Z",
+      "2026-11-27T10:07:15.932254Z"
+    ],
+    "live_raw_sha256_values": [
+      "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+      "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28"
+    ]
+  },
+  "validation": {
+    "declared_gate_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 --maxfail=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_validation_execution.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_common.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_meta_bridge_client.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_docs_sync_report.py mu/tests/docs/test_doc_governance.py mu/tests/docs/test_docs_registry_agent_memory_exempt.py --tb=short --durations=20",
+    "declared_gate": {
+      "argv": [
+        "bash",
+        "-c",
+        "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 --maxfail=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_validation_execution.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_common.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_meta_bridge_client.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_docs_sync_report.py mu/tests/docs/test_doc_governance.py mu/tests/docs/test_docs_registry_agent_memory_exempt.py --tb=short --durations=20"
+      ],
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 --maxfail=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_validation_execution.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_common.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_meta_bridge_client.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_docs_sync_report.py mu/tests/docs/test_doc_governance.py mu/tests/docs/test_docs_registry_agent_memory_exempt.py --tb=short --durations=20",
+      "env_extra": {},
+      "env_observed": {
+        "GIT_EDITOR": "true",
+        "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+        "RCX_PIPELINE_SESSION": "1",
+        "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+        "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+      },
+      "started_at": "2026-11-27T10:10:41.357287+00:00",
+      "finished_at": "2026-11-27T10:21:12.454730+00:00",
+      "elapsed_seconds": 631.072,
+      "timeout_seconds": 7200,
+      "timed_out": false,
+      "exit_code": 0,
+      "summary_line": "5723 passed, 1 warning in 630.57s (0:10:30)",
+      "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/G1-declared-gate.stdout",
+      "stdout_sha256": "b25cafdbe382a502b4f4ddff9507ccd08290f2ce2c5ccd873c9401566ba5bbad",
+      "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/G1-declared-gate.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "binding_unchanged": true,
+      "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+      "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+      "catalog_before": {
+        "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+        "pinned_ok": true,
+        "live_raw_sha256": "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28",
+        "live_fetched_at": "2026-11-27T10:07:15.932254Z",
+        "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+        "live_models_ok": true
+      },
+      "catalog_after": {
+        "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+        "pinned_ok": true,
+        "live_raw_sha256": "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28",
+        "live_fetched_at": "2026-11-27T10:07:15.932254Z",
+        "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+        "live_models_ok": true
+      }
+    },
+    "identical_sweep": {
+      "argv": [
+        "bash",
+        "-c",
+        "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 --maxfail=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_validation_execution.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_common.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_meta_bridge_client.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_docs_sync_report.py mu/tests/docs/test_doc_governance.py mu/tests/docs/test_docs_registry_agent_memory_exempt.py --tb=short --durations=20"
+      ],
+      "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 --maxfail=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_validation_execution.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_common.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_meta_bridge_client.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_docs_sync_report.py mu/tests/docs/test_doc_governance.py mu/tests/docs/test_docs_registry_agent_memory_exempt.py --tb=short --durations=20",
+      "env_extra": {},
+      "env_observed": {
+        "GIT_EDITOR": "true",
+        "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+        "RCX_PIPELINE_SESSION": "1",
+        "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+        "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+      },
+      "started_at": "2026-11-27T10:21:12.579420+00:00",
+      "finished_at": "2026-11-27T10:31:35.069237+00:00",
+      "elapsed_seconds": 622.459,
+      "timeout_seconds": 7200,
+      "timed_out": false,
+      "exit_code": 0,
+      "summary_line": "5723 passed, 1 warning in 621.94s (0:10:21)",
+      "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/G2-identical-sweep.stdout",
+      "stdout_sha256": "5c50cf3281f43e729ffd8a42bc398ce521a876edc09b32f3eabd7b631c91d20f",
+      "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/G2-identical-sweep.stderr",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "binding_unchanged": true,
+      "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+      "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+      "catalog_before": {
+        "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+        "pinned_ok": true,
+        "live_raw_sha256": "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28",
+        "live_fetched_at": "2026-11-27T10:07:15.932254Z",
+        "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+        "live_models_ok": true
+      },
+      "catalog_after": {
+        "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+        "pinned_ok": true,
+        "live_raw_sha256": "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28",
+        "live_fetched_at": "2026-11-27T10:07:15.932254Z",
+        "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+        "live_models_ok": true
+      }
+    },
+    "pair_on_identical_binding": true,
+    "runs": {
+      "A-reproduction-24": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_meta_bridge_client.py::test_supervisor_handoff_refuses_cached_common_over_ceiling",
+          "mu/tests/tools/test_meta_bridge_client.py::test_supervisor_handoff_ignores_timestamp_bytecode"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:02:40.181180+00:00",
+        "finished_at": "2026-11-27T10:02:42.889858+00:00",
+        "elapsed_seconds": 2.696,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "24 passed in 2.30s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/A-reproduction-24.stdout",
+        "stdout_sha256": "658f8e87e5dcd5cef1c997b8714146f2c859b8b1dd250ad9aef9a7f3bc0360ec",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/A-reproduction-24.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "B-meta-bridge-client-module": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "-n",
+          "4",
+          "--dist",
+          "worksteal",
+          "--max-worker-restart=0",
+          "mu/tests/tools/test_meta_bridge_client.py"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:02:42.998325+00:00",
+        "finished_at": "2026-11-27T10:02:48.121156+00:00",
+        "elapsed_seconds": 5.111,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "150 passed in 4.80s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/B-meta-bridge-client-module.stdout",
+        "stdout_sha256": "335ec6754ded24bdeda2d6c65753f62c4973f91364b4a5411e913d3ee9f31711",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/B-meta-bridge-client-module.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "C-validation-execution-module": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "-n",
+          "4",
+          "--dist",
+          "worksteal",
+          "--max-worker-restart=0",
+          "mu/tests/tools/test_validation_execution.py"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:02:48.228147+00:00",
+        "finished_at": "2026-11-27T10:03:14.435742+00:00",
+        "elapsed_seconds": 26.195,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "49 passed in 25.86s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/C-validation-execution-module.stdout",
+        "stdout_sha256": "664d3176d7b84b608d037c76b736ba957663632ad7d24a4158f604635e449b36",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/C-validation-execution-module.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "C2-native-fixture-benchmark": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_validation_execution.py::test_actual_native_fixture_benchmark"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "RCX_VALIDATION_LOG_DIR": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/benchmark"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500",
+          "RCX_VALIDATION_LOG_DIR": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/benchmark"
+        },
+        "started_at": "2026-11-27T10:03:14.555495+00:00",
+        "finished_at": "2026-11-27T10:03:31.469448+00:00",
+        "elapsed_seconds": 16.902,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "1 passed in 16.58s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/C2-native-fixture-benchmark.stdout",
+        "stdout_sha256": "9800066b9f0f45e94a9f194df41696057882a8fdffe61cb2bbd1315057891bcf",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/C2-native-fixture-benchmark.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run01": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:03:33.368204+00:00",
+        "finished_at": "2026-11-27T10:03:37.864677+00:00",
+        "elapsed_seconds": 4.485,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.16s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run01.stdout",
+        "stdout_sha256": "6697f81cd1300531ad83132564282218866e63dee96ce27038d3c7ef85fb1e21",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run01.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run02": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:03:37.987025+00:00",
+        "finished_at": "2026-11-27T10:03:42.534062+00:00",
+        "elapsed_seconds": 4.535,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.18s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run02.stdout",
+        "stdout_sha256": "bf6d9b3fc99caf4e57348407095ff02881c1ee8dc75e5c392fa29ac825035d6f",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run02.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run03": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:03:42.637129+00:00",
+        "finished_at": "2026-11-27T10:03:47.147150+00:00",
+        "elapsed_seconds": 4.497,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.13s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run03.stdout",
+        "stdout_sha256": "f08958dc1d19342bde7797036193914f0262b2887b69dfd8130c1d701ea1372a",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run03.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run04": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:03:47.254979+00:00",
+        "finished_at": "2026-11-27T10:03:51.651688+00:00",
+        "elapsed_seconds": 4.385,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.06s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run04.stdout",
+        "stdout_sha256": "a89f2267e41ab2128be2b543074f766b4d620768952c6ff16393b00baf4c17e8",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run04.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run05": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:03:51.766159+00:00",
+        "finished_at": "2026-11-27T10:03:56.222977+00:00",
+        "elapsed_seconds": 4.445,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.08s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run05.stdout",
+        "stdout_sha256": "f1b502ad0b6dfb5c703b13760f1c9c9f1bc2d791b384432d535ca9d0bd4a213e",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run05.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run06": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:03:56.341814+00:00",
+        "finished_at": "2026-11-27T10:04:00.933940+00:00",
+        "elapsed_seconds": 4.58,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.19s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run06.stdout",
+        "stdout_sha256": "d173bcc58c4ca7e8eab98a96f45beb1bb055f8c076e2c43814b345b4786554b4",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run06.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run07": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:01.043178+00:00",
+        "finished_at": "2026-11-27T10:04:05.574473+00:00",
+        "elapsed_seconds": 4.52,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.16s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run07.stdout",
+        "stdout_sha256": "6697f81cd1300531ad83132564282218866e63dee96ce27038d3c7ef85fb1e21",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run07.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run08": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:05.682165+00:00",
+        "finished_at": "2026-11-27T10:04:10.146396+00:00",
+        "elapsed_seconds": 4.452,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.08s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run08.stdout",
+        "stdout_sha256": "f1b502ad0b6dfb5c703b13760f1c9c9f1bc2d791b384432d535ca9d0bd4a213e",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run08.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run09": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:10.262515+00:00",
+        "finished_at": "2026-11-27T10:04:14.734507+00:00",
+        "elapsed_seconds": 4.46,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.07s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run09.stdout",
+        "stdout_sha256": "557a96c7c61aaeba8dad1b7b9c615ec231a34fb56670357b378e8d8cc4c4215a",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run09.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run10": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:14.850971+00:00",
+        "finished_at": "2026-11-27T10:04:19.472108+00:00",
+        "elapsed_seconds": 4.61,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.21s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run10.stdout",
+        "stdout_sha256": "4fa050a70f65f1025f90f9221076319d7044ad385bc99ed1feaabfa656fcc960",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run10.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run11": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:19.575783+00:00",
+        "finished_at": "2026-11-27T10:04:24.064169+00:00",
+        "elapsed_seconds": 4.476,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.12s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run11.stdout",
+        "stdout_sha256": "37e946703ae61a760ffdb995f61836bbde4f35d8b0940c11cf71af66cec22012",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run11.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run12": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:24.175863+00:00",
+        "finished_at": "2026-11-27T10:04:28.629041+00:00",
+        "elapsed_seconds": 4.441,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.07s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run12.stdout",
+        "stdout_sha256": "557a96c7c61aaeba8dad1b7b9c615ec231a34fb56670357b378e8d8cc4c4215a",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run12.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run13": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:28.736889+00:00",
+        "finished_at": "2026-11-27T10:04:33.246870+00:00",
+        "elapsed_seconds": 4.498,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.13s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run13.stdout",
+        "stdout_sha256": "f08958dc1d19342bde7797036193914f0262b2887b69dfd8130c1d701ea1372a",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run13.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run14": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:33.355992+00:00",
+        "finished_at": "2026-11-27T10:04:37.908648+00:00",
+        "elapsed_seconds": 4.541,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.18s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run14.stdout",
+        "stdout_sha256": "bf6d9b3fc99caf4e57348407095ff02881c1ee8dc75e5c392fa29ac825035d6f",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run14.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run15": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:38.020370+00:00",
+        "finished_at": "2026-11-27T10:04:42.496049+00:00",
+        "elapsed_seconds": 4.464,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.14s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run15.stdout",
+        "stdout_sha256": "1c64f2aa6d9aac80ea0e30b01c3c0c6ffb729ee8d39ca6b010fd61bcb97ee50e",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run15.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run16": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:42.598442+00:00",
+        "finished_at": "2026-11-27T10:04:47.099656+00:00",
+        "elapsed_seconds": 4.489,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.16s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run16.stdout",
+        "stdout_sha256": "6697f81cd1300531ad83132564282218866e63dee96ce27038d3c7ef85fb1e21",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run16.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run17": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:47.210171+00:00",
+        "finished_at": "2026-11-27T10:04:51.613481+00:00",
+        "elapsed_seconds": 4.391,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.02s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run17.stdout",
+        "stdout_sha256": "819a2d4122fbf968e4bdce180e95a4a34610a672e7226d2dea25200c7cde445a",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run17.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run18": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:51.722517+00:00",
+        "finished_at": "2026-11-27T10:04:56.220006+00:00",
+        "elapsed_seconds": 4.486,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.13s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run18.stdout",
+        "stdout_sha256": "f08958dc1d19342bde7797036193914f0262b2887b69dfd8130c1d701ea1372a",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run18.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run19": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:04:56.313700+00:00",
+        "finished_at": "2026-11-27T10:05:00.839886+00:00",
+        "elapsed_seconds": 4.514,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.18s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run19.stdout",
+        "stdout_sha256": "bf6d9b3fc99caf4e57348407095ff02881c1ee8dc75e5c392fa29ac825035d6f",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run19.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "D-hybrid-fixture-run20": {
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "--maxfail=0",
+          "-p",
+          "no:cacheprovider",
+          "--import-mode=importlib",
+          "-m",
+          "not slow and not fuzzer",
+          "--tb=short",
+          "mu/tests/tools/test_recovery_gate.py::test_hybrid_child_receipts_and_live_environment_are_contained"
+        ],
+        "shell_command": null,
+        "env_extra": {
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1"
+        },
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "HYPOTHESIS_PROFILE": "ci_fast",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONHASHSEED": "0",
+          "RCX_CI": "1",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:05:00.951282+00:00",
+        "finished_at": "2026-11-27T10:05:05.351396+00:00",
+        "elapsed_seconds": 4.388,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "3 passed in 4.03s",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run20.stdout",
+        "stdout_sha256": "267b2ad44d45aa1fab650ab4145dee2091a8048ba68e29882584261979375231",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/D-hybrid-fixture-run20.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "E1-private-attr-checker": {
+        "argv": [
+          "python3",
+          "tools/checks/linters/check_private_attr_access.py",
+          "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126",
+          "mu/tests/docs/test_doc_governance.py",
+          "mu/tests/docs/test_docs_registry_agent_memory_exempt.py",
+          "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+          "mu/tests/tools/test_commit_executor_receipt.py",
+          "mu/tests/tools/test_docs_sync_report.py",
+          "mu/tests/tools/test_executor_common.py",
+          "mu/tests/tools/test_executor_config_alignment.py",
+          "mu/tests/tools/test_executor_dispatch.py",
+          "mu/tests/tools/test_launch_wave.py",
+          "mu/tests/tools/test_meta_bridge_client.py",
+          "mu/tests/tools/test_meta_bridge_supervisor.py",
+          "mu/tests/tools/test_phase_b_executor.py",
+          "mu/tests/tools/test_recovery_gate.py",
+          "mu/tests/tools/test_validation_execution.py"
+        ],
+        "shell_command": null,
+        "env_extra": {},
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:03:31.582745+00:00",
+        "finished_at": "2026-11-27T10:03:32.276951+00:00",
+        "elapsed_seconds": 0.682,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": null,
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/E1-private-attr-checker.stdout",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/E1-private-attr-checker.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "E2-control-surface-invariants": {
+        "argv": [
+          "python3",
+          "tools/checks/check_control_surface_invariants.py",
+          "--files",
+          "CHANGELOG.md",
+          "TASKS.md",
+          "mu/docs/agents/AgentRunbook.v0.md",
+          "mu/docs/core/DocGovernance.v0.md",
+          "mu/tests/docs/test_doc_governance.py",
+          "mu/tests/docs/test_docs_registry_agent_memory_exempt.py",
+          "mu/tests/tools/test_commit_executor_post_merge_cleanup.py",
+          "mu/tests/tools/test_commit_executor_receipt.py",
+          "mu/tests/tools/test_docs_sync_report.py",
+          "mu/tests/tools/test_executor_common.py",
+          "mu/tests/tools/test_executor_config_alignment.py",
+          "mu/tests/tools/test_executor_dispatch.py",
+          "mu/tests/tools/test_launch_wave.py",
+          "mu/tests/tools/test_meta_bridge_client.py",
+          "mu/tests/tools/test_meta_bridge_supervisor.py",
+          "mu/tests/tools/test_phase_b_executor.py",
+          "mu/tests/tools/test_recovery_gate.py",
+          "mu/tests/tools/test_validation_execution.py",
+          "mu/tools/agents/meta_bridge_client.py",
+          "mu/tools/agents/meta_bridge_supervisor.py",
+          "mu/tools/docs/docs_sync_report.py",
+          "mu/tools/docs/shared_doc_config.py",
+          "mu/tools/executors/commit_executor.py",
+          "mu/tools/executors/executor_common.py",
+          "mu/tools/executors/executor_dispatch.py",
+          "mu/tools/executors/launch_wave.py",
+          "mu/tools/executors/phase_b_executor.py",
+          "mu/tools/executors/recovery_gate.py",
+          "mu/tools/executors/validation_execution.py",
+          "reports/archive/deferred/commit-targeted-pytest-gate-phase-b-module-budget-2026-11-26_closed-by-workingrcx-pipeline-throughput-r14-2026-11-26.md",
+          "reports/archive/deferred/phase-b-heartbeat-observation-window-ci-flake-2026-11-26_closed-by-workingrcx-pipeline-throughput-r14-2026-11-26.md",
+          "reports/archive/deferred/workingrcx-pipeline-throughput-r7-2026-10-29_bridge_blockers_closed-by-workingrcx-pipeline-throughput-r14-2026-11-26.md",
+          "reports/control_plane/workingrcx-pipeline-throughput-r14-2026-11-26_2026-11-26.md",
+          "--json",
+          "-v"
+        ],
+        "shell_command": null,
+        "env_extra": {},
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:03:32.394320+00:00",
+        "finished_at": "2026-11-27T10:03:32.615306+00:00",
+        "elapsed_seconds": 0.209,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": null,
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/E2-control-surface-invariants.stdout",
+        "stdout_sha256": "2b55d39575dca48084bfbbf777edb656d4f6d7c87e6ebfee82c8128ddc5f66f7",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/E2-control-surface-invariants.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "F-docs-counterfactual": {
+        "argv": [
+          "python3",
+          "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/docs_counterfactual.py",
+          "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126",
+          "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/docs_counterfactual.frozen.json"
+        ],
+        "shell_command": null,
+        "env_extra": {},
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:03:32.717345+00:00",
+        "finished_at": "2026-11-27T10:03:33.257144+00:00",
+        "elapsed_seconds": 0.528,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": null,
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/F-docs-counterfactual.stdout",
+        "stdout_sha256": "99efb4f97f59c47b41864a8ed24986a258b950019abcba42962b6507a46f7594",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/F-docs-counterfactual.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "G1-declared-gate": {
+        "argv": [
+          "bash",
+          "-c",
+          "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 --maxfail=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_validation_execution.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_common.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_meta_bridge_client.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_docs_sync_report.py mu/tests/docs/test_doc_governance.py mu/tests/docs/test_docs_registry_agent_memory_exempt.py --tb=short --durations=20"
+        ],
+        "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 --maxfail=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_validation_execution.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_common.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_meta_bridge_client.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_docs_sync_report.py mu/tests/docs/test_doc_governance.py mu/tests/docs/test_docs_registry_agent_memory_exempt.py --tb=short --durations=20",
+        "env_extra": {},
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:10:41.357287+00:00",
+        "finished_at": "2026-11-27T10:21:12.454730+00:00",
+        "elapsed_seconds": 631.072,
+        "timeout_seconds": 7200,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "5723 passed, 1 warning in 630.57s (0:10:30)",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/G1-declared-gate.stdout",
+        "stdout_sha256": "b25cafdbe382a502b4f4ddff9507ccd08290f2ce2c5ccd873c9401566ba5bbad",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/G1-declared-gate.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28",
+          "live_fetched_at": "2026-11-27T10:07:15.932254Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28",
+          "live_fetched_at": "2026-11-27T10:07:15.932254Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "G2-identical-sweep": {
+        "argv": [
+          "bash",
+          "-c",
+          "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 --maxfail=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_validation_execution.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_common.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_meta_bridge_client.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_docs_sync_report.py mu/tests/docs/test_doc_governance.py mu/tests/docs/test_docs_registry_agent_memory_exempt.py --tb=short --durations=20"
+        ],
+        "shell_command": "PYTHONHASHSEED=0 RCX_CI=1 HYPOTHESIS_PROFILE=ci_fast PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -n 4 --dist worksteal --max-worker-restart=0 --maxfail=0 -p no:cacheprovider --import-mode=importlib -m 'not slow and not fuzzer' mu/tests/tools/test_validation_execution.py mu/tests/tools/test_phase_b_executor.py mu/tests/tools/test_commit_executor_receipt.py mu/tests/tools/test_executor_common.py mu/tests/tools/test_executor_dispatch.py mu/tests/tools/test_launch_wave.py mu/tests/tools/test_meta_bridge_supervisor.py mu/tests/tools/test_executor_config_alignment.py mu/tests/tools/test_recovery_gate.py mu/tests/tools/test_meta_bridge_client.py mu/tests/tools/test_commit_executor_post_merge_cleanup.py mu/tests/tools/test_docs_sync_report.py mu/tests/docs/test_doc_governance.py mu/tests/docs/test_docs_registry_agent_memory_exempt.py --tb=short --durations=20",
+        "env_extra": {},
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:21:12.579420+00:00",
+        "finished_at": "2026-11-27T10:31:35.069237+00:00",
+        "elapsed_seconds": 622.459,
+        "timeout_seconds": 7200,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": "5723 passed, 1 warning in 621.94s (0:10:21)",
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/G2-identical-sweep.stdout",
+        "stdout_sha256": "5c50cf3281f43e729ffd8a42bc398ce521a876edc09b32f3eabd7b631c91d20f",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/G2-identical-sweep.stderr",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28",
+          "live_fetched_at": "2026-11-27T10:07:15.932254Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28",
+          "live_fetched_at": "2026-11-27T10:07:15.932254Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      },
+      "H-native-hybrid-per-module": {
+        "argv": [
+          "python3",
+          "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/r14_native_hybrid_acceptance.py",
+          "per-module"
+        ],
+        "shell_command": null,
+        "env_extra": {},
+        "env_observed": {
+          "GIT_EDITOR": "true",
+          "RCX_EXECUTOR_PROCESS_OWNERS": "1fa1f95bbe4d46ff9bd9ed3731ae4dd1",
+          "RCX_PIPELINE_SESSION": "1",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY": "phase_a",
+          "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE": "1500"
+        },
+        "started_at": "2026-11-27T10:05:05.460375+00:00",
+        "finished_at": "2026-11-27T10:10:41.196811+00:00",
+        "elapsed_seconds": 335.719,
+        "timeout_seconds": 1800,
+        "timed_out": false,
+        "exit_code": 0,
+        "summary_line": null,
+        "stdout_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/H-native-hybrid-per-module.stdout",
+        "stdout_sha256": "3912b839937e7b54f431c10108e8cf57255791ae0b14415320beb1ffcfb77d72",
+        "stderr_path": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/logs/H-native-hybrid-per-module.stderr",
+        "stderr_sha256": "525b874dcf3208d5fd63dee88fc17c93a6cc6236a49cc32da427d19297f4979b",
+        "binding_unchanged": true,
+        "binding_sha256_before": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "binding_sha256_after": "a8962d09c5dd41f329597d9f6bd4f11c252df427b047160e6c1dd081d4b281cd",
+        "catalog_before": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "live_fetched_at": "2026-11-27T04:07:06.919524Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        },
+        "catalog_after": {
+          "pinned_sha256": "92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c",
+          "pinned_ok": true,
+          "live_raw_sha256": "9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28",
+          "live_fetched_at": "2026-11-27T10:07:15.932254Z",
+          "live_models_sha256": "583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b",
+          "live_models_ok": true
+        }
+      }
+    },
+    "fixture_benchmark": [
+      {
+        "serial": 12.43750475,
+        "parallel": 3.818571,
+        "speedup": 3.257109727696565,
+        "identities": [
+          [
+            "test_jobs",
+            "test_independent_job[0]",
+            []
+          ],
+          [
+            "test_jobs",
+            "test_independent_job[1]",
+            []
+          ],
+          [
+            "test_jobs",
+            "test_independent_job[2]",
+            []
+          ],
+          [
+            "test_jobs",
+            "test_independent_job[3]",
+            []
+          ],
+          [
+            "test_jobs",
+            "test_independent_job[4]",
+            []
+          ],
+          [
+            "test_jobs",
+            "test_independent_job[5]",
+            []
+          ],
+          [
+            "test_jobs",
+            "test_independent_job[6]",
+            []
+          ],
+          [
+            "test_jobs",
+            "test_independent_job[7]",
+            []
+          ]
+        ],
+        "serial_receipt": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/benchmark/46a9d5bb13c8474cb9ac38b222da67f6.json",
+        "parallel_receipt": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/benchmark/78a42f52163a4ed8a4872bd854a7d141.json"
+      }
+    ],
+    "native_hybrid_acceptance": {
+      "targets": [
+        "mu/tests/tools/test_validation_execution.py",
+        "mu/tests/tools/test_executor_common.py",
+        "mu/tests/tools/test_phase_b_executor.py",
+        "mu/tests/tools/test_commit_executor_receipt.py"
+      ],
+      "schedule_mode": "per-module",
+      "selector_profile": "full",
+      "hypothesis_profile": null,
+      "audit_ok": true,
+      "per_leaf": [
+        {
+          "targets": [
+            "mu/tests/tools/test_validation_execution.py"
+          ],
+          "status": "passed",
+          "exit_code": 0,
+          "elapsed_seconds": 27.08918875,
+          "timeout_seconds": 300,
+          "executed_count": 49,
+          "command": [
+            "/opt/homebrew/opt/python@3.13/bin/python3.13",
+            "-m",
+            "pytest",
+            "--tb=short",
+            "-p",
+            "no:cacheprovider",
+            "-c",
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/pyproject.toml",
+            "-n",
+            "4",
+            "--dist",
+            "worksteal",
+            "--max-worker-restart=0",
+            "mu/tests/tools/test_validation_execution.py",
+            "--maxfail=0",
+            "--basetemp",
+            "/tmp/rcx-recovery-tmp-yxlgjk5s/pytest",
+            "--junitxml",
+            "/tmp/rcx-hybrid-validation-s83uae4w/hybrid-529b3b9f7d254b2ebd6b2d197b6ca506/validator-0.junit.xml"
+          ],
+          "stdout_sha256": "5a5ccaec3f5e0dd00bc3a82beb90c14752250ed4e2390587240f61458f3d2af0",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "junit_sha256": "1bbdbec8dc107633a4f8050cb7ec02bd911b84fa8090088f514981a7f21ec5fd",
+          "output_complete": true
+        },
+        {
+          "targets": [
+            "mu/tests/tools/test_executor_common.py"
+          ],
+          "status": "passed",
+          "exit_code": 0,
+          "elapsed_seconds": 2.59480125,
+          "timeout_seconds": 300,
+          "executed_count": 81,
+          "command": [
+            "/opt/homebrew/opt/python@3.13/bin/python3.13",
+            "-m",
+            "pytest",
+            "--tb=short",
+            "-p",
+            "no:cacheprovider",
+            "-c",
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/pyproject.toml",
+            "-n",
+            "4",
+            "--dist",
+            "worksteal",
+            "--max-worker-restart=0",
+            "mu/tests/tools/test_executor_common.py",
+            "--maxfail=0",
+            "--basetemp",
+            "/tmp/rcx-recovery-tmp-d85u9bft/pytest",
+            "--junitxml",
+            "/tmp/rcx-hybrid-validation-s83uae4w/hybrid-529b3b9f7d254b2ebd6b2d197b6ca506/validator-1.junit.xml"
+          ],
+          "stdout_sha256": "4047c327d6e6735bd67eed9541d2dc555705bc1ac3975948592cdd891a3cd437",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "junit_sha256": "59ea5f7ead726024241711edcc9d979091e55a969203a43e0c31d19d60fd67d1",
+          "output_complete": true
+        },
+        {
+          "targets": [
+            "mu/tests/tools/test_phase_b_executor.py"
+          ],
+          "status": "passed",
+          "exit_code": 0,
+          "elapsed_seconds": 249.804372292,
+          "timeout_seconds": 300,
+          "executed_count": 1520,
+          "command": [
+            "/opt/homebrew/opt/python@3.13/bin/python3.13",
+            "-m",
+            "pytest",
+            "--tb=short",
+            "-p",
+            "no:cacheprovider",
+            "-c",
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/pyproject.toml",
+            "-n",
+            "4",
+            "--dist",
+            "worksteal",
+            "--max-worker-restart=0",
+            "mu/tests/tools/test_phase_b_executor.py",
+            "--maxfail=0",
+            "--basetemp",
+            "/tmp/rcx-recovery-tmp-pff0556e/pytest",
+            "--junitxml",
+            "/tmp/rcx-hybrid-validation-s83uae4w/hybrid-529b3b9f7d254b2ebd6b2d197b6ca506/validator-2.junit.xml"
+          ],
+          "stdout_sha256": "82cca929a930385263225b3ac8e37844f902d7d5751d6325d66bd790fbd4cb6d",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "junit_sha256": "2851b63b92c00e2bc213cb0567b8735b7176565575ad96b0c06e8cb66e16bc72",
+          "output_complete": true
+        },
+        {
+          "targets": [
+            "mu/tests/tools/test_commit_executor_receipt.py"
+          ],
+          "status": "passed",
+          "exit_code": 0,
+          "elapsed_seconds": 47.241391,
+          "timeout_seconds": 300,
+          "executed_count": 335,
+          "command": [
+            "/opt/homebrew/opt/python@3.13/bin/python3.13",
+            "-m",
+            "pytest",
+            "--tb=short",
+            "-p",
+            "no:cacheprovider",
+            "-c",
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/pyproject.toml",
+            "-n",
+            "4",
+            "--dist",
+            "worksteal",
+            "--max-worker-restart=0",
+            "mu/tests/tools/test_commit_executor_receipt.py",
+            "--maxfail=0",
+            "--basetemp",
+            "/tmp/rcx-recovery-tmp-ryvwyjrv/pytest",
+            "--junitxml",
+            "/tmp/rcx-hybrid-validation-s83uae4w/hybrid-529b3b9f7d254b2ebd6b2d197b6ca506/validator-3.junit.xml"
+          ],
+          "stdout_sha256": "2035d5cffc808bf1e0c09e4a7297639d5c9fa6a4084f6c7118b1502a068302a2",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "junit_sha256": "c16c7bc5907e46a9342a7080fa5dc86061927719780503489a848b4e2d1d3092",
+          "output_complete": true
+        }
+      ],
+      "parent_budget": {
+        "allocations": [
+          [
+            "implementation_convergence",
+            18000
+          ],
+          [
+            "pytest_full",
+            7200
+          ],
+          [
+            "meta_validation",
+            1200
+          ],
+          [
+            "supervisor_review",
+            900
+          ]
+        ],
+        "baseline": 18000,
+        "bindings": [
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/executors/executor_common.py",
+            "301f17d6f504c1746375d72cb0880e9d262b319e521e56ec7b76c0d628a2f43e"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/executors/validation_execution.py",
+            "dc0964506389d250bd6f9a3f808d14f1ad436e80d923b50bcbb066a08076fc3f"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/executors/phase_b_executor.py",
+            "f79595d0ef81c118c43ce72280c7559618562dc7cd7caaf8855338533f646ddb"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/executors/commit_executor.py",
+            "63305d86d9ece676e9c4a59fdcf1ee207ebf167229cc67ac1fd746b38b120ab3"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/executors/executor_dispatch.py",
+            "5e7e09af2097203d65de0b16eb1b201b161c2afceea723482401e2a7c4229351"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/executors/launch_wave.py",
+            "09a050eadc859e9630b8c25c41156205be79ccb266bc18d144dff3ce7301464c"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/executors/recovery_gate.py",
+            "285dc8815d7aaa051325f39288d3ea6d14aa671b4f6be90494db3eaf183ef778"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/agents/meta_bridge_supervisor.py",
+            "afd2e721470f91627eebc2d03b005101b4a5daa93e6023f85a1b5d7c9009a431"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/agents/meta_bridge_client.py",
+            "1a618ac6e7248e299c1765e3d4defd31bbf2488e3f89a095cef5434eca662c71"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/mu/tools/executors/executor_config.json",
+            "9f03b0f14379528fb3e65fae08aad8809e5910ed0409fda8b8d205b2c8057d39"
+          ],
+          [
+            "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126/.agent_bus/bridge_config.json",
+            "absent"
+          ],
+          [
+            "/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/bin/python3.13",
+            "4be5bd974c413ea1817a33d091f9470bb8735355d182db7fb852977e266d647e"
+          ],
+          [
+            "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/r14_native_hybrid_acceptance.py",
+            "f958120e06e64c307a571feae898fb7e3bc1fae82c781763bebe069ce17d4c0b"
+          ]
+        ],
+        "ceiling": 27300,
+        "command": [
+          "/opt/homebrew/opt/python@3.13/bin/python3.13",
+          "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/r14_native_hybrid_acceptance.py",
+          "per-module"
+        ],
+        "digest": "426beedc2185a19d41994f4cef96cdfc0d3d938a656e2e5afa157bd8f7c4acfb",
+        "environment": [
+          [
+            "PYTHONHASHSEED",
+            null
+          ],
+          [
+            "RCX_CI",
+            null
+          ],
+          [
+            "HYPOTHESIS_PROFILE",
+            null
+          ],
+          [
+            "PYTHONDONTWRITEBYTECODE",
+            null
+          ],
+          [
+            "PYTEST_ADDOPTS",
+            null
+          ],
+          [
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+            null
+          ],
+          [
+            "PYTHONPATH",
+            null
+          ],
+          [
+            "PATH",
+            "/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.bun/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.codeium/windsurf/bin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/opt/homebrew/opt/python@3.13/libexec/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/Users/jeffabrams/.npm-global/bin:/Users/jeffabrams/.local/bin:/Users/jeffabrams/Library/Python/3.13/bin:/Users/jeffabrams/.cargo/bin:/Users/jeffabrams/.cabal/bin:/Users/jeffabrams/.ghcup/bin:/Users/jeffabrams/.elan/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/TeX/texbin"
+          ],
+          [
+            "RCX_META_VALIDATION_TIMEOUT_S",
+            null
+          ]
+        ],
+        "invocation": "eed64e5186de4eab9331cbff96791767",
+        "key": "phase_b_executor",
+        "repo": "/Users/jeffabrams/Desktop/RCX_X/RCXStack/RCXStackminimal/WorkingRCX/.scratch/worktrees/pipeline-throughput-r14-20261126",
+        "seconds": 27300,
+        "started_ns": 1055003314464958,
+        "version": 1,
+        "wall_started_ns": 1795773906912579000
+      },
+      "passed": true,
+      "hybrid_receipt_path": "/tmp/rcx-hybrid-validation-s83uae4w/hybrid-529b3b9f7d254b2ebd6b2d197b6ca506/result.json",
+      "hybrid_elapsed_seconds": 332.640183958,
+      "record": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/native-hybrid-acceptance.per-module.json",
+      "record_sha256": "9972ebc94a323639451aa24fbbe784b381b58b2c7e15ee6844d2aa074e395426"
+    },
+    "docs_counterfactual": {
+      "pre_freeze": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/docs_counterfactual.json",
+      "frozen": "/Volumes/RCX Recovery/WorkingRCX-Recovery/reviews/autonomous-landing-20261011/workingrcx-pipeline-throughput-r14-2026-11-26-phase-b/docs_counterfactual.frozen.json",
+      "frozen_sha256": "26e840780aaedd21eaf29174160fae2c10f46d1ca70e609b52df53dbb58864c0"
+    }
+  },
+  "implementation": {
+    "carried_candidate": "22 candidate files carried byte-identically from R13's reviewed staged blobs; verified against the R14 admission record before any change. After this wave, 20 remain byte-identical; CHANGELOG.md and mu/tests/tools/test_phase_b_executor.py were changed by this wave as described in changed_files.r14_authored. The three closure records and TASKS.md (checkpoint plus only this wave's tracker note) are byte-identical.",
+    "item_3_reproduction": "Re-run first: the 24 normal and -B stale executor_common bytecode controls (warm/stale/cold/absent caches, validation module warm/cold) pass: a same-size, same-mtime cache of a 9900-second ceiling beside source declaring 7200 never admits a 9000-second request. See validation.runs.A-reproduction-24.",
+    "items_4_8_27_handoff": "Complete test_meta_bridge_client.py (150 tests: warm/cold/absent caches for both handoff dependencies, wrong-source refusal, compile/import/execution/interruption/source-drift/peer-drift/missing-guard refresh failures with preserved ownership, over-ceiling refusal under normal and -B) passes. Carried code reviewed; unchanged.",
+    "item_31_runner": "Carried runner reviewed: completion requires leader exit and end-of-file on both kernel pipes within the finite allowance; only the runner's copier writes the durable files and they are closed before hashing; an open writer at the boundary is an ownership HOLD with output_complete false; NativeStageBudget.remaining() raises at zero and on stale clocks, so the wait loop is finite. test_validation_execution.py (49 tests) passes. Unchanged.",
+    "item_28_fixture": "Carried retained_native_scratch fixture sets repo-local gc.auto 0 and maintenance.auto false before its first commit; test_hybrid_child_receipts_and_live_environment_are_contained passed 20 consecutive fresh-process runs (3 owner cases each) in round 2 and 20 in round 1.",
+    "item_11_benchmark": "Deterministic eight-independent-job fixture through the actual phase_b_executor native caller: see validation.fixture_benchmark (identical identities; parallel/serial ratio below 0.80). Fixture improvement only; not an end-to-end delivery speedup claim.",
+    "item_5_recovery_acceptance": "Actual recovery_gate.run_hybrid_validation, four-module full selector as four ordered validator items, at most four workers, unchanged 300-second leaves inside one admitted finite phase_b_executor parent schedule, durable output under /tmp outside the candidate, native hybrid checkpoint and final scope audit: see validation.native_hybrid_acceptance. HYPOTHESIS_PROFILE was unset (pytest default), so this is full-selector evidence, not ci_full evidence.",
+    "item_16_checks": "Private-attribute checker over every changed test module: exit 0. All six control-surface invariants (INV-1..INV-6): PASS. Both checkers unchanged.",
+    "item_30_docs": "See changed_files.r14_authored. Counterfactual (validation.docs_counterfactual): the HEAD report fails --check on ignored .agents/.codex copies (unclassified plus tracker-section violations) and an ignored docs/ subfolder, and silently walks the filesystem without git; the new report passes, reports exactly the untracked non-ignored files, and exits 2 without git. Removing the agent-memory registry entry makes the explicit-set report list the probe, so the strengthened assertion bites.",
+    "round_history": "Round 1 (artifacts retained under the phase-b evidence round1/ directory): every focused control passed except the actual native hybrid caller, whose test_phase_b_executor.py leaf failed one test, test_native_supervisor_hold_preserves_phase_b_checkpoint[True-post_reentry_supervisor], at reentry_pytest_gate with 'HOLD: process observation unavailable before validation: process ancestry changed between observations' (1 failed, 1519 passed, 253.98 s of 300 s, output complete, audit clean). Diagnosis: the test reaches two real validation gates through run_phase_b without the module's complete_process_observation helper, unlike its two sibling run_phase_b fixtures (AST audit: the only unwrapped call). Churn probe: under a bounded orphan-reparenting storm the landed observation was uncertain 23/60 times with that exact reason, 60/60 complete inside the helper, and the corrected test passed 5/5 runs. The lane was re-frozen and every recorded run repeated in round 2."
+  },
+  "phase_and_check_matrix": {
+    "source": "before = dev baced34f; after = this candidate (carried AgentRunbook 'Native validation execution and budget transport' section plus code). No phase, stage, test, marker/profile contract, refusal, review or source binding is removed.",
+    "rows": [
+      {
+        "stage": "Phase A design review",
+        "before": "required",
+        "after": "unchanged"
+      },
+      {
+        "stage": "Phase B implementation (native implementer via bridge adapter)",
+        "before": "required",
+        "after": "unchanged"
+      },
+      {
+        "stage": "Independent convergence (bridge review loop, REQUEST_CHANGES to correction to fresh review)",
+        "before": "required",
+        "after": "unchanged; exact declared review-report destinations checked, including rechecks after an envelope; undeclared review output refused before corrective mutation"
+      },
+      {
+        "stage": "Phase B final and re-entry pytest gates",
+        "before": "phase_b_executor runner",
+        "after": "shared validation_execution runner, full profile, at most four xdist workers, finite source/command-bound budget, durable output, typed HOLD; selected tests unchanged"
+      },
+      {
+        "stage": "Pre-commit supervisor (evidence execution, independent review, state restoration)",
+        "before": "required",
+        "after": "unchanged; consumes the source-bound validation budget; handoff dependencies execute from exact bound source bytes"
+      },
+      {
+        "stage": "Staged-candidate checks (L4 staged, scope fences, candidate authority)",
+        "before": "required",
+        "after": "unchanged"
+      },
+      {
+        "stage": "Commit pre-commit targeted pytest gate",
+        "before": "commit_executor targeted runner",
+        "after": "shared runner, ci_fast profile and marker, per-selector budgets, at most four workers, collection-proven profile-deselection semantics; migrated tests keep every behavioral assertion"
+      },
+      {
+        "stage": "Commit hooks (pre-commit-doc-check, docs consistency)",
+        "before": "required",
+        "after": "unchanged hook; docs sync report covers git-visible markdown (ignored files out of scope; untracked non-ignored still reported; no git listing fails closed)"
+      },
+      {
+        "stage": "Push checks (pre-push-fast: audit_fast + L4 contract)",
+        "before": "required",
+        "after": "unchanged"
+      },
+      {
+        "stage": "Exact-head hosted CI (ci.yml, green_gate.yml)",
+        "before": "required",
+        "after": "unchanged"
+      },
+      {
+        "stage": "Bot/human review policy",
+        "before": "required",
+        "after": "unchanged"
+      },
+      {
+        "stage": "Merge, PRIMARY sync, verified cleanup",
+        "before": "required",
+        "after": "unchanged"
+      },
+      {
+        "stage": "Hybrid tier-3 recovery validation",
+        "before": "existing validators",
+        "after": "same shared runner, full profile, at most four workers, finite parent/leaf budgets, receipts outside the candidate, unchanged final scope audit"
+      },
+      {
+        "stage": "Launch/dispatch admission",
+        "before": "existing",
+        "after": "deterministic execution/budget admission and immutable transport; inadmissible schedules fail before expensive work"
+      }
+    ]
+  },
+  "retained_findings": [
+    {
+      "class": "DEFECT",
+      "disposition": "nonblocking, out of this wave's allowlist; owner-40 follow-up",
+      "summary": "mu/tests/docs/test_docs_registry_coverage.py::test_all_markdown_files_are_classified and mu/tests/docs/test_doc_placement_rules.py::test_tracker_sections_only_in_root_canonical_docs still walk the filesystem with rglob, so git-ignored import-sync copies (.agents/, .codex/) present in a lane fail them wherever they run locally (audit_fast, tests/docs). check_docs_consistency.sh does not run them. The shared list_git_visible_markdown helper is the fix in a later wave."
+    },
+    {
+      "class": "POLICY_BOUND",
+      "disposition": "nonblocking; landed guard unchanged per item 14; owner-40 follow-up",
+      "summary": "executor_common.observe_executor_processes (landed at baced34f) returns uncertain on any host-wide PPID change between its two ps queries and does not resample for that case. Under a bounded reparenting storm 23/60 direct observations were uncertain. run_validation therefore HOLDs before admission when unrelated host processes are reparented inside that window: fail-closed and safe, but able to stop a wave on host churn."
+    },
+    {
+      "class": "DEFECT",
+      "disposition": "nonblocking; observation only",
+      "summary": "Tests that exercise run_validation directly use the real two-query observation by design (failure, interruption, ownership and output-containment controls). They passed in every run here but share the host-churn exposure above."
+    }
+  ],
+  "blocking_findings": [],
+  "issues_encountered": [
+    "Round 1 actual hybrid caller failure, diagnosed and corrected as recorded in implementation.round_history; all recorded runs repeated on the corrected lane.",
+    "test_doc_governance.py failed to collect after any mu/tests/tools module (pytest importlib mode binds sys.modules['tools'] to mu/tests/tools). Pre-existing: HEAD's copy fails identically after test_launch_wave.py. This wave's gate is the first to order them so; fixed with the sibling module's guard.",
+    "A PreToolUse safety hook could not tokenize one heredoc edit command; the same edit was made with the Edit tool.",
+    "The carried CHANGELOG entry was titled R13 and claimed R13's eleven-module receipts were in this wave's evidence file; corrected for R14."
+  ],
+  "boundary": [
+    "Local Phase B evidence only: no review, commit, push, CI, merge or PRIMARY sync is claimed.",
+    "The fixture benchmark is a deterministic eight-job measurement, not an end-to-end delivery speedup.",
+    "The hybrid acceptance ran the full selector with HYPOTHESIS_PROFILE unset; it is not ci_full evidence. The declared gate and sweep are ci_fast.",
+    "No process-tree release, Darwin lifetime attribution or cleanup claim is made; landed identity, uncertainty HOLD and non-replay guards are unchanged.",
+    "No runtime/substrate, model, persona, Claude-owned, executor_config, growth-cap or packet file was edited; R13's tracker, packet, evidence, indicator and approvals were not imported.",
+    "Option A: the pinned catalog copy was re-hashed and the live catalog's decoded model entries checked before and after every recorded run; the live catalog was never edited, refreshed or replaced.",
+    "Option A observation: during round 2's hybrid acceptance run the live catalog's fetched_at changed from 2026-11-27T04:07:06.919524Z to 2026-11-27T10:07:15.932254Z (raw sha256 92696a48cd7be4ddcea309d48a64b760aaf1169899e6973b2c1073702e54362c to 9a1bd23448d7aedac1ba6a81d9d6c928bf040e9a5e9c22cc8314bc63757d6b28, size 870423 both). The change is confined to fetched_at: substituting only that value into the pinned bytes reproduces the live bytes exactly, and the decoded models still hash to 583d4fd693d339ce050d46d1fdd003103e756db7a7c72e0974fa025b9941379b, so no HOLD applies. Before bytes: the admission pinned copy. After bytes: live_models_cache.after.9a1bd23448d7aeda.json in the phase-b evidence directory. The gate and sweep both ran after the change, with the pinned copy unchanged."
+  ],
+  "pending": [
+    "Native independent review, pre-commit supervisor, staged L4 checks (the L4 indicator is collected and staged by the executors), any Step 5e growth-cap transition, the nonblocker report slot, commit hooks, pre-push checks, exact-head hosted CI, bot/human review, merge, PRIMARY sync and verified cleanup.",
+    "Owner38 retention remains pending; original PRs 1337/1336/1335/1325 remain open; six folders still need native one-use retirement.",
+    "Owner-40 follow-ups in retained_findings."
+  ],
+  "driver_scripts": {
+    "r14_series.py": "29c9baff61f3ac48eae2c2325476fc912677a7c64f18addcdc6404051086ed06",
+    "r14_native_hybrid_acceptance.py": "f958120e06e64c307a571feae898fb7e3bc1fae82c781763bebe069ce17d4c0b",
+    "docs_counterfactual.py": "b9f874104b837875aef9ddc6374611da2b4ef3f3722e12ebb2713dae5e0860a9",
+    "r14_build_evidence.py": "381c7cd5c0abef5927b2c32e983d7569b0748ce847b84271378317d04c7badd9"
+  }
+}

@@ -421,6 +421,9 @@ class WaveConfig:
     reviewer_agent: str = ""
     pager_route: str = ""
     max_turns: int | None = None
+    # Explicit, finite per-invocation envelope. Empty preserves the configured
+    # baselines; admission below refuses an incoherent requested schedule.
+    validation_schedule: dict[str, int] = field(default_factory=dict)
 
     # Optional post-P0IA candidate-authority contract. Empty/default values keep
     # the historical simple launcher configs valid.
@@ -556,6 +559,13 @@ class WaveConfig:
         """Return a list of config errors (empty = valid)."""
         del bus_dir  # reserved for future bus-scoped agent catalogs
         errors: list[str] = []
+        if not isinstance(self.validation_schedule, dict):
+            errors.append("validation_schedule must be an object")
+        elif self.validation_schedule:
+            try:
+                _ec.validate_validation_schedule(self.validation_schedule, repo_root or SCRIPT_DIR.parent.parent.parent)
+            except (ValueError, OSError, _ec.ExecutorCommonError) as exc:
+                errors.append(str(exc))
         normalized = _ec.normalize_wave_id(self.wave_id)
         if normalized != self.wave_id:
             errors.append(
@@ -842,6 +852,7 @@ def build_launch_wave_override_authority(config: WaveConfig) -> dict[str, Any]:
         "reviewer_agent": config.reviewer_agent,
         "pager_route": config.pager_route,
         "max_turns": config.max_turns,
+        **({"validation_schedule": dict(config.validation_schedule)} if config.validation_schedule else {}),
     }
 
 
@@ -3759,7 +3770,7 @@ def launch_metadata(config: WaveConfig) -> dict[str, Any]:
     return metadata
 
 
-def dispatcher_child_environment(repo_root: Path, config: WaveConfig) -> dict[str, str] | None:
+def dispatcher_child_environment(repo_root: Path, config: WaveConfig, *, bus_dir: str | Path | None = None) -> dict[str, str] | None:
     """Return a sanitized child env when launch-owned override keys matter.
 
     The dispatcher resolves role and pager overrides from environment before
@@ -3773,14 +3784,24 @@ def dispatcher_child_environment(repo_root: Path, config: WaveConfig) -> dict[st
     env_overrides = dispatcher_environment_overrides(config)
     inherited_override_present = any(
         key in os.environ for key in _DISPATCHER_OVERRIDE_TRIGGER_ENV_KEYS
-    )
-    if not env_overrides and not inherited_override_present:
+    ) or any(key in os.environ for key in (_ec.NATIVE_STAGE_BUDGET_ENV, _ec.VALIDATION_SCHEDULE_ENV))
+    if not env_overrides and not inherited_override_present and not config.validation_schedule:
         return None
 
     child_env = os.environ.copy()
     for key in _DISPATCHER_OVERRIDE_ENV_KEYS:
         child_env.pop(key, None)
     child_env.update(env_overrides)
+    # A previous invocation cannot donate an elapsed budget or a schedule.
+    child_env.pop(_ec.NATIVE_STAGE_BUDGET_ENV, None)
+    child_env.pop(_ec.VALIDATION_SCHEDULE_ENV, None)
+    if config.validation_schedule:
+        child_env["RCX_AGENT_BUS_DIR"] = str(_ec.normalize_agent_bus_dir(
+            bus_dir if bus_dir is not None else os.environ.get("RCX_AGENT_BUS_DIR")))
+        child_env[_ec.VALIDATION_SCHEDULE_ENV] = _ec.retain_validation_schedule(
+            repo_root, config.validation_schedule, wave_id=config.wave_id,
+            evidence_command=config.evidence_command, bus_dir=bus_dir,
+        )
     if config.implementer_agent or config.reviewer_agent:
         child_env[_ROLE_AGENT_OVERRIDE_REPO_ROOT_ENV] = str(Path(repo_root).resolve())
     return child_env
@@ -3798,7 +3819,7 @@ def _maybe_launch_dispatcher_command(
     """Run one dispatcher command and manage the terminal receipt lifecycle."""
     repo_root = Path(repo_root)
     runner_kwargs: dict[str, Any] = {"cwd": str(repo_root)}
-    child_env = dispatcher_child_environment(repo_root, config)
+    child_env = dispatcher_child_environment(repo_root, config, bus_dir=bus_dir)
     if child_env is not None:
         runner_kwargs["env"] = child_env
 
@@ -3876,10 +3897,11 @@ def _launch_post_commit_dispatcher_without_terminal_receipt(
     command: list[str],
     *,
     runner: Callable[..., Any],
+    bus_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Preserve the established post-commit retry behavior without R4 state."""
     runner_kwargs: dict[str, Any] = {"cwd": str(repo_root)}
-    child_env = dispatcher_child_environment(Path(repo_root), config)
+    child_env = dispatcher_child_environment(Path(repo_root), config, bus_dir=bus_dir)
     if child_env is not None:
         runner_kwargs["env"] = child_env
     result = runner(command, **runner_kwargs)
@@ -4427,6 +4449,7 @@ def _run_wave_setup_impl(
                 config,
                 post_commit_command,
                 runner=runner,
+                bus_dir=bus_dir,
             )
             candidate_spec_path = continuation_authority[
                 "candidate_authority_spec_path"

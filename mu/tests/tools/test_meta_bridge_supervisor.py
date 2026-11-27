@@ -619,11 +619,13 @@ class TestParseMetaEnvelope:
         with pytest.raises(meta.MetaBridgeError, match="missing BEGIN_META_ENVELOPE"):
             meta.parse_meta_envelope(output)
 
-    def test_run_validation_command_timeout_returns_124(self):
-        with patch.object(meta.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd=["python3"], timeout=1)):
-            exit_code, output = meta.run_validation_command(REPO_ROOT, ["python3", "-c", "print('x')"])
+    def test_run_validation_command_timeout_returns_124(self, tmp_path):
+        import validation_execution as validation
+        from mu.tests.tools.test_executor_common import complete_process_observation
+        with patch.object(meta, "VALIDATION_COMMAND_TIMEOUT_S", 1), complete_process_observation(validation.common):
+            exit_code, output = meta.run_validation_command(tmp_path, [sys.executable, "-u", "-c", "import time; print('x'); time.sleep(30)"])
         assert exit_code == 124
-        assert "timed out" in output
+        assert "timed out" in output and "x" in output
 
     def test_git_output_timeout_raises_metabridgeerror(self):
         with patch.object(meta.subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd=["git"], timeout=1)):
@@ -3043,6 +3045,76 @@ def wave_evidence_repo(tmp_path):
 
 
 class TestWaveEvidenceGate:
+    def test_admitted_validation_budget_runs_real_evidence_and_restores(self, wave_evidence_repo, monkeypatch):
+        import executor_common as common
+        import validation_execution as validation
+        from mu.tests.tools.test_executor_common import complete_process_observation
+        import shlex
+        repo = wave_evidence_repo
+        before = (repo / "tracked.txt").read_bytes()
+        command = shlex.join([sys.executable, "-u", "-c",
+            "import time;from pathlib import Path;Path('tracked.txt').write_text('temporary');print('actual evidence');time.sleep(1.2)"])
+        monkeypatch.setenv("RCX_META_VALIDATION_TIMEOUT_S", "1")
+        rows = common.validation_schedule_requirements(repo, 3)
+        request = {"validation_seconds": 3, **{key: sum(value for _, value in items) for key, items in rows.items()}}
+        transport = common.build_validation_schedule_transport(repo, request, wave_id="fixture", evidence_command=command)
+        monkeypatch.setenv(common.VALIDATION_SCHEDULE_ENV, transport)
+        monkeypatch.setattr(meta, "VALIDATION_COMMAND_TIMEOUT_S", 1)
+        with complete_process_observation(validation.common):
+            code, output = meta._run_wave_evidence_with_restore(repo, command)  # ANTICHEAT_OK: actual evidence/restoration public supervisor path
+        assert code == 0 and "actual evidence" in output
+        assert (repo / "tracked.txt").read_bytes() == before
+        with pytest.raises(meta.ValidationExecutionHold, match="differs"):
+            meta.run_validation_command(repo, ["bash", "-c", command + " && echo changed"])
+
+    def test_unresolved_inherited_writer_holds_before_restoration(self, wave_evidence_repo, monkeypatch, tmp_path):
+        """Evidence whose leader exits 0 while a descendant still holds the
+        streams is an ownership HOLD: nothing is restored under the live writer
+        and the actual pre-evidence snapshots are preserved."""
+        import executor_common as common
+        import validation_execution as validation
+        import shlex
+        from mu.tests.tools.test_executor_common import complete_process_observation, fixture_orphan_reaper
+        from mu.tests.tools.test_validation_execution import inherited_writer_leader, prove_fixture_descendant_exited
+        repo = wave_evidence_repo
+        fixture = tmp_path / "fixture"
+        fixture.mkdir()
+        record, release = fixture / "descendant.json", fixture / "release"
+        command = ("printf temporary > tracked.txt && "
+                   + shlex.join(inherited_writer_leader(record, release, delay=None)))
+        monkeypatch.delenv(common.VALIDATION_SCHEDULE_ENV, raising=False)
+        monkeypatch.setenv("RCX_VALIDATION_LOG_DIR", str(tmp_path / "validation"))
+        monkeypatch.setattr(meta, "VALIDATION_COMMAND_TIMEOUT_S", 5)
+        with fixture_orphan_reaper(), complete_process_observation(validation.common):
+            try:
+                code, output = meta._run_wave_evidence_with_restore(repo, command)  # ANTICHEAT_OK: actual evidence/restoration public supervisor path
+                assert not record.with_name(record.name + ".after").exists()  # Still unreleased at the HOLD.
+            finally:
+                release.touch()
+                prove_fixture_descendant_exited(record)
+        assert code == 125 and output.startswith("[ownership_hold] "), output
+        assert "leader exited 0" in output and "output incomplete: HOLD" in output
+        retained = Path(output.rsplit("[restore HOLD] snapshots preserved at ", 1)[1].strip())
+        assert retained.parent == tmp_path / "validation"
+        # The live writer's tree was never restored over; the actual pre-evidence bytes remain retained.
+        assert (repo / "tracked.txt").read_text() == "temporary"
+        assert any(path.is_file() and path.read_bytes() == b"committed\n" for path in retained.rglob("*"))
+
+    def test_validation_source_drift_holds_before_evidence(self, wave_evidence_repo, monkeypatch):
+        import executor_common as common
+        repo = wave_evidence_repo
+        monkeypatch.setenv("RCX_META_VALIDATION_TIMEOUT_S", "1")
+        rows = common.validation_schedule_requirements(repo, 3)
+        request = {"validation_seconds": 3, **{key: sum(value for _, value in items) for key, items in rows.items()}}
+        transport = common.build_validation_schedule_transport(repo, request, wave_id="fixture", evidence_command="touch ran")
+        monkeypatch.setenv(common.VALIDATION_SCHEDULE_ENV, transport)
+        config = repo / "mu/tools/executors/executor_config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text("{}")
+        with pytest.raises(meta.ValidationExecutionHold, match="drift"):
+            meta.run_validation_command(repo, ["bash", "-c", "touch ran"])
+        assert not (repo / "ran").exists()
+
     def test_matching_declared_and_provided_shell_command_runs_exact_bash_c_once(self, wave_evidence_repo):
         command = "ENV_FLAG=1 python3 -c 'print(1)' && echo done"
         package = _make_wave_evidence_package(

@@ -82,6 +82,163 @@ orchestrator verification stay aligned.
 
 ## Tool Overview
 
+### Native validation execution and budget transport
+
+`validation_execution.py` is the shared child-execution policy used by the
+existing Phase B and commit callers. It does not dispatch or retry waves.
+Phase B uses the full pytest profile; commit uses `ci_fast`, importlib import
+mode and `not slow and not fuzzer`. Both preserve explicit test selections,
+pin deterministic hashing, run every selected test despite inherited exitfirst,
+and disable automatic worker restart. Parallel execution uses at most four
+xdist workers with work stealing. Explicit serial execution omits xdist flags;
+unavailable/disabled xdist or incompatible inherited options refuse admission.
+Zero collection and pytest errors cannot become a successful gate. Two existing
+gate contracts remain: an empty selection starts no process, and a commit
+selection whose collected tests the fast profile deselects entirely passes
+with pytest's exit 5. xdist reports that case as zero items, so one serial
+collection-only child (same selectors, configuration, import mode and
+environment, minus only the profile marker) must collect real items within the
+remaining leaf allowance. Its uncertainty or refused admission is a HOLD; zero
+collection, collection errors and its timeout still fail. The shared runner
+itself refuses an empty selector list.
+
+Each child retains its actual argv, profile, finite allowance, timestamps, exit
+status and complete stdout/stderr in the active bus validation directory (or
+the explicitly selected validation-log directory). The child writes kernel
+pipes that only the runner copies into those files, so recorded output hashes
+are final. A validation completes only when its leader has exited and both
+streams have reached end-of-file, within the same finite allowance. End-of-file
+proves that every holder of a stream, including a reparented descendant, has
+closed it. That is the bounded completion the earlier captured-pipe callers had.
+A writer still holding either stream at that boundary is an ownership HOLD
+(`output_complete` false, `unresolved_output_streams` named). It is never
+success, so evidence restoration and further admission stop while it can still
+write. Progress reports start, bounded running updates (including a leader that
+has exited while its output is still open) and finish. Timeout/interruption uses
+the existing identity-checked ownership helper and then drains boundedly;
+uncertainty holds further execution and preserves diagnostics. Normal exit is
+not whole-tree release evidence, and stream end-of-file is not process release.
+An unavailable pipe or copier primitive HOLDs before the child is admitted. A
+failed durable write or close is an execution error, never success; draining
+continues so writer closure stays observable.
+
+Optional `validation_schedule` requests are admitted by the native launcher
+against current source/config, exact evidence command and wave/bus identity.
+They preserve existing scalar defaults and per-key meanings; no global timeout
+is increased. Every leaf remains within the existing 7200-second ceiling.
+Enclosing allocations account for existing implementation/review/delivery and
+contained validation/CI allowances. A request smaller than the ordinary
+supervisor validation leaf is rejected before expensive execution. The immutable
+transport is carried through routing and commit handoff. The launch-owned
+admission ledger and immutable stage witness retain the original clocks across
+fresh processes; missing, expired, conflicting or reset authority HOLD. Recovery
+cannot replace that budget with a scalar timeout override.
+Contended first-admission locks also HOLD immediately, before any clock or
+budget record is created; admission never waits indefinitely for another consumer.
+
+At supervisor handoff, current source bootstraps the narrow dependency refresh
+even when both the previous common module and client callable remain cached.
+The client handoff executes both dependencies from bound bytes every time. A
+newly imported supervisor runs the same transaction but keeps a registered
+dependency only when its execution is proven: each module records the module
+code object its own import actually ran (`EXECUTED_MODULE_CODE`), and that
+object must equal the code the bound source bytes compile to. Symbol
+compatibility never proves which code ran. A proven pair is kept, so modules
+imported earlier keep their class and exception identity, and a missing
+`validation_execution` is executed against the proven common module. A stale
+but symbol-compatible owner (one loaded from an accepted same-size/same-time
+timestamp cache, for example), a module without that witness, or an absent,
+incompatible or incoherent pair is executed again as a whole; a foreign source
+still refuses. Both `executor_common` and `validation_execution` are compiled from
+the exact source bytes read for each warm, cold or absent-module handoff, with
+the import system's compile semantics (no inherited `__future__` flags). Validation uses
+that executed common module; timestamp/size bytecode and either module's
+self-reported disk hash cannot establish execution provenance, even under `-B`.
+Both cached source paths are checked before either replacement is published.
+Compile/import failure, interruption, missing guard capability or drift in either
+source restores both prior module entries, including absence, and refuses the
+handoff. No admission identity, retained clock or finite ceiling is reset. Existing
+executor callables keep their original modules and review/routing guards remain
+in place. After private-review GO, a changed, already-owned active nonblocking
+report can receive a separate deterministic transition seal. Its original
+prepared source/index and canonical reviewer envelope remain retained. One
+fresh continuation can run the remaining gates after final-gate failure; replay,
+unexplained source/index drift, substituted review output or interrupted
+consumption HOLD. Archive/deletion report transitions require separate authority.
+
+The phase sequence stays design review → implementation → independent convergence
+→ final native validation → pre-commit supervision → staged candidate checks
+→ commit hooks → push checks → exact-head hosted CI → required bot/human review
+→ merge → PRIMARY sync → verified cleanup. Local performance measurements and
+local passing tests do not replace any phase or grant delivery/release authority.
+
+Hybrid recovery uses that same runner and the full pytest profile for every
+retained selector, with at most four workers and no exitfirst truncation. The
+existing 300-second ordinary leaf and exact full-fleet allowances remain;
+sequential validators share one source/command/config-bound enclosing budget,
+limited to 7200 seconds. Admission checks the total allocation and the existing
+parent's remaining sequential reserve before expensive work. Each child consumes
+that original enclosing clock; a later leaf cannot restart it or consume the
+next leaf's reserve. Worker absence, invalid authority and ownership uncertainty
+produce structured HOLD through validation, recovery-loop and caller boundaries.
+Ordinary assertion failures keep their failure behavior and latest diagnostics.
+
+A supervisor `VALIDATION_BUDGET_HOLD` retains its structured error code, detail
+and validation evidence through commit rejection and all three Phase B
+supervisor boundaries (initial, post-reentry and commit-ready status refresh).
+Phase B preserves the existing checkpoint bytes even if HOLD notification
+fails. Caller CLIs exit nonzero and recovery classifies the result as terminal
+policy without admitting a corrective actor, review or commit. Ordinary
+assertion errors and `NEEDS_PHASE_B` retain their existing routing; mentioning
+HOLD in diagnostic text does not create terminal authority.
+
+The recovery validator retains outer streams, JUnit identities, selected targets,
+budgets and receipts in an external validation-log directory, separate from the
+candidate. Its test children receive that contained evidence path and temporary
+execution/cache roots. Live bus, role, pager and stage-authority environment keys
+are isolated only for tests; ownership chains, unrelated keys and deterministic
+pins remain. The parent environment is unchanged. Timeout/interruption retains
+available output; uncertain writers retain scratch and provider guards. The final
+native scope audit and immutable Git-control checks still run, with no generated
+output exemption. These checks do not resolve unsampled Darwin lifetime
+attribution or manufacture whole-tree release evidence.
+
+### Declared review reports and corrective implementation
+
+Phase B reads exact blocking and nonblocking report destinations from the
+existing candidate-authority spec and verifies its launch-bound identity before
+each ordinary, re-entry and private-attribute remediation review. The task sent
+to the reviewer includes those destinations. This contract covers the entire
+review, including any rechecks and files written after an envelope. A declared
+directory is not permission to invent a report suffix or use a directory glob.
+The frozen report slots are exactly the wave's candidate-allowlist entries named
+`<wave_id>_*.md` directly under `reports/deferred/blocking/` and
+`reports/deferred/non_blocking/`. A wave may declare no blocking slot. The
+pre-commit supervisor package lists every non-README Markdown file under
+`reports/deferred/blocking/` as a blocker, and supervisor Gate 7 fails any that
+is not acknowledged. Such a wave therefore keeps blocking findings in the
+reviewer envelope, its packet and its implementation evidence, never in a new
+blocking-lane file.
+
+Immediately after the reviewer finishes, Phase B checks the actual worktree and
+index against the same authority, before consuming continuation or invoking a
+corrective implementer. Candidate source bytes/modes, index entries/flags, HEAD,
+branch, effective configuration and inherited owner must remain unchanged;
+declared findings reports cannot be deleted or redirected through symlinks.
+The exact task text, including this report contract, is used for durable reviewer
+ownership checks without rewriting the original prepared checkpoint.
+Undeclared output is retained and produces a structured
+scope failure with the original decision and diagnostics. Valid declared report
+outputs join the next correction's sealed file inventory; no live allowlist or
+old checkpoint is expanded or resealed. `REQUEST_CHANGES` and `NO_GO` remain
+blocking and require correction followed by fresh review. If a required report
+cannot be written to an allowed destination, return the existing structured
+blocking outcome with findings in the reviewer envelope. Do not invent another
+repository path or downgrade findings. Later authoritative guards remain active.
+Optional legacy invocations without candidate authority keep their existing
+behavior; an optional authority spec, when present, is still enforced and must
+remain identical across the review. Symlinked report destinations refuse.
+
 Two complementary systems exist for running agents:
 
 ### 1. Native Subagents (`.claude/agents/`) — Ad-Hoc Use

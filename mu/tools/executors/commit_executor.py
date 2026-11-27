@@ -76,6 +76,7 @@ try:
         ensure_not_agent_review_mode,
         ExecutorCommonError,
         emit_pipeline_agent_event,
+        validation_hold_result,
     )
 except ImportError:
     import importlib.util as _ilu
@@ -105,6 +106,7 @@ except ImportError:
     ensure_not_agent_review_mode = _mod.ensure_not_agent_review_mode
     ExecutorCommonError = _mod.ExecutorCommonError
     emit_pipeline_agent_event = _mod.emit_pipeline_agent_event
+    validation_hold_result = _mod.validation_hold_result
 
 _ACTIVE_BUS_DIR: ContextVar[Path | None] = ContextVar("commit_executor_bus_dir", default=None)
 
@@ -158,6 +160,7 @@ REQUIRED_HANDOFF_FIELDS = {
     "base_branch", "pre_commit_receipt_path", "task_id", "caller",
 }
 OPTIONAL_HANDOFF_FIELDS = {
+    "validation_schedule",
     "target_branch",
     "tracked_packet",
     "supervisor_lane",
@@ -247,6 +250,8 @@ def _load_repo_recovery_symbols(repo_root: Path) -> tuple[Any, Any]:
 def _should_attempt_standalone_recovery(result: dict[str, Any]) -> bool:
     """Return true when a standalone non-success result is recoverable."""
     status = str(result.get("status", "") or "").strip().lower()
+    if result.get("validation_budget_hold") is True or status == "validation_budget_hold":
+        return False
     if status in _STANDALONE_RECOVERY_TERMINAL_STATUSES:
         return False
     if status in _STANDALONE_RECOVERY_STATUSES:
@@ -2445,6 +2450,7 @@ def _commit_supervisor_rejection_result(
     handoff: dict[str, Any],
     wave_id: str,
     changed_files: list[str],
+    supervisor_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     decision_text = str(decision or "UNKNOWN").strip() or "UNKNOWN"
     summary_text = str(summary or "").strip()
@@ -2468,6 +2474,12 @@ def _commit_supervisor_rejection_result(
                 if _normalize_repo_relpath(str(path))
             }
         )
+    if supervisor_result is not None:
+        result["supervisor_result"] = supervisor_result
+        hold = validation_hold_result(supervisor_result, step="build_and_run_supervisor")
+        if hold is not None:
+            # A typed refusal retains diagnostics and cannot authorize correction.
+            return {**result, **hold}
     if decision_text == "NEEDS_PHASE_B":
         plan_path = _commit_supervisor_reentry_plan_path(handoff)
         result.update({
@@ -4410,6 +4422,8 @@ def _commit_validation_protected_env_keys() -> frozenset[str]:
     prefix in ``_commit_validation_env`` rather than enumerated here.
     """
     keys = {
+        "RCX_NATIVE_STAGE_BUDGET",
+        "RCX_VALIDATION_SCHEDULE",
         "RCX_AGENT_BUS_DIR",
         "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_KEY",
         "RCX_RECOVERY_BRIDGE_TURN_TIMEOUT_OVERRIDE",
@@ -4830,113 +4844,26 @@ def _private_attr_gate_error(gate_result: dict[str, Any]) -> str:
     return message
 
 
-def _run_pytest_on_files(
-    repo_root: Path,
-    test_files: list[str],
-    *,
-    timeout: int = 120,
+def run_pytest_gate(
+    repo_root: Path, test_files: list[str], *, timeout: int = 120, workers: int = 4,
 ) -> dict[str, Any]:
-    """Run pytest on specific test files. Returns exit_code and output."""
+    """Public native fast-profile validation entry point (no dispatch or retry)."""
     if not test_files:
+        # Existing gate contract: an empty selection starts no process. The shared
+        # runner still refuses an empty selector list from any direct caller.
         return {"exit_code": 0, "stdout": "", "stderr": "", "passed": True}
-    # Control-plane executor tests are integration-heavy. The real 2-file gate
-    # for `test_phase_b_executor.py test_recovery_gate.py` took 198.857s on
-    # 2026-04-21, and the same commit gate exhausted the old 300s budget on
-    # 2026-05-05. Keep enough slack that the gate fails on test truth, not an
-    # undersized commit-executor budget.
-    # On 2026-09-27 the complete fleet module still exceeded 900s serially
-    # after bounding its fixtures. The declared fleet/classification suite ran
-    # 463 tests in 281.30s with four xdist workers. Use that bounded execution
-    # policy whenever the exact full module is selected, including mixed gates.
-    # Keep every selector, the existing finite budget and the marker/import mode.
-    full_fleet = "mu/tests/tools/test_workingrcx_fleet_apply.py" in test_files
-    # The preserved lifecycle diagnostic took 260.699s on 2026-10-04;
-    # Phase B testcase time totaled 305.332s on 2026-10-09. Both exceed the
-    # ordinary 240s allocation. Only these exact full modules get finite slack;
-    # node selectors and other paths retain the default.
-    selector_budgets = {
-        "mu/tests/tools/test_workingrcx_fleet_apply.py": 900,
-        "mu/tests/tools/test_worktree_lifecycle.py": 600,
-        "mu/tests/tools/test_phase_b_executor.py": 600,
-    }
-    effective_timeout = max(timeout, sum(
-        selector_budgets.get(selector, 240)
-        for selector in test_files
-    ))
-    command = [
-        sys.executable,
-        "-m",
-        "pytest",
-        "-x",
-        "--tb=short",
-        "--import-mode=importlib",
-        "-m",
-        "not slow and not fuzzer",
-        *(["-n", "4", "--dist", "worksteal"] if full_fleet else []),
-        *test_files,
-    ]
     try:
-        result = subprocess.run(
-            command,
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=effective_timeout,
-            # Validation child: build the env through the commit-owned validation
-            # constructor so the live pipeline lane bus and every invocation-owned
-            # role/pager override are dropped (AFTER the pytest determinism pins
-            # are applied) and the repository's own tests resolve their temporary
-            # .agent_bus and default routing instead of the live pipeline lane.
-            # This helper backs the Step 8b pre-commit targeted pytest gate and
-            # the Step 15 bot-remediation targeted pytest gate -- both commit-owned
-            # validation children reproduced leaking a namespaced live lane and a
-            # live pager route override.
-            env=_commit_validation_env(
-                {
-                    "PYTHONHASHSEED": "0",
-                    "RCX_CI": "1",
-                    "HYPOTHESIS_PROFILE": "ci_fast",
-                }
-            ),
-        )
-        passed = result.returncode == 0 or _pytest_only_deselected_by_marker_filter(
-            result.returncode,
-            result.stdout,
-            result.stderr,
-        )
-        return {
-            "exit_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "passed": passed,
-            **({"command": command, "timeout_seconds": effective_timeout} if not passed else {}),
-        }
-    except subprocess.TimeoutExpired as exc:
-        # TimeoutExpired may carry bytes even with text=True. Retain all
-        # available pytest progress, including both ends of long streams.
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8", errors="backslashreplace")
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", errors="backslashreplace")
-        return {
-            "exit_code": -1,
-            "stdout": stdout,
-            "stderr": f"pytest timed out after {effective_timeout}s" + (f"\n{stderr}" if stderr else ""),
-            "passed": False,
-            "command": command,
-            "timeout_seconds": effective_timeout,
-            "timed_out": True,
-        }
+        from validation_execution import run_pytest
+    except ImportError:
+        from mu.tools.executors.validation_execution import run_pytest
+    return run_pytest(repo_root, test_files, profile="fast", timeout=timeout,
+                      workers=workers, env=_commit_validation_env())
 
 
-def _pytest_only_deselected_by_marker_filter(returncode: int, stdout: str, stderr: str) -> bool:
-    """Return True when the fast-shard marker filter selected no tests by design."""
-    if returncode != 5 or stderr.strip():
-        return False
-    return "0 selected" in stdout and "deselected" in stdout
+def _run_pytest_on_files(
+    repo_root: Path, test_files: list[str], *, timeout: int = 120,
+) -> dict[str, Any]:
+    return run_pytest_gate(repo_root, test_files, timeout=timeout)
 
 
 def _run_bot_remediation_staged_test_gate(
@@ -4976,6 +4903,9 @@ def _run_bot_remediation_staged_test_gate(
             )
         pytest_result = _run_pytest_on_files(repo_root, test_files)
         result["pytest_gate"] = pytest_result
+        hold = validation_hold_result(pytest_result, step="bot_remediation_validation")
+        if hold is not None:
+            return {**result, **hold}
         if not pytest_result["passed"]:
             stderr = (pytest_result.get("stderr") or "").strip()
             stdout = (pytest_result.get("stdout") or "").strip()
@@ -15104,6 +15034,7 @@ def _attempt_bot_finding_remediation(
                     "remediation_rounds_attempted": round_num,
                     "errors": gate_errors,
                     "bot_remediation_gate": staged_test_gate,
+                    **(validation_hold_result(staged_test_gate, step="bot_remediation_validation") or {}),
                 }
 
             # Mint bot-remediation receipt (type B) only after local staged
@@ -16123,6 +16054,20 @@ def build_commit_handoff(
     if isinstance(target_branch, str) and target_branch.strip():
         handoff["target_branch"] = target_branch.strip()
 
+    # Keep the launch-owned request through the existing builder/handoff. A
+    # fresh dispatcher consumes the same invocation and its retained clocks.
+    if "RCX_VALIDATION_SCHEDULE" in os.environ:
+        try:
+            from executor_common import read_validation_schedule_transport, ValidationBudgetError
+            if repo_root is None:
+                raise ExecutorCommonError("HOLD: validation handoff requires repo identity")
+            schedule = read_validation_schedule_transport(repo_root, bus_dir=bus_dir)
+            if schedule["wave_id"] != wave_id:
+                raise ExecutorCommonError("HOLD: validation handoff wave mismatch")
+            handoff["validation_schedule"] = os.environ["RCX_VALIDATION_SCHEDULE"]
+        except (ExecutorCommonError, ValidationBudgetError, ValueError, OSError) as exc:
+            return handoff, [str(exc)]
+
     # Validate against schema
     valid, validation_errors = validate_handoff(handoff, repo_root=repo_root)
     if not valid:
@@ -16143,6 +16088,22 @@ def validate_handoff(
     errors: list[str] = []
 
     allowed_fields = REQUIRED_HANDOFF_FIELDS | OPTIONAL_HANDOFF_FIELDS
+    if "RCX_VALIDATION_SCHEDULE" in os.environ and "validation_schedule" not in handoff:
+        errors.append("HOLD: commit handoff lost admitted validation schedule")
+    if "validation_schedule" in handoff:
+        try:
+            from executor_common import read_validation_schedule_transport, ValidationBudgetError
+            raw = handoff["validation_schedule"]
+            if type(raw) is not str or not raw or repo_root is None:
+                raise ExecutorCommonError("HOLD: malformed validation handoff transport")
+            schedule = read_validation_schedule_transport(repo_root, raw)
+            if schedule["wave_id"] != handoff.get("wave_id"):
+                raise ExecutorCommonError("HOLD: validation handoff wave mismatch")
+            inherited = os.environ.get("RCX_VALIDATION_SCHEDULE")
+            if inherited is not None and inherited != raw:
+                raise ExecutorCommonError("HOLD: validation handoff invocation mismatch")
+        except (ExecutorCommonError, ValidationBudgetError, ValueError, OSError) as exc:
+            errors.append(str(exc))
     unexpected = sorted(set(handoff.keys()) - allowed_fields)
     if unexpected:
         errors.extend(f"Unexpected field: {field}" for field in unexpected)
@@ -22349,6 +22310,10 @@ def _run_commit_pipeline_impl(
                     handoff=handoff,
                     wave_id=wave_id,
                     changed_files=changed_files,
+                    supervisor_result={name: getattr(sup_result, name, None) for name in (
+                        "decision", "summary", "status", "validations_passed", "validations_failed",
+                        "findings", "request_for_claude", "error_code", "error_detail", "receipt_path",
+                    )},
                 )
             receipt_path_from_supervisor = sup_result.receipt_path
             receipt_decision = sup_result.decision
@@ -22605,6 +22570,9 @@ def _run_commit_pipeline_impl(
     if commit_test_files:
         log(f"Step 8b: running pytest on {len(commit_test_files)} affected test file(s)")
         pytest_result = _run_pytest_on_files(repo_root, commit_test_files)
+        hold = validation_hold_result(pytest_result, step="run_pre_commit_script")
+        if hold is not None:
+            return {**hold, "steps_completed": result["steps_completed"]}
         if not pytest_result["passed"]:
             stderr = (pytest_result.get("stderr") or "").strip()
             stdout = (pytest_result.get("stdout") or "").strip()
@@ -22629,6 +22597,7 @@ def _run_commit_pipeline_impl(
                 "stdout": pytest_result.get("stdout") or "",
                 "stderr": pytest_result.get("stderr") or "",
                 "failure_command": diagnostic,
+                "validation_budget_hold": pytest_result.get("validation_budget_hold", False),
                 "steps_completed": result["steps_completed"],
             }
 
@@ -23172,6 +23141,15 @@ def run_commit_pipeline(
             ],
             "steps_completed": [],
         }
+
+    import executor_common as budget_common
+    try:
+        budget_common.validate_native_stage_context(
+            repo_root, key="commit_executor", wave_id=handoff.get("wave_id"),
+            transport=handoff.get("validation_schedule"))
+    except budget_common.ValidationBudgetError as exc:
+        return {"status": "validation_budget_hold", "step": "validation_budget_admission",
+                "validation_budget_hold": True, "errors": [str(exc)], "steps_completed": []}
 
     wave_id = str(handoff.get("wave_id") or "unknown").strip() or "unknown"
     handoff_sha = _handoff_sha(handoff) if isinstance(handoff, dict) else "invalid"
