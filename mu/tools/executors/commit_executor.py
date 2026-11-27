@@ -11158,7 +11158,12 @@ def _extract_review_findings(
 
 
 def _local_quota_review_adapter(repo_root: Path) -> tuple[Any, dict[str, Any]]:
-    """Opt in from this carrier only; never heal config or substitute a provider."""
+    """Opt in from this carrier only; never heal config or substitute a provider.
+
+    The expected Codex model and reasoning effort are this carrier's committed
+    ``bridge_agent_defaults.codex`` registry entry, never a literal. The launched
+    reviewer command must match that entry exactly; a missing entry stops.
+    """
     config_path = repo_root / "mu/tools/executors/executor_config.json"
     config_bytes = config_path.read_bytes()
     config = json.loads(config_bytes)
@@ -11171,16 +11176,22 @@ def _local_quota_review_adapter(repo_root: Path) -> tuple[Any, dict[str, Any]]:
     if (config.get("role_agents", {}).get("reviewer") != "codex"
             or effective.get("role_agents", {}).get("reviewer") != "codex"):
         raise ValueError("Local quota review requires the selected Codex reviewer")
-    defaults = config.get("bridge_agent_defaults", {}).get("codex", {})
-    if defaults.get("model") != "gpt-6-astra" or defaults.get("reasoning_effort") != "max":
-        raise ValueError("Local quota review requires registry gpt-6-astra/max")
+    # The committed registry is the only model/effort source: no merged
+    # default, environment or launched command may supply a missing entry.
+    registry = config.get("bridge_agent_defaults")
+    registry = registry.get("codex") if isinstance(registry, dict) else None
+    model, effort = ((registry.get("model"), registry.get("reasoning_effort"))
+                     if isinstance(registry, dict) else (None, None))
+    if not all(isinstance(value, str) and value and value == value.strip()
+               for value in (model, effort)):
+        raise ValueError("Local quota review requires the committed Codex registry model and reasoning effort")
     if _bridge_adapters is None:
         raise ValueError("Native bridge adapter unavailable")
     provenance = reviewer_launch_provenance(
         repo_root, bus_dir=_active_bus_dir(), selected_agent="codex",
     )
-    if provenance["model"] != "gpt-6-astra" or provenance["effort"] != "max":
-        raise ValueError("Selected reviewer command does not match gpt-6-astra/max")
+    if provenance["model"] != model or provenance["effort"] != effort:
+        raise ValueError(f"Selected reviewer command does not match the committed Codex registry {model}/{effort}")
     adapter = _bridge_adapters.get_adapter(
         _bridge_adapters.load_bridge_config(bridge_config_path(repo_root, _active_bus_dir())),
         "codex",
@@ -11188,8 +11199,8 @@ def _local_quota_review_adapter(repo_root: Path) -> tuple[Any, dict[str, Any]]:
     # Accept the native exec shape only. Extra flags/config/environment could
     # override the sandbox, model, provider or account. Fail rather than repair.
     cmd = list(adapter.cmd)
-    expected = [cmd[0], "exec", "-", "--json", "-m", "gpt-6-astra", "-c",
-                'model_reasoning_effort="max"', "--sandbox", cmd[-1]]
+    expected = [cmd[0], "exec", "-", "--json", "-m", model, "-c",
+                f'model_reasoning_effort="{effort}"', "--sandbox", cmd[-1]]
     if (Path(cmd[0]).name != "codex" or cmd != expected
             or cmd[-1] not in {"read-only", "workspace-write", "danger-full-access"}
             or adapter.env or not adapter.prompt_via_stdin):

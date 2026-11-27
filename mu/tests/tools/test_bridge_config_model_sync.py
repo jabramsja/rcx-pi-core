@@ -107,13 +107,19 @@ def _agent_cmd(path: Path, agent: str) -> list[str]:
     return json.loads(path.read_text())["agents"][agent]["cmd"]
 
 
-def test_committed_codex_menu_and_fallback_metadata_are_gpt_6_astra_max():
+def test_committed_codex_menu_and_fallback_metadata_are_gpt_6_2_astra_max(tmp_path):
+    """Pin the founder's 2026-11-27 Codex reviewer selection: gpt-6.2-astra at max.
+
+    The committed registry entry and the DEFAULT fallback move together, the
+    pager route follows the Claude orchestrator mode, and a bus synced from the
+    committed registry launches the reviewer with exactly that model and effort.
+    """
     committed = json.loads(
         (REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json").read_text()
     )
     expected_codex = {
-        "display_name": "Codex GPT-6 Astra max",
-        "model": "gpt-6-astra",
+        "display_name": "Codex GPT-6.2 Astra max",
+        "model": "gpt-6.2-astra",
         "reasoning_effort": "max",
     }
 
@@ -137,7 +143,18 @@ def test_committed_codex_menu_and_fallback_metadata_are_gpt_6_astra_max():
         "commit_executor": None,
     }
     assert committed["bridge_reviewers"] == {"phase_a": "codex", "phase_b": "codex"}
-    assert committed["pipeline_agent_pager"] == {"enabled": True, "route": "codex"}
+    assert committed["pipeline_agent_pager"] == {"enabled": True, "route": "claude"}
+
+    _seed_executor_config(tmp_path, defaults=committed["bridge_agent_defaults"])
+    bridge = _seed_bridge_config(
+        tmp_path, {"codex": {"mode": "live", "display_name": "stale", "cmd": _codex_cmd()}}
+    )
+    assert sync_bridge_config_agents_from_defaults(tmp_path) == bridge
+    synced = json.loads(bridge.read_text())["agents"]["codex"]
+    cmd = synced["cmd"]
+    assert cmd[cmd.index("-m") + 1] == "gpt-6.2-astra"
+    assert cmd[cmd.index("-c") + 1] == 'model_reasoning_effort="max"'
+    assert synced["display_name"] == "Codex GPT-6.2 Astra max"
 
 
 @pytest.mark.parametrize(

@@ -2,6 +2,7 @@
 
 import copy
 import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -550,6 +551,115 @@ def test_process_born_between_queries_requires_complete_resampling(owned_process
             if child.poll() is None:
                 child.kill()
             child.wait(timeout=5)
+
+
+def _observe_with_gap_row(monkeypatch, owner, *, missing_from, gap_samples, probe_error):
+    """Observe an immutable real census plus one unowned gap row.
+
+    The row stands for another user's process: it is absent from the
+    ``missing_from`` query for the first ``gap_samples`` samples, present in
+    both afterwards, and only its signal-0 probe is replaced, raising
+    ``probe_error()``. Every probe is recorded. As in the birth replay above,
+    these are controlled parser/resampling inputs, never release evidence.
+    """
+    real_run, real_kill = subprocess.run, os.kill
+    identity_command = ["ps", "axeww", "-o", "pid=,ppid=,lstart=,stat=,command="]
+    census = real_run(identity_command, capture_output=True, text=True, check=True,
+                      timeout=5, env={**os.environ, "LC_ALL": "C"}).stdout.splitlines()
+    gap_pid = max(int(row.split()[0]) for row in census) + 1
+    observer = next(row.split(None, 8) for row in census if int(row.split()[0]) == os.getpid())
+    gap_row = " ".join([str(gap_pid), "1", *observer[2:8], "fixture-other-user-process"])
+    queries = {"graph": [], "identities": [], "probes": []}
+
+    def observe(args, *a, **kw):
+        if args == ["ps", "-axo", "pid=,ppid="]:
+            name = "graph"
+        elif args == identity_command:
+            name = "identities"
+        else:
+            return real_run(args, *a, **kw)
+        queries[name].append(args)
+        rows = (census if name == missing_from and len(queries["graph"]) <= gap_samples
+                else [*census, gap_row])
+        if name == "graph":
+            rows = [" ".join(row.split(None, 2)[:2]) for row in rows]
+        return subprocess.CompletedProcess(args, 0, "".join(row + "\n" for row in rows), "")
+
+    def probe(pid, signum):
+        queries["probes"].append((pid, signum))
+        if pid == gap_pid:
+            raise probe_error()
+        return real_kill(pid, signum)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(subprocess, "run", observe)
+        patch.setattr(os, "kill", probe)
+        observation = common.observe_executor_processes(owner)
+    return observation, gap_pid, queries
+
+
+def _permission_denied():
+    return PermissionError(errno.EPERM, "Operation not permitted")
+
+
+@pytest.mark.parametrize("missing_from", ["graph", "identities"])
+def test_permission_denied_gap_row_resamples_until_both_queries_agree(
+    owned_process, monkeypatch, missing_from,
+):
+    """EPERM proves a live PID, not an exit: its gap row resamples, never holds at once.
+
+    The row is in only one first-sample query and its probe is denied; the
+    next sample sees it in both queries, which completes the census.
+    """
+    proc, owner = owned_process
+    observation, gap_pid, queries = _observe_with_gap_row(
+        monkeypatch, owner, missing_from=missing_from, gap_samples=1,
+        probe_error=_permission_denied)
+    assert observation.complete, observation.error
+    assert len(queries["graph"]) == len(queries["identities"]) == 2
+    assert queries["probes"] == [(gap_pid, 0)]
+    assert observation.parents[gap_pid] == 1
+    assert observation.identities[gap_pid].owned is False
+    assert observation.identities[proc.pid].owned
+    assert proc.poll() is None
+
+
+@pytest.mark.parametrize("missing_from", ["graph", "identities"])
+def test_permission_denied_gap_row_that_persists_holds_after_bounded_resampling(
+    owned_process, monkeypatch, missing_from,
+):
+    """A denied probe never completes a census: a persistent gap ends in the bounded HOLD."""
+    proc, owner = owned_process
+    observation, gap_pid, queries = _observe_with_gap_row(
+        monkeypatch, owner, missing_from=missing_from, gap_samples=sys.maxsize,
+        probe_error=_permission_denied)
+    assert observation.complete is False
+    assert observation.error == "live process missing from process observation"
+    assert not observation.parents and not observation.identities
+    assert len(queries["graph"]) == len(queries["identities"]) == 5
+    assert queries["probes"] == [(gap_pid, 0)] * 5
+    assert proc.poll() is None
+
+
+@pytest.mark.parametrize("probe_error", [
+    lambda: OSError(errno.EINVAL, "Invalid argument"),
+    lambda: OverflowError("signed integer is greater than maximum"),
+], ids=["einval", "overflow"])
+def test_other_gap_probe_errors_hold_at_once(owned_process, monkeypatch, probe_error):
+    """Only ESRCH resolves and EPERM resamples; any other probe error holds at once.
+
+    The gap would resolve on the next sample, so resampling here would complete.
+    """
+    proc, owner = owned_process
+    assert not isinstance(probe_error(), PermissionError)
+    observation, gap_pid, queries = _observe_with_gap_row(
+        monkeypatch, owner, missing_from="graph", gap_samples=1, probe_error=probe_error)
+    assert observation.complete is False
+    assert observation.error == "process observation gap absence is uncertain"
+    assert not observation.parents and not observation.identities
+    assert len(queries["graph"]) == len(queries["identities"]) == 1
+    assert queries["probes"] == [(gap_pid, 0)]
+    assert proc.poll() is None
 
 
 @pytest.mark.parametrize("failed", [False, True])

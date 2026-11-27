@@ -115,6 +115,34 @@ def test_role_switch_preserves_orchestrator_mode_surfaces(tmp_path):
     assert state_path.read_text(encoding="utf-8") == before_state
 
 
+def test_committed_selection_is_a_set_roles_fixpoint(tmp_path, monkeypatch, capsys):
+    """Re-applying the committed roles changes no byte of the committed config.
+
+    The derivation keeps role_agents, the derived backends (including the
+    providerless commit executor), bridge_reviewers, the pager route and every
+    bridge_agent_defaults entry, and --show reports the committed roles.
+    """
+    _clear_role_env(monkeypatch)
+    committed = REPO_ROOT / "mu" / "tools" / "executors" / "executor_config.json"
+    cfg = tmp_path / "mu" / "tools" / "executors" / "executor_config.json"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_bytes(committed.read_bytes())
+    roles = json.loads(committed.read_text())["role_agents"]
+    rc = set_roles.main(
+        ["--implementer", roles["implementer"], "--reviewer", roles["reviewer"],
+         "--repo-root", str(tmp_path)]
+    )
+    assert rc == 0
+    assert cfg.read_bytes() == committed.read_bytes()
+    assert json.loads(cfg.read_text())["backends"]["commit_executor"] is None
+    capsys.readouterr()
+    assert set_roles.main(["--show", "--repo-root", str(tmp_path)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    shown = f"implementer={roles['implementer']} reviewer={roles['reviewer']}"
+    assert f"CURRENT role_agents: {shown}" in lines
+    assert any(line.strip().startswith("EFFECTIVE") and line.endswith(shown) for line in lines)
+
+
 def test_idempotent(tmp_path):
     cfg = _seed_config(tmp_path)
     set_roles.main(
