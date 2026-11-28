@@ -1181,6 +1181,32 @@ def parse_envelope(output: str) -> dict[str, Any]:
     return envelopes[-1]
 
 
+def bind_envelope_identity(
+    envelope: Mapping[str, Any],
+    *,
+    job_id: str,
+    turn_id: str,
+    agent_role: str,
+) -> dict[str, Any]:
+    """Bind a parsed agent envelope to its turn's canonical identity.
+
+    The bridge, not the agent, owns turn identity: neither the prompt nor the
+    adapter supplies the turn id the bridge mints, so an agent may write its
+    own. A ``job_id`` that is present (neither absent nor null) and is not
+    exactly this turn's job is refused, so another job's output is never
+    relabeled as this turn's. Otherwise the returned envelope carries the
+    canonical ``job_id``, ``turn_id`` and ``agent_role``; every other field is
+    unchanged.
+    """
+    claimed_job_id = envelope.get("job_id")
+    if claimed_job_id is not None and claimed_job_id != job_id:
+        raise BridgeError(
+            f"Agent envelope job_id {claimed_job_id!r} names a different job than "
+            f"this turn's job {job_id!r}; refusing envelope"
+        )
+    return {**envelope, "job_id": job_id, "turn_id": turn_id, "agent_role": agent_role}
+
+
 def _format_list(items: list[str]) -> str:
     return ", ".join(items) if items else "(none)"
 
@@ -1660,7 +1686,15 @@ def execute_agent_turn(
         raise
 
     try:
-        envelope = parse_envelope(output)
+        # Bind before storing: the stored and the returned envelope are this
+        # one bound object, and a refused identity is recorded exactly as an
+        # unparseable envelope is. The raw output file stays verbatim.
+        envelope = bind_envelope_identity(
+            parse_envelope(output),
+            job_id=job["job_id"],
+            turn_id=turn_id,
+            agent_role=agent_role,
+        )
     except Exception:
         update_turn_complete(
             conn,
