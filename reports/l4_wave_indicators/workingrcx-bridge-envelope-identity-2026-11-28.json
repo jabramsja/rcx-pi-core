@@ -1,0 +1,25 @@
+{
+  "wave_id": "workingrcx-bridge-envelope-identity-2026-11-28",
+  "repeat_run_speedup_ratio": 0.980168,
+  "parity_diff_count": 3,
+  "net_host_semantic_delta": 0,
+  "step_growth_slope": 0.299519,
+  "repeat_run_raw_seconds": [
+    0.293579,
+    0.299519
+  ],
+  "step_growth_points": [
+    {
+      "step": 1,
+      "elapsed_seconds": 0.293579
+    },
+    {
+      "step": 2,
+      "elapsed_seconds": 0.593098
+    }
+  ],
+  "parity_diff_source": "tools/checks/check_js_debt.sh",
+  "collection_timestamp_utc": "2026-11-28T14:47:56Z",
+  "collector_version": "2.3.0",
+  "comparison_commit": "48b93eac8a102be9abccd2d56adaca4f3c404fd5"
+}

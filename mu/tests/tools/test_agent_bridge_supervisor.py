@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 import pwd
+import re
 import sqlite3
 import subprocess
 import sys
@@ -3841,7 +3842,8 @@ def test_execute_agent_turn_recovers_from_malformed_frame_to_shared_valid_frame(
             (turn_id,),
         ).fetchone()
 
-    assert parsed == envelope
+    # The valid frame's payload, bound to the bridge's canonical turn id.
+    assert parsed == {**envelope, "turn_id": turn_id}
     assert turn is not None
     assert turn["status"] == "completed"
     assert elapsed < 2.0
@@ -3901,6 +3903,317 @@ def test_execute_agent_turn_rejects_malformed_findings_without_persisting_envelo
     assert turns[0]["status"] == "FAILED"
     assert turns[0]["decision"] == "ERROR"
     assert turns[0]["envelope_json"] is None
+
+
+# --- Envelope identity binding: the bridge owns turn identity ---
+
+
+_IDENTITY_AGENT_SCRIPT = """\
+import json
+import sys
+from pathlib import Path
+
+job, turn, role, mode, emitted_dir = sys.argv[1:6]
+sys.stdin.read()
+if mode == "unparseable":
+    text = "agent prose without an envelope block\\n"
+else:
+    claimed_job, claimed_turn, claimed_role = {
+        "canonical": (job, turn, role),
+        "self_turn_id": (job, f"{job}-{role}-r1", role),
+        "self_turn_id_and_role": (job, f"{job}-{role}-r1", "reader|reviewer"),
+        "null_job_id": (None, f"{job}-{role}-r1", role),
+        "foreign_job": ("another-bridge-job", f"another-bridge-job-{role}-r1", role),
+    }[mode]
+    envelope = {
+        "job_id": claimed_job,
+        "turn_id": claimed_turn,
+        "agent_role": claimed_role,
+        "decision": "GO" if role == "reviewer" else "REQUEST_CHANGES",
+        "summary": f"{role} identity fixture ({mode})",
+        "touched_files_claimed": [],
+        "findings": [],
+        "validations_claimed": [],
+        "request_for_next_agent": "",
+    }
+    text = "BEGIN_AGENT_ENVELOPE\\n" + json.dumps(envelope, indent=2) + "\\nEND_AGENT_ENVELOPE\\n"
+Path(emitted_dir, turn + ".txt").write_bytes(text.encode("utf-8"))
+sys.stdout.write(text)
+"""
+
+
+def _configure_identity_agent(paths, *, adapter: str, mode: str) -> Path:
+    """Point one adapter at the identity fixture; return where it records its stdout.
+
+    The fixture and its records live outside the repo, so a turn never changes
+    repo state. The fixture receives the turn's canonical identity through the
+    adapter placeholders and claims the identity that ``mode`` selects.
+    """
+    base = paths.repo_root.parent
+    agent = base / "identity_agent.py"
+    agent.write_text(_IDENTITY_AGENT_SCRIPT, encoding="utf-8")
+    emitted_dir = base / f"emitted-{adapter}-{mode}"
+    emitted_dir.mkdir()
+    config = json.loads(paths.config_path.read_text(encoding="utf-8"))
+    config["agents"][adapter] = {
+        "mode": "live",
+        "cmd": [
+            sys.executable,
+            str(agent),
+            "{job_id}",
+            "{turn_id}",
+            "{agent_role}",
+            mode,
+            str(emitted_dir),
+        ],
+        "prompt_via_stdin": True,
+        "timeout_s": 30,
+        "env": {},
+    }
+    paths.config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    return emitted_dir
+
+
+def _execute_identity_reviewer_turn(tmp_path: Path, mode: str) -> dict[str, object]:
+    """Run one reviewer turn through the bridge's adapter flow with the identity fixture."""
+    paths, _ = _setup_bridge_repo(tmp_path)
+    emitted_dir = _configure_identity_agent(paths, adapter="codex", mode=mode)
+    job_id = bridge.submit_job(
+        paths,
+        task_text=f"identity binding ({mode})",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="identity-binding-job",
+    )
+    with bridge.open_db(paths) as conn:
+        job = bridge.read_job(conn, job_id)
+        turn_id, returned, _, raw_path, _ = bridge.execute_agent_turn(
+            conn,
+            paths,
+            job,
+            round_no=1,
+            agent_role="reviewer",
+            adapter_name="codex",
+            prompt_text="review identity binding",
+        )
+        row = conn.execute("SELECT * FROM turns WHERE turn_id = ?", (turn_id,)).fetchone()
+    emitted = (emitted_dir / f"{turn_id}.txt").read_bytes()
+    return {
+        "job_id": job_id,
+        "turn_id": turn_id,
+        "returned": returned,
+        "row": row,
+        "raw": raw_path.read_bytes(),
+        "emitted": emitted,
+        "claimed": bridge.parse_envelope(emitted.decode("utf-8")),
+    }
+
+
+@pytest.mark.parametrize(
+    ("mode", "claimed_job_id", "claimed_role"),
+    [
+        pytest.param("self_turn_id", "identity-binding-job", "reviewer", id="self-written-turn-id"),
+        pytest.param(
+            "self_turn_id_and_role",
+            "identity-binding-job",
+            "reader|reviewer",
+            id="self-written-turn-id-and-role",
+        ),
+        pytest.param("null_job_id", None, "reviewer", id="null-job-id"),
+    ],
+)
+def test_execute_agent_turn_stores_and_returns_canonical_identity_for_self_written_ids(
+    tmp_path: Path,
+    mode: str,
+    claimed_job_id: str | None,
+    claimed_role: str,
+) -> None:
+    turn = _execute_identity_reviewer_turn(tmp_path, mode)
+    job_id, turn_id, row, claimed = turn["job_id"], turn["turn_id"], turn["row"], turn["claimed"]
+
+    # The reviewer claimed its own identity, in the format live reviewers write.
+    assert claimed["turn_id"] == f"{job_id}-reviewer-r1"
+    assert claimed["turn_id"] != turn_id
+    assert (claimed["job_id"], claimed["agent_role"]) == (claimed_job_id, claimed_role)
+    # The bridge's turn id has the canonical format the post-review seal requires.
+    assert re.fullmatch(rf"{re.escape(job_id)}--r1-reviewer-[0-9a-f]{{8}}", turn_id)
+
+    canonical = {"job_id": job_id, "turn_id": turn_id, "agent_role": "reviewer"}
+    stored = json.loads(row["envelope_json"])
+    assert turn["returned"] == {**claimed, **canonical}
+    assert stored == turn["returned"]
+    assert (stored["job_id"], stored["turn_id"], stored["agent_role"]) == (
+        row["job_id"],
+        row["turn_id"],
+        row["agent_role"],
+    )
+    assert (row["status"], row["decision"]) == ("completed", "GO")
+    # The raw output stays the agent's own bytes; only the stored envelope is bound.
+    assert turn["raw"] == turn["emitted"]
+
+
+def test_execute_agent_turn_leaves_an_already_canonical_envelope_unchanged(tmp_path: Path) -> None:
+    turn = _execute_identity_reviewer_turn(tmp_path, "canonical")
+    claimed = turn["claimed"]
+
+    assert (claimed["job_id"], claimed["turn_id"], claimed["agent_role"]) == (
+        turn["job_id"],
+        turn["turn_id"],
+        "reviewer",
+    )
+    assert turn["returned"] == claimed
+    assert json.loads(turn["row"]["envelope_json"]) == claimed
+    assert turn["raw"] == turn["emitted"]
+
+
+def _run_job_to_reviewer_failure(base: Path, mode: str) -> tuple[str, dict[str, object]]:
+    """Run a normal job whose reviewer emits ``mode`` output; return its error and record."""
+    base.mkdir()
+    paths, _ = _setup_bridge_repo(base)
+    emitted_dir = _configure_identity_agent(paths, adapter="codex", mode=mode)
+    job_id = bridge.submit_job(
+        paths,
+        task_text="identity refusal parity",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="identity-refusal-job",
+    )
+    with pytest.raises(bridge.BridgeError) as caught:
+        bridge.run_job(paths, job_id)
+    with bridge.open_db(paths) as conn:
+        job = bridge.read_job(conn, job_id)
+        reviewer_turn = bridge.latest_turn(conn, job_id, role="reviewer")
+        stored_envelope = bridge.latest_envelope(conn, job_id, role="reviewer")
+    raw_path = Path(reviewer_turn["raw_output_path"])
+    return str(caught.value), {
+        "turn": (reviewer_turn["status"], reviewer_turn["decision"], reviewer_turn["envelope_json"]),
+        "turn_finished": reviewer_turn["finished_at"] is not None,
+        "stored_envelope": stored_envelope,
+        "job": (job["status"], job["current_round"], job["terminal_decision"]),
+        "raw_is_agent_output": raw_path.read_bytes() == (emitted_dir / raw_path.name).read_bytes(),
+    }
+
+
+def test_envelope_naming_another_job_is_refused_exactly_as_an_unparseable_envelope(
+    tmp_path: Path,
+) -> None:
+    refused_error, refused = _run_job_to_reviewer_failure(tmp_path / "foreign-job", "foreign_job")
+    unparseable_error, unparseable = _run_job_to_reviewer_failure(
+        tmp_path / "unparseable",
+        "unparseable",
+    )
+
+    assert "'another-bridge-job' names a different job" in refused_error
+    assert "'identity-refusal-job'" in refused_error
+    assert "missing BEGIN_AGENT_ENVELOPE" in unparseable_error
+    assert refused == unparseable
+    assert refused == {
+        "turn": ("FAILED", "ERROR", None),
+        "turn_finished": True,
+        "stored_envelope": None,
+        "job": ("AWAITING_REVIEWER_APPROVAL", 1, None),
+        "raw_is_agent_output": True,
+    }
+
+
+def test_run_job_stores_every_agent_envelope_with_its_turn_identity(tmp_path: Path) -> None:
+    paths, _ = _setup_bridge_repo(tmp_path)
+    _configure_identity_agent(paths, adapter="claude", mode="self_turn_id")
+    _configure_identity_agent(paths, adapter="codex", mode="self_turn_id")
+    job_id = bridge.submit_job(
+        paths,
+        task_text="every stored envelope carries its turn identity",
+        scope_hint=None,
+        wave_class="MAINTENANCE",
+        allow_edits=False,
+        reader_agent="claude",
+        reviewer_agent="codex",
+        max_rounds=1,
+        acceptance_checks=[],
+        job_id="identity-run-job",
+    )
+
+    assert bridge.run_job(paths, job_id) == "GO"
+
+    with bridge.open_db(paths) as conn:
+        turns = conn.execute(
+            "SELECT * FROM turns WHERE job_id = ? ORDER BY started_at, rowid",
+            (job_id,),
+        ).fetchall()
+        latest_reviewer = bridge.latest_envelope(conn, job_id, role="reviewer")
+    assert [turn["agent_role"] for turn in turns] == ["reader", "reviewer"]
+    for turn in turns:
+        stored = json.loads(turn["envelope_json"])
+        assert (stored["job_id"], stored["turn_id"], stored["agent_role"], stored["decision"]) == (
+            turn["job_id"],
+            turn["turn_id"],
+            turn["agent_role"],
+            turn["decision"],
+        )
+        raw_text = Path(turn["raw_output_path"]).read_text(encoding="utf-8")
+        assert f'"turn_id": "{job_id}-{turn["agent_role"]}-r1"' in raw_text
+        assert turn["turn_id"] not in raw_text
+    assert latest_reviewer is not None
+    assert latest_reviewer["turn_id"] == turns[1]["turn_id"]
+
+
+@pytest.mark.parametrize(
+    "claimed_job_id",
+    [
+        pytest.param("another-bridge-job", id="another-job"),
+        pytest.param("", id="empty-string"),
+        pytest.param(7, id="non-string"),
+        pytest.param(["bound-job"], id="list"),
+    ],
+)
+def test_bind_envelope_identity_refuses_a_present_job_id_that_is_not_the_turn_job(
+    claimed_job_id: object,
+) -> None:
+    envelope = _complete_agent_envelope()
+    envelope["job_id"] = claimed_job_id
+    before = json.loads(json.dumps(envelope))
+
+    with pytest.raises(bridge.BridgeError, match="names a different job"):
+        bridge.bind_envelope_identity(
+            envelope,
+            job_id="bound-job",
+            turn_id="bound-job--r1-reviewer-0123abcd",
+            agent_role="reviewer",
+        )
+    assert envelope == before
+
+
+@pytest.mark.parametrize("claimed_job_id", ["bound-job", None, "absent"])
+def test_bind_envelope_identity_binds_without_mutating_the_parsed_envelope(
+    claimed_job_id: str | None,
+) -> None:
+    envelope = _complete_agent_envelope(summary="identity unit")
+    if claimed_job_id == "absent":
+        del envelope["job_id"]
+    else:
+        envelope["job_id"] = claimed_job_id
+    before = json.loads(json.dumps(envelope))
+    canonical = {
+        "job_id": "bound-job",
+        "turn_id": "bound-job--r1-reviewer-0123abcd",
+        "agent_role": "reviewer",
+    }
+
+    bound = bridge.bind_envelope_identity(envelope, **canonical)
+
+    assert bound == {**before, **canonical}
+    assert envelope == before
+    assert bridge.bind_envelope_identity(bound, **canonical) == bound
 
 
 def test_pause_after_reader_stops_before_reviewer(tmp_path: Path) -> None:
@@ -5749,7 +6062,7 @@ def test_bridge_turn_timeout_env_override_allows_longer_reviewer_turn(
         "time.sleep(0.2)\n"
         "print('BEGIN_AGENT_ENVELOPE')\n"
         "print('{')\n"
-        "print('  \"job_id\": \"job-1\",')\n"
+        "print('  \"job_id\": \"wall-time-cap-env-override-job\",')\n"
         "print('  \"turn_id\": \"r1-reviewer\",')\n"
         "print('  \"agent_role\": \"reviewer\",')\n"
         "print('  \"decision\": \"GO\",')\n"
@@ -5818,7 +6131,7 @@ def test_bridge_turn_timeout_env_override_can_exceed_adapter_timeout(
         "time.sleep(1.2)\n"
         "print('BEGIN_AGENT_ENVELOPE')\n"
         "print('{')\n"
-        "print('  \"job_id\": \"job-1\",')\n"
+        "print('  \"job_id\": \"wall-time-cap-exceeds-adapter-job\",')\n"
         "print('  \"turn_id\": \"r1-reviewer\",')\n"
         "print('  \"agent_role\": \"reviewer\",')\n"
         "print('  \"decision\": \"GO\",')\n"
@@ -5876,7 +6189,7 @@ from pathlib import Path
 sys.stdin.read()
 envelope = \"\"\"BEGIN_AGENT_ENVELOPE
 {{
-  "job_id": "job-1",
+  "job_id": "verbose-linger-job",
   "turn_id": "r1-reviewer",
   "agent_role": "reviewer",
   "decision": "GO",
